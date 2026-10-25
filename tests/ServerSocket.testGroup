@@ -32,7 +32,10 @@ return testResult
   srv~close
 
 ::method test_every_address_takes_ipv6_where_there_is_ipv6
-  if \hasIpv6() then return
+  if \hasIpv6() then do
+    say "  (no IPv6 on this machine: test_every_address_takes_ipv6_where_there_is_ipv6 checked nothing)"
+    return
+  end
   srv = .ServerSocket~new(0)
   client = .Client~new
   msg = client~start("connect", "::1", srv~localPort)

@@ -344,7 +344,10 @@ refused:
 
 ::method test_ipv6_loopback
   peer = ipv6Peer()
-  if peer == .nil then return                -- no IPv6 here
+  if peer == .nil then do                    -- no IPv6 here
+    say "  (no IPv6 on this machine: test_ipv6_loopback checked nothing)"
+    return
+  end
   msg = peer~start("echo")
   s = .Socket~new("::1", peer~port)
   self~assertSame("::1", s~remoteAddress)

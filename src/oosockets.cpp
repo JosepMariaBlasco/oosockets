@@ -629,6 +629,7 @@ RexxMethod1(RexxArrayObject, socket_shutdown, CSELF, cself)
 // nClose: shared by Socket and ServerSocket. Closing twice is harmless.
 RexxMethod1(RexxObjectPtr, sock_close, CSELF, cself)
 {
+    (void)context;
     closeSock((Sock *)cself);
     return NULLOBJECT;
 }
