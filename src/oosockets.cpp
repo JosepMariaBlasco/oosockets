@@ -56,8 +56,6 @@
  * The OS handle lives in a heap Sock, reached through CSELF.
  */
 
-#include "oorexxapi.h"
-
 #include <string>
 #include <vector>
 #include <cstring>
@@ -101,6 +99,10 @@
     #define SEND_FLAGS 0                     // macOS: SO_NOSIGPIPE instead
   #endif
 #endif
+
+// After winsock2.h: oorexxapi.h includes windows.h, which would otherwise
+// bring the old winsock.h first.
+#include "oorexxapi.h"
 
 
 struct Sock
