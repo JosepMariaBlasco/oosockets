@@ -9,7 +9,7 @@ echo "Homebrew OpenSSL: $OSSL"; ls -la /etc/ssl/cert.pem
 
 echo "== build (deprecation warnings counted)"
 clang -Wall -o st st.c -framework Security -framework CoreFoundation 2> st.warn; echo "st.c: $(grep -c 'deprecated' st.warn) deprecation warnings"; grep -m3 'deprecated' st.warn
-clang -Wall -o nw nw.c -framework Network 2> nw.warn; echo "nw.c: $(grep -c 'deprecated' nw.warn) deprecation warnings"; cat nw.warn | head -20
+clang -Wall -o nw nw.c -framework Network -framework Security 2> nw.warn; echo "nw.c: $(grep -c 'deprecated' nw.warn) deprecation warnings"; cat nw.warn | head -20
 clang -Wall -o ossl ossl.c -I"$OSSL/include" -L"$OSSL/lib" -lssl -lcrypto -framework Security -framework CoreFoundation 2> ossl.warn; echo "ossl.c: $(grep -c 'deprecated' ossl.warn) deprecation warnings"; grep -E 'error|deprecated' ossl.warn | head -5
 
 echo "== Network.framework: any call that takes a file descriptor or socket?"
@@ -55,9 +55,13 @@ for n in 1 2 3 4 5; do
   lim ./ossl pin localhost 944$n c$n.pem
   lim ./ossl sectrust-pin localhost 944$n c$n.pem
 done
-echo; echo "---- a wrong name, trusting certificate 4 (both must refuse)"
-lim ./ossl pin 127.0.0.2 9444 c4.pem
-lim ./ossl sectrust-pin 127.0.0.2 9444 c4.pem
+echo; echo "---- the longest validity macOS accepts (keytool, serverAuth, trusted explicitly)"
+for d in 397 398 399 824 825 826; do
+  kt v$d $d -ext EKU=serverAuth
+  $O s_server -accept 9450 -tls1_3 -cert cv$d.pem -key kv$d.pem -www -quiet -naccept 1 > /dev/null 2>&1 &
+  sleep 1
+  printf "%s days: " $d; lim ./ossl sectrust-pin localhost 9450 cv$d.pem | grep 'macOS trust'
+done
 echo; echo "---- Secure Transport and Network.framework against the TLS 1.3-only server"
 lim ./st localhost 9442 noverify
 lim ./nw localhost 9442
