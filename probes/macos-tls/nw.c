@@ -1,6 +1,7 @@
 /* Network.framework: it makes its own connection (nw_connection); there is
    no call to hand it a socket we opened. Usage: nw host [port] */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <Network/Network.h>
 #include <dispatch/dispatch.h>
@@ -32,10 +33,10 @@ int main(int argc, char **argv)
     nw_protocol_metadata_t md = nw_connection_copy_protocol_metadata(conn, nw_protocol_copy_tls_definition());
     sec_protocol_metadata_t smd = nw_tls_copy_sec_protocol_metadata(md);
     tls_protocol_version_t v = sec_protocol_metadata_get_negotiated_tls_protocol_version(smd);
-    char req[256]; snprintf(req, sizeof req, "HEAD / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
+    char req[256]; snprintf(req, sizeof req, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
     dispatch_data_t d = dispatch_data_create(req, strlen(req), q, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
     nw_connection_send(conn, d, NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT, true, ^(nw_error_t e) { (void)e; });
-    __block char line[128] = "";
+    char *line = calloc(128, 1);
     nw_connection_receive(conn, 1, 128, ^(dispatch_data_t content, nw_content_context_t c, bool complete, nw_error_t e) {
         (void)c; (void)complete; (void)e;
         if (content) dispatch_data_apply(content, ^bool(dispatch_data_t r, size_t off, const void *buf, size_t size) {

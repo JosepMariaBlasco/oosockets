@@ -17,18 +17,28 @@ NWH="$(xcrun --show-sdk-path)/System/Library/Frameworks/Network.framework/Header
 grep -n -i -E '\b(int|fd|socket)\b.*(file_descriptor|_fd\b|socket\b)|from_fd|with_fd|file_descriptor' "$NWH"/*.h | head -10 || true
 echo "(end of matches)"
 
+# Every probe gets 30 s at most (macOS has no timeout(1)).
+lim() { perl -e 'alarm 30; exec @ARGV' "$@" || echo "  (exit $?)"; }
+
 hosts="example.com expired.badssl.com wrong.host.badssl.com self-signed.badssl.com untrusted-root.badssl.com"
 for h in $hosts; do
   echo; echo "######## $h"
-  ./st "$h"
-  ./nw "$h"
-  for m in anchors certpem sectrust; do ./ossl $m "$h"; done
+  lim ./st "$h"
+  lim ./nw "$h"
+  for m in anchors certpem sectrust; do lim ./ossl $m "$h"; done
 done
 
 echo; echo "######## local server, TLS 1.3 only (Homebrew openssl s_server)"
 "$OSSL/bin/openssl" req -x509 -newkey rsa:2048 -nodes -keyout k.pem -out c.pem -days 2 -subj /CN=localhost -addext subjectAltName=DNS:localhost 2>/dev/null
-"$OSSL/bin/openssl" s_server -accept 9443 -tls1_3 -cert c.pem -key k.pem -www -quiet > /dev/null 2>&1 &
+"$OSSL/bin/openssl" s_server -accept 9443 -naccept 20 -tls1_3 -cert c.pem -key k.pem -www -quiet > /dev/null 2>&1 &
 srv=$!; sleep 1
-./st localhost 9443 noverify
-./ossl sectrust localhost 9443
+lim ./st localhost 9443 noverify
+lim ./nw localhost 9443
+lim ./ossl sectrust localhost 9443
+echo "-- the same, trusting its certificate explicitly (TLSOptions~trust)"
+lim ./ossl pin localhost 9443 c.pem
+lim ./ossl sectrust-pin localhost 9443 c.pem
+echo "-- trusting it, but asking for another name (must fail)"
+lim ./ossl sectrust-pin 127.0.0.1 9443 c.pem
+lim ./ossl pin 127.0.0.1 9443 c.pem
 kill $srv

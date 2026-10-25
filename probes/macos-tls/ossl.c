@@ -5,11 +5,14 @@
      sectrust: OpenSSL only does the handshake; macOS decides
                (SecTrustEvaluateWithError on the peer's chain, SSL policy
                with the host name)
-   Usage: ossl mode host [port] */
+     pin     : OpenSSL verifies, against one certificate (PEM, 4th argument)
+     sectrust-pin: macOS decides, with one certificate as the only anchor
+   Usage: ossl mode host [port [pem]] */
 #include "common.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/x509v3.h>
+#include <openssl/pem.h>
 #include <Security/Security.h>
 
 static int load_anchors(X509_STORE *store)
@@ -28,6 +31,8 @@ static int load_anchors(X509_STORE *store)
     return n;
 }
 
+static const char *pin_file = NULL;
+
 static void sectrust(SSL *ssl, const char *host)
 {
     STACK_OF(X509) *chain = SSL_get_peer_cert_chain(ssl);
@@ -42,6 +47,16 @@ static void sectrust(SSL *ssl, const char *host)
     SecPolicyRef pol = SecPolicyCreateSSL(true, h);
     SecTrustRef trust = NULL;
     SecTrustCreateWithCertificates(certs, pol, &trust);
+    if (pin_file) {                    /* trust this certificate, and only it */
+        FILE *f = fopen(pin_file, "r"); X509 *x = PEM_read_X509(f, NULL, NULL, NULL); fclose(f);
+        unsigned char *der = NULL; int len = i2d_X509(x, &der);
+        CFDataRef d = CFDataCreate(NULL, der, len); OPENSSL_free(der); X509_free(x);
+        SecCertificateRef c = SecCertificateCreateWithData(NULL, d); CFRelease(d);
+        CFArrayRef anchors = CFArrayCreate(NULL, (const void **)&c, 1, &kCFTypeArrayCallBacks);
+        printf("  anchor set to %s: %d\n", pin_file, (int)SecTrustSetAnchorCertificates(trust, anchors));
+        SecTrustSetAnchorCertificatesOnly(trust, true);
+        CFRelease(anchors); CFRelease(c);
+    }
     CFErrorRef err = NULL;
     bool ok = SecTrustEvaluateWithError(trust, &err);
     if (ok) printf("  macOS trust: OK\n");
@@ -65,6 +80,9 @@ int main(int argc, char **argv)
         int n = load_anchors(SSL_CTX_get_cert_store(ctx));
         printf("  anchors from the keychain: %d\n", n);
         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    } else if (!strcmp(mode, "pin")) {
+        printf("  load %s: %d\n", argv[4], SSL_CTX_load_verify_locations(ctx, argv[4], NULL));
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
     } else if (!strcmp(mode, "certpem")) {
         printf("  load /etc/ssl/cert.pem: %d\n", SSL_CTX_load_verify_locations(ctx, "/etc/ssl/cert.pem", NULL));
         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
@@ -75,15 +93,17 @@ int main(int argc, char **argv)
     SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, fd);
     SSL_set_tlsext_host_name(ssl, host);
-    if (strcmp(mode, "sectrust")) SSL_set1_host(ssl, host);
+    int macos = !strncmp(mode, "sectrust", 8);
+    if (!strcmp(mode, "sectrust-pin")) pin_file = argv[4];
+    if (!macos) SSL_set1_host(ssl, host);
     if (SSL_connect(ssl) != 1) {
         long vr = SSL_get_verify_result(ssl);
         printf("  RESULT: handshake failed: %s (verify: %s)\n",
                ERR_reason_error_string(ERR_peek_last_error()), X509_verify_cert_error_string(vr));
         return 0;
     }
-    if (!strcmp(mode, "sectrust")) sectrust(ssl, host);
-    char req[256]; snprintf(req, sizeof req, "HEAD / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
+    if (macos) sectrust(ssl, host);
+    char req[256]; snprintf(req, sizeof req, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
     SSL_write(ssl, req, strlen(req));
     char line[128] = ""; int got = SSL_read(ssl, line, sizeof line - 1); if (got > 0) line[got] = 0;
     char *nl = strpbrk(line, "\r\n"); if (nl) *nl = 0;

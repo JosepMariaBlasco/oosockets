@@ -54,7 +54,7 @@ int main(int argc, char **argv)
         return 0;
     }
     SSLProtocol p; SSLGetNegotiatedProtocolVersion(ctx, &p);
-    char req[256]; snprintf(req, sizeof req, "HEAD / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
+    char req[256]; snprintf(req, sizeof req, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
     size_t done; SSLWrite(ctx, req, strlen(req), &done);
     char line[128] = ""; size_t got = 0; SSLRead(ctx, line, sizeof line - 1, &got); line[got] = 0;
     char *nl = strpbrk(line, "\r\n"); if (nl) *nl = 0;
