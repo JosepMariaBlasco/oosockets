@@ -39,6 +39,15 @@ client~close; srv~close
 - Timeouts, in seconds, none by default: `.Socket~new(host, port,
   connectTimeout)`, `readTimeout`, `writeTimeout`, and the
   `ServerSocket`'s `acceptTimeout` (an expired `accept` returns `.nil`).
+- Writes go out when written. A program that writes many small pieces
+  can ask for them to be kept and sent together, `s~bufferOutput = .true`
+  (64 KiB, or a number of bytes): what is kept goes out when the buffer
+  fills, on `flush`, `close` and `shutdownOutput`, and before any read
+  that has to wait, so a request is never left in the buffer while its
+  reply is awaited. (A read already waiting in *another* activity does
+  not send it: there, call `flush`.) 100,000 `lineOut`s of 50 bytes over
+  loopback: about 3 s unbuffered, 0.3 s buffered (Linux). `noDelay =
+  .true` turns off the system's joining of small segments (TCP_NODELAY).
 - Each blocking call waits in its own activity without stopping the
   others: a server can serve every client in an activity of its own, and
   one activity can read while another writes on the same socket.

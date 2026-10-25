@@ -50,6 +50,11 @@
    Once connected, the end of the connection, a timeout or an error is
    NOTREADY, as for any stream.
 
+   Writes go out when written, unless s~bufferOutput = .true; then they
+   are kept until the buffer fills, flush, close, or a read that has to
+   wait (so a request is never left in the buffer while its reply is
+   awaited).
+
    Strings are bytes, and so is the network: nothing is converted.      */
 
 ::requires "oosockets" LIBRARY
@@ -59,7 +64,7 @@
 /* Socket: a connected TCP socket, either end                                 */
 /*============================================================================*/
 
-::class Socket public subclass InputOutputStream
+::class Socket public subclass InputOutputStream inherit SocketOutput
 
 /* ---- the native layer (oosockets.cpp) ---------------------------------- */
 ::method nConnect  private external "LIBRARY oosockets socket_connect"
@@ -67,6 +72,7 @@
 ::method nRecv     private external "LIBRARY oosockets socket_recv"
 ::method nSend     private unguarded external "LIBRARY oosockets socket_send"
 ::method nShutdown private unguarded external "LIBRARY oosockets socket_shutdown"
+::method nNoDelay  private unguarded external "LIBRARY oosockets socket_nodelay"
 ::method nClose    private unguarded external "LIBRARY oosockets sock_close"
 ::method nFree     private external "LIBRARY oosockets sock_free"
 ::method nAddress  private unguarded external "LIBRARY oosockets sock_address"
@@ -257,24 +263,36 @@
   if self~put(text~string || lineEnd) then return 0
   raise notready description(name) additional(self) return (1)
 
-/** flush: writes are not buffered; nothing to do. */
+/** flush: sends what bufferOutput has kept. "READY:" when sent (or when
+    nothing was kept); else NOTREADY, and the description. */
 ::method flush unguarded
-  return "READY:"
+  expose desc name
+  if self~sendKept then return "READY:"
+  raise notready description(name) additional(self) return (desc)
 
 /* ---- the connection ----------------------------------------------------- */
 
-/** close: closes the connection. Closing twice is harmless. */
+/** close: sends what bufferOutput has kept, then closes the connection.
+    "READY:"; if what was kept could not be sent, NOTREADY and that
+    description (the socket is closed all the same). Closing twice is
+    harmless. */
 ::method close unguarded
-  expose closed st desc
+  expose closed st desc name
+  sent = .true
+  if \closed then sent = self~sendKept
+  failure = desc
   self~nClose
   closed = .true
   st = "UNKNOWN"; desc = "UNKNOWN:"
-  return "READY:"
+  if sent then return "READY:"
+  raise notready description(name) additional(self) return (failure)
 
 /** shutdownOutput: tells the peer nothing more is coming (it reads the
     end of the stream); this end can still read. */
 ::method shutdownOutput unguarded
   expose name
+  if \self~sendKept then
+    raise notready description(name) additional(self) return (1)
   r = self~nShutdown
   if r[1] == "OK" then return 0
   self~failed(r)
@@ -333,6 +351,44 @@
   use strict arg value
   writeTimeout = checkTimeout(value, "Socket~writeTimeout=", "value")
 
+/** .true when writes are kept in a buffer, .false (the default) when each
+    goes out when written. Set to .true (a 65536-byte buffer), to a
+    number of bytes, or to .false (which sends what was kept). 1 and 0
+    are .true and .false. */
+::attribute bufferOutput get unguarded
+  return self~keepSize > 0
+::attribute bufferOutput set unguarded
+  expose name
+  use strict arg value
+  select
+    when value == .true then size = 65536
+    when value == .false then size = 0
+    when value~dataType("W"), value > 0 then size = value + 0
+    otherwise
+      raise syntax 88.900 array("Socket~bufferOutput=: the value must be .true, .false or a positive whole number of bytes; found" value)
+  end
+  if \self~sendKept then
+    raise notready description(name) additional(self)
+  self~keepSize = size
+
+/** .true when small writes go out at once (TCP_NODELAY), .false (the
+    system's default) when the system may wait briefly to join them
+    (Nagle's algorithm). */
+::attribute noDelay get unguarded
+  r = self~nNoDelay(-1)
+  if r[1] == "OK" then return r[2] == 1
+  return .false
+::attribute noDelay set unguarded
+  expose name
+  use strict arg value
+  if value \== .true & value \== .false then
+    raise syntax 88.900 array("Socket~noDelay=: the value must be .true or .false; found" value)
+  r = self~nNoDelay(value)
+  if r[1] \== "OK" then do
+    self~failed(r)
+    raise notready description(name) additional(self)
+  end
+
 /** host:port, as given or as accepted ("[::1]:8888" for IPv6). */
 ::method string unguarded
   expose name
@@ -350,6 +406,13 @@
     return "ERROR"
   end
   if timeout == .nil then timeout = -1
+  -- About to wait: what was kept goes out first (it may be the request
+  -- whose reply this read is waiting for).
+  if timeout \= 0, self~keptLength > 0 then
+    if \self~sendKept then do
+      if st == "NOTREADY", desc == "NOTREADY:TIMEOUT" then return "TIMEOUT"
+      return "ERROR"
+    end
   r = self~nRecv(65536, timeout)
   select
     when r[1] == "OK" then do
@@ -371,7 +434,8 @@
       return "ERROR"
   end
 
--- Writes all of data. .true when written; else the state says why.
+-- Writes all of data (or keeps it, see bufferOutput). .true when written
+-- or kept; else the state says why.
 ::method put private unguarded
   expose closed st desc writeTimeout
   use arg data
@@ -381,7 +445,25 @@
   end
   timeout = writeTimeout
   if timeout == .nil then timeout = -1
-  r = self~nSend(data, timeout)
+  return self~sent(self~keep(data, timeout))
+
+-- Sends what was kept. .true when sent (or nothing was kept); else the
+-- state says why.
+::method sendKept private unguarded
+  expose closed st desc writeTimeout
+  if self~keptLength == 0 then return .true
+  if closed then do
+    st = "NOTREADY"; desc = "NOTREADY:closed"
+    return .false
+  end
+  timeout = writeTimeout
+  if timeout == .nil then timeout = -1
+  return self~sent(self~sendAllKept(timeout))
+
+-- The state after a send's result.
+::method sent private unguarded
+  expose st desc
+  use arg r
   if r[1] == "OK" then do
     self~ready
     return .true
@@ -405,6 +487,60 @@
   expose st desc
   use arg r
   st = "ERROR"; desc = ("ERROR:" || r[3] r[2])~strip
+
+
+/*============================================================================*/
+/* SocketOutput: Socket's write buffer                                        */
+/*============================================================================*/
+
+/* A mixin so that its guarded methods take a lock of their own (a scope's
+   lock), not Socket's: an activity blocked reading holds Socket's, and
+   another must still be able to write. Under this lock, data is kept and
+   sent in order, whichever activity sends it. Results are nSend's.    */
+
+::class SocketOutput mixinclass Object
+
+-- keep(data, timeout): sends data at once if nothing is kept and no
+-- buffer is set; else adds it to what is kept, and sends all of it when
+-- the buffer is full.
+::method keep private
+  expose kept keepSize
+  use arg data, timeout
+  if var("kept") == 0 then kept = .mutableBuffer~new
+  if var("keepSize") == 0 then keepSize = 0
+  if keepSize == 0, kept~length == 0 then return self~nSend(data, timeout)
+  kept~append(data)
+  if kept~length < keepSize then return .array~of("OK", 0)
+  return self~sendAllKept(timeout)
+
+-- Sends all that is kept. On a timeout, what did not go out stays kept;
+-- on an error, it is dropped (the connection is broken).
+::method sendAllKept private
+  expose kept
+  use arg timeout
+  if var("kept") == 0 then kept = .mutableBuffer~new
+  if kept~length == 0 then return .array~of("OK", 0)
+  r = self~nSend(kept~string, timeout)
+  select
+    when r[1] == "OK" then kept~setBufferSize(0)
+    when r[1] == "TIMEOUT" then kept = .mutableBuffer~new(kept~substr(r[2] + 1))
+    otherwise kept~setBufferSize(0)
+  end
+  return r
+
+-- Bytes kept, without waiting for the lock.
+::method keptLength private unguarded
+  expose kept
+  if var("kept") == 0 then return 0
+  return kept~length
+
+::attribute keepSize get private unguarded
+  expose keepSize
+  if var("keepSize") == 0 then return 0
+  return keepSize
+::attribute keepSize set private
+  expose keepSize
+  use arg keepSize
 
 
 /*============================================================================*/

@@ -606,6 +606,32 @@ RexxMethod3(RexxArrayObject, socket_send, CSELF, cself, RexxStringObject, data, 
     return statusResult(context, "OK", context->StringSize(sent));
 }
 
+// nNoDelay(value): TCP_NODELAY. value 1 or 0 sets it, -1 only asks.
+// Returns "OK", 1 or 0 (the option as it is now).
+RexxMethod2(RexxArrayObject, socket_nodelay, CSELF, cself, int, value)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    if (value >= 0)
+    {
+        int flag = value ? 1 : 0;
+        if (setsockopt(s->fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(flag)) != 0)
+        {
+            return errorResult(context, lastError());
+        }
+    }
+    int flag = 0;
+    socklen_type len = sizeof(flag);
+    if (getsockopt(s->fd, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, &len) != 0)
+    {
+        return errorResult(context, lastError());
+    }
+    return statusResult(context, "OK", context->WholeNumber(flag ? 1 : 0));
+}
+
 // nShutdown: no more output (the peer reads end of stream).
 RexxMethod1(RexxArrayObject, socket_shutdown, CSELF, cself)
 {
@@ -897,6 +923,7 @@ static RexxMethodEntry oosockets_methods[] =
     REXX_METHOD(socket_recv,     socket_recv),
     REXX_METHOD(socket_send,     socket_send),
     REXX_METHOD(socket_shutdown, socket_shutdown),
+    REXX_METHOD(socket_nodelay,  socket_nodelay),
     REXX_METHOD(socket_resolve,  socket_resolve),
     REXX_METHOD(sock_close,      sock_close),
     REXX_METHOD(sock_free,       sock_free),

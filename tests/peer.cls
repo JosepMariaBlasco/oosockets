@@ -82,6 +82,22 @@ notready:
   c~close
   return 0
 
+-- Reads lines until none arrives for the given seconds (or the client
+-- closes); returns them, as an array, and closes.
+::method linesWithin unguarded
+  expose srv
+  use strict arg seconds
+  c = srv~accept
+  c~readTimeout = seconds
+  got = .array~new
+  signal on notready
+  loop
+    got~append(c~lineIn)
+  end
+notready:
+  c~close
+  return got
+
 -- Accepts and closes at once.
 ::method acceptAndClose unguarded
   expose srv

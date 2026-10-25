@@ -340,6 +340,134 @@ refused:
   s~close
   peer~close
 
+/* ---- write buffering ---------------------------------------------------- */
+
+::method test_writes_go_out_at_once_by_default
+  peer = .Peer~new
+  msg = peer~start("linesWithin", 0.5)
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertFalse(s~bufferOutput)
+  s~lineOut("a")
+  self~assertSame("a", msg~result~makeString("L", " "))   -- before close
+  s~close
+  peer~close
+
+::method test_buffered_writes_are_kept
+  peer = .Peer~new
+  msg = peer~start("linesWithin", 0.3)
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~bufferOutput = .true
+  self~assertTrue(s~bufferOutput)
+  self~assertSame(0, s~lineOut("a"))
+  self~assertSame(0, s~charOut("b"))
+  self~assertSame(0, msg~result~items)                    -- nothing arrived
+  s~close
+  peer~close
+
+::method test_flush_sends_what_was_kept
+  peer = .Peer~new
+  msg = peer~start("linesWithin", 0.5)
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~bufferOutput = .true
+  s~lineOut("a"); s~lineOut("b")
+  self~assertSame("READY:", s~flush)
+  self~assertSame("a b", msg~result~makeString("L", " "))
+  s~close
+  peer~close
+
+::method test_close_sends_what_was_kept
+  peer = .Peer~new
+  msg = peer~start("collect")
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~bufferOutput = .true
+  s~lineOut("a")
+  self~assertSame("READY:", s~close)
+  self~assertSame("610D0A", msg~result~c2x)
+  peer~close
+
+::method test_a_read_that_waits_sends_what_was_kept_first
+  peer = .Peer~new
+  msg = peer~start("echo")
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~bufferOutput = .true
+  s~readTimeout = 3                          -- a failure, not a hang
+  s~lineOut("ping")
+  self~assertSame("ping", s~lineIn)          -- the request went out first
+  s~lineOut("bye")
+  s~close
+  msg~result
+  peer~close
+
+::method test_a_full_buffer_is_sent
+  peer = .Peer~new
+  msg = peer~start("linesWithin", 0.5)
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~bufferOutput = 10
+  s~lineOut("12345678")                      -- 10 bytes with CRLF: full
+  self~assertSame("12345678", msg~result~makeString("L", " "))
+  s~close
+  peer~close
+
+::method test_bufferOutput_false_sends_what_was_kept
+  peer = .Peer~new
+  msg = peer~start("linesWithin", 0.5)
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~bufferOutput = .true
+  s~lineOut("a")
+  s~bufferOutput = .false
+  self~assertFalse(s~bufferOutput)
+  s~lineOut("b")                             -- at once again
+  self~assertSame("a b", msg~result~makeString("L", " "))
+  s~close
+  peer~close
+
+::method test_shutdownOutput_sends_what_was_kept
+  peer = .Peer~new
+  msg = peer~start("collect", "done")
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~bufferOutput = .true
+  s~charOut("abc")
+  s~shutdownOutput
+  self~assertSame("done", s~read)
+  s~close
+  self~assertSame("abc", msg~result)
+  peer~close
+
+::method test_many_buffered_lines_arrive_in_order
+  peer = .Peer~new
+  msg = peer~start("collect")
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~bufferOutput = 1000
+  expected = .mutableBuffer~new
+  do i = 1 to 5000
+    s~lineOut(i)
+    expected~append(i || "0d0a"x)
+  end
+  s~close
+  self~assertTrue(expected~string == msg~result, "5000 lines, in order")
+  peer~close
+
+::method test_bad_bufferOutput
+  peer = .Peer~new
+  msg = peer~start("acceptAndClose")
+  s = .Socket~new("127.0.0.1", peer~port)
+  msg~result
+  self~expectSyntax(88.900)
+  s~bufferOutput = -5
+
+::method test_noDelay
+  peer = .Peer~new
+  msg = peer~start("acceptAndClose")
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertFalse(s~noDelay)
+  s~noDelay = .true
+  self~assertTrue(s~noDelay)
+  s~noDelay = .false
+  self~assertFalse(s~noDelay)
+  msg~result
+  s~close
+  peer~close
+
 /* ---- IPv6 (where the machine has it) ------------------------------------ */
 
 ::method test_ipv6_loopback
