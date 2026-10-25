@@ -1,0 +1,382 @@
+#!/usr/bin/env rexx
+/* Socket: connecting, the stream methods, errors and timeouts.
+   Each test runs the other end in another activity (peer.cls).          */
+
+  parse source . . fileSpec
+  group = .TestGroup~new(fileSpec)
+  group~add(.Socket.testGroup)
+  if group~isAutomatedTest then return group
+  testResult = group~suite~execute~~print
+return testResult
+
+::requires 'ooTest.frm'
+::requires 'sockets.cls'
+::requires 'peer.cls'
+
+::class "Socket.testGroup" subclass ooTestCase public
+
+/* ---- the samples -------------------------------------------------------- */
+
+::method test_client_and_server
+  peer = .Peer~new
+  msg = peer~start("echo")
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~lineOut("Hello, this is from your ooRexx-client!")
+  self~assertSame("Hello, this is from your ooRexx-client!", s~lineIn)
+  s~lineOut("bye")
+  s~close
+  got = msg~result
+  self~assertSame(2, got~items)
+  self~assertSame("bye", got[2])
+  peer~close
+
+::method test_localhost_by_name
+  peer = .Peer~new
+  msg = peer~start("echo")
+  s = .Socket~new("localhost", peer~port)
+  s~lineOut("bye")
+  s~close
+  self~assertSame("bye", msg~result[1])
+  peer~close
+
+/* ---- lines -------------------------------------------------------------- */
+
+::method test_lineIn_takes_lf_and_crlf_and_a_last_line_without_end
+  peer = .Peer~new
+  msg = peer~start("send", "one" || "0a"x || "two" || "0d0a"x || "0a"x || "three")
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertSame("one", s~lineIn)
+  self~assertSame("two", s~lineIn)
+  self~assertSame("", s~lineIn)
+  self~assertSame("three", s~lineIn)
+  self~assertSame("READY", s~state)
+  msg~result
+  s~close
+  peer~close
+
+::method test_end_of_stream_is_notready
+  peer = .Peer~new
+  msg = peer~start("send", "last" || "0a"x)
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertSame("last", s~lineIn)
+  trapped = .false
+  signal on notready name eos
+  line = s~lineIn
+  signal eosDone
+eos:
+  trapped = .true
+  c = condition("o")
+  self~assertSame(s, c~additional)
+  self~assertSame(s~string, c~description)
+eosDone:
+  signal off notready
+  self~assertTrue(trapped, "NOTREADY at the end of the stream")
+  self~assertSame("NOTREADY", s~state)
+  self~assertSame("NOTREADY:EOF", s~description)
+  self~assertSame(0, s~lines)
+  self~assertSame(0, s~chars)
+  msg~result
+  s~close
+  peer~close
+
+::method test_end_of_stream_untrapped_returns_empty
+  peer = .Peer~new
+  msg = peer~start("acceptAndClose")
+  s = .Socket~new("127.0.0.1", peer~port)
+  msg~result
+  self~assertSame("", s~lineIn)
+  self~assertSame("NOTREADY", s~state)
+  s~close
+  peer~close
+
+::method test_lineOut_writes_crlf
+  peer = .Peer~new
+  msg = peer~start("collect")
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertSame(0, s~lineOut("a"))
+  s~close
+  self~assertSame("610D0A", msg~result~c2x)
+  peer~close
+
+::method test_lineEnd_can_change
+  peer = .Peer~new
+  msg = peer~start("collect")
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertSame("0D0A", s~lineEnd~c2x)
+  s~lineEnd = "0a"x
+  s~lineOut("a")
+  s~close
+  self~assertSame("610A", msg~result~c2x)
+  peer~close
+
+::method test_lines_and_chars_before_data
+  peer = .Peer~new
+  msg = peer~start("silentThenLine", 0.3, "late")
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertSame(1, s~lines)          -- nothing yet, but the connection is open
+  self~assertSame(1, s~chars)
+  self~assertSame("late", s~lineIn)
+  s~close
+  msg~result
+  peer~close
+
+/* ---- bytes -------------------------------------------------------------- */
+
+::method test_every_byte_goes_through
+  bytes = xrange("00"x, "ff"x)
+  peer = .Peer~new
+  msg = peer~start("collect", bytes)
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~charOut(bytes)
+  s~shutdownOutput
+  self~assertSame(bytes~c2x, s~charIn(, 256)~c2x)
+  s~close
+  self~assertSame(bytes~c2x, msg~result~c2x)
+  peer~close
+
+::method test_a_megabyte_each_way
+  data = copies(xrange("00"x, "ff"x), 4096)      -- 1 MiB
+  peer = .Peer~new
+  msg = peer~start("collect", data)
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~charOut(data)
+  s~shutdownOutput
+  back = s~charIn(, data~length)
+  self~assertSame(data~length, back~length)
+  self~assertTrue(back == data)
+  self~assertTrue(msg~result == data)
+  s~close
+  peer~close
+
+::method test_read_returns_what_has_arrived
+  peer = .Peer~new
+  msg = peer~start("send", "abc")
+  s = .Socket~new("127.0.0.1", peer~port)
+  msg~result
+  self~assertSame("ab", s~read(2))
+  self~assertSame("c", s~read)
+  self~assertSame("", s~read)
+  self~assertSame("NOTREADY:EOF", s~description)
+  s~close
+  peer~close
+
+::method test_charIn_short_at_the_end
+  peer = .Peer~new
+  msg = peer~start("send", "xyz")
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertSame("xyz", s~charIn(, 10))
+  self~assertSame("NOTREADY", s~state)
+  msg~result
+  s~close
+  peer~close
+
+/* ---- as a stream -------------------------------------------------------- */
+
+::method test_is_a_stream
+  self~assertTrue(.Socket~isSubclassOf(.InputOutputStream))
+
+::method test_say_to_the_network
+  peer = .Peer~new
+  msg = peer~start("collect")
+  s = .Socket~new("127.0.0.1", peer~port)
+  .output~destination(s)
+  say "through .output"
+  .output~destination
+  s~close
+  self~assertSame("through .output" || "0d0a"x, msg~result)
+  peer~close
+
+::method test_a_server_loop_with_signal_on_notready
+  peer = .Peer~new
+  msg = peer~start("send", "a" || "0a"x || "b" || "0a"x || "c" || "0a"x)
+  s = .Socket~new("127.0.0.1", peer~port)
+  got = ""
+  signal on notready name done
+  loop
+    got = got || s~lineIn
+  end
+done:
+  self~assertSame("abc", got)
+  msg~result
+  s~close
+  peer~close
+
+::method test_shutdownOutput_then_read_the_reply
+  peer = .Peer~new
+  msg = peer~start("collect", "the reply")
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~charOut("the request")
+  self~assertSame(0, s~shutdownOutput)
+  self~assertSame("the reply", s~lineIn)
+  self~assertSame("the request", msg~result)
+  s~close
+  peer~close
+
+/* ---- activities --------------------------------------------------------- */
+
+-- One activity blocked reading, another writing on the same socket.
+::method test_read_and_write_from_two_activities
+  peer = .Peer~new
+  msg = peer~start("echo")
+  s = .Socket~new("127.0.0.1", peer~port)
+  reader = .Reader~new~start("lines", s, 3)
+  call sysSleep 0.2                          -- the reader is now in lineIn
+  s~lineOut("one"); s~lineOut("two"); s~lineOut("three")
+  got = reader~result
+  self~assertSame("one two three", got~makeString("L", " "))
+  s~lineOut("bye")
+  msg~result
+  s~close
+  peer~close
+
+-- close, from another activity, wakes a read that waits.
+::method test_close_wakes_a_blocked_read
+  peer = .Peer~new
+  msg = peer~start("silentThenLine", 3, "too late")
+  s = .Socket~new("127.0.0.1", peer~port)
+  reader = .Reader~new~start("lines", s, 1)
+  call sysSleep 0.2
+  t0 = .dateTime~new
+  s~close
+  got = reader~result
+  waited = (.dateTime~new - t0)~totalSeconds
+  self~assertTrue(waited < 2, "the read woke up when the socket was closed (" || waited || "s)")
+  msg~result
+  peer~close
+
+/* ---- addresses ---------------------------------------------------------- */
+
+::method test_addresses
+  peer = .Peer~new
+  msg = peer~start("echo")
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertSame("127.0.0.1", s~remoteAddress)
+  self~assertSame(peer~port, s~remotePort)
+  self~assertSame("127.0.0.1", s~localAddress)
+  self~assertTrue(s~localPort > 0)
+  self~assertSame("127.0.0.1:" || peer~port, s~string)
+  s~lineOut("bye")
+  msg~result
+  s~close
+  peer~close
+
+::method test_resolve_localhost
+  addrs = .Socket~resolve("localhost")
+  self~assertTrue(addrs~isA(.Array))
+  self~assertTrue(addrs~items > 0)
+  self~assertTrue(addrs~hasItem("127.0.0.1") | addrs~hasItem("::1"))
+
+::method test_resolve_a_literal
+  self~assertSame("192.0.2.1", .Socket~resolve("192.0.2.1")[1])
+
+::method test_resolve_unknown_host
+  self~expectSyntax(48.900)
+  .Socket~resolve("no-such-host.invalid")
+
+/* ---- errors ------------------------------------------------------------- */
+
+::method test_refused_is_syntax_48_900
+  port = freePort()
+  self~expectSyntax(.array~of(48.900, "Socket error: connection refused (127.0.0.1, port" port")"))
+  s = .Socket~new("127.0.0.1", port)
+
+::method test_refused_carries_the_system_error
+  port = freePort()
+  signal on syntax name refused
+  s = .Socket~new("127.0.0.1", port)
+  self~fail("connected to a closed port")
+refused:
+  c = condition("o")
+  self~assertSame(48, c~rc)
+  self~assertSame("ECONNREFUSED", c~additional[2])
+
+::method test_unknown_host
+  self~expectSyntax(.array~of(48.900, "Socket error: unknown host (no-such-host.invalid, port 80)"))
+  s = .Socket~new("no-such-host.invalid", 80)
+
+::method test_bad_port
+  self~expectSyntax(88.900)
+  s = .Socket~new("127.0.0.1", 70000)
+
+::method test_bad_timeout
+  self~expectSyntax(88.900)
+  s = .Socket~new("127.0.0.1", 80, -1)
+
+::method test_after_close_reads_are_notready
+  peer = .Peer~new
+  msg = peer~start("echo")
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~close
+  self~assertSame("UNKNOWN", s~state)
+  self~assertSame("", s~lineIn)
+  self~assertSame(1, s~lineOut("x"))
+  self~assertSame("NOTREADY:closed", s~description)
+  s~close                                    -- twice: harmless
+  msg~result
+  peer~close
+
+/* ---- timeouts ----------------------------------------------------------- */
+
+::method test_read_timeout_is_notready_and_the_socket_stays_usable
+  peer = .Peer~new
+  msg = peer~start("silentThenLine", 0.6, "late")
+  s = .Socket~new("127.0.0.1", peer~port)
+  s~readTimeout = 0.1
+  self~assertSame(0.1, s~readTimeout)
+  self~assertSame("", s~lineIn)
+  self~assertSame("NOTREADY:TIMEOUT", s~description)
+  s~readTimeout = .nil
+  self~assertSame("late", s~lineIn)
+  self~assertSame("READY", s~state)
+  s~close
+  msg~result
+  peer~close
+
+::method test_connect_timeout_argument
+  peer = .Peer~new
+  msg = peer~start("acceptAndClose")
+  s = .Socket~new("127.0.0.1", peer~port, 5)
+  msg~result
+  s~close
+  peer~close
+
+/* ---- IPv6 (where the machine has it) ------------------------------------ */
+
+::method test_ipv6_loopback
+  peer = ipv6Peer()
+  if peer == .nil then return                -- no IPv6 here
+  msg = peer~start("echo")
+  s = .Socket~new("::1", peer~port)
+  self~assertSame("::1", s~remoteAddress)
+  self~assertSame("[::1]:" || peer~port, s~string)
+  s~lineOut("bye")
+  msg~result
+  s~close
+  peer~close
+
+
+-- Reads lines in its own activity.
+::class Reader
+::method lines
+  use strict arg s, n
+  got = .array~new
+  signal on notready name stop
+  do n
+    got~append(s~lineIn)
+  end
+stop:
+  return got
+
+-- A port nobody listens on: one the system gave and took back.
+::routine freePort
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  port = srv~localPort
+  srv~close
+  return port
+
+-- A Peer on ::1, or .nil if the machine has no IPv6.
+::routine ipv6Peer
+  signal on syntax name none
+  return .Peer~new("::1")
+none:
+  return .nil

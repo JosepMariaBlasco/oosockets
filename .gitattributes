@@ -1,0 +1,4 @@
+*.cls       linguist-language=REXX
+*.testGroup linguist-language=REXX
+*.rex       linguist-language=REXX
+*.sh        text eol=lf

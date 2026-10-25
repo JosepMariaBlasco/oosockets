@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            build: ubuntu2404.x86_64
+          - os: macos-15
+            build: macos.arm64.x86_64
+          - os: macos-15-intel
+            build: macos.arm64.x86_64
+          - os: windows-2022
+            build: windows.x86_64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # ooRexx: SourceForge's portable build of the revision in
+      # scripts/oorexx-version.sh (the family's; see oorexx-bridges).
+      - name: Install ooRexx
+        run: |
+          . scripts/oorexx-version.sh
+          name="oorexx-5.3.0-$OOREXX_REV.${{ matrix.build }}-portable-release"
+          curl -fsSL --retry 3 -o oorexx.zip \
+            "https://downloads.sourceforge.net/project/oorexx/oorexx/5.3.0beta/portable/$name.zip"
+          dest="$RUNNER_TEMP/oorexx"
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z x -y -o"$dest" oorexx.zip > /dev/null
+          else
+            unzip -q oorexx.zip -d "$dest"
+          fi
+          home="$dest/$name"
+          echo "OOREXX_HOME=$home" >> "$GITHUB_ENV"
+          echo "$home/bin" >> "$GITHUB_PATH"
+
+      - name: ooRexx version
+        run: rexx -v
+
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME"
+          cmake --build build --config Release
+
+      - name: ooRexxUnit
+        run: scripts/get-oorexxunit.sh
+
+      - name: Test
+        timeout-minutes: 10
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            scripts/test.sh "$PWD/build/Release"
+          else
+            scripts/test.sh "$PWD/build"
+          fi

@@ -1,0 +1,106 @@
+#!/usr/bin/env rexx
+/* ServerSocket: listening, accepting, errors and timeouts.              */
+
+  parse source . . fileSpec
+  group = .TestGroup~new(fileSpec)
+  group~add(.ServerSocket.testGroup)
+  if group~isAutomatedTest then return group
+  testResult = group~suite~execute~~print
+return testResult
+
+::requires 'ooTest.frm'
+::requires 'sockets.cls'
+
+::class "ServerSocket.testGroup" subclass ooTestCase public
+
+::method test_port_zero_gives_a_free_port
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  self~assertTrue(srv~localPort > 0)
+  self~assertSame("127.0.0.1", srv~localAddress)
+  srv~close
+
+::method test_every_address_takes_ipv4
+  srv = .ServerSocket~new(0)                 -- IPv6 and IPv4, or IPv4 alone
+  client = .Client~new
+  msg = client~start("connect", "127.0.0.1", srv~localPort)
+  c = srv~accept
+  self~assertTrue(c~isA(.Socket))
+  self~assertSame("127.0.0.1", c~remoteAddress)   -- not ::ffff:127.0.0.1
+  self~assertSame("hello", c~lineIn)
+  c~close
+  msg~result
+  srv~close
+
+::method test_every_address_takes_ipv6_where_there_is_ipv6
+  if \hasIpv6() then return
+  srv = .ServerSocket~new(0)
+  client = .Client~new
+  msg = client~start("connect", "::1", srv~localPort)
+  c = srv~accept
+  self~assertSame("::1", c~remoteAddress)
+  self~assertSame("hello", c~lineIn)
+  c~close
+  msg~result
+  srv~close
+
+::method test_port_in_use
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  port = srv~localPort
+  self~expectSyntax(.array~of(48.900, "Socket error: address already in use (127.0.0.1, port" port")"))
+  other = .ServerSocket~new(port, "127.0.0.1")
+
+::method test_accept_timeout_returns_nil
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  srv~acceptTimeout = 0.1
+  self~assertSame(0.1, srv~acceptTimeout)
+  self~assertSame(.nil, srv~accept)
+  srv~close
+
+::method test_accept_after_close
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  srv~close
+  self~expectSyntax(48.900)
+  srv~accept
+
+::method test_bad_port
+  self~expectSyntax(88.900)
+  srv = .ServerSocket~new(-1)
+
+::method test_bad_address
+  self~expectSyntax(48.900)
+  srv = .ServerSocket~new(0, "no-such-host.invalid")
+
+::method test_many_clients_each_in_its_own_activity
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  msgs = .array~new
+  do i = 1 to 5
+    msgs~append(.Client~new~start("connect", "127.0.0.1", srv~localPort, "client" i))
+  end
+  got = .array~new
+  do i = 1 to 5
+    c = srv~accept
+    got~append(c~lineIn)
+    c~close
+  end
+  do m over msgs; m~result; end
+  srv~close
+  self~assertSame(5, got~items)
+  got~sort
+  self~assertSame("client 1", got[1])
+  self~assertSame("client 5", got[5])
+
+
+::class Client
+::method connect
+  use strict arg host, port, line = "hello"
+  s = .Socket~new(host, port)
+  s~lineOut(line)
+  s~close
+  return 0
+
+::routine hasIpv6
+  signal on syntax name none
+  .ServerSocket~new(0, "::1")~close
+  return .true
+none:
+  return .false
