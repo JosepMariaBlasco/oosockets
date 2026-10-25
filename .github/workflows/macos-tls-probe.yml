@@ -1,0 +1,22 @@
+name: macOS TLS probe
+
+# Measures the TLS options on macOS (Secure Transport, Network.framework,
+# OpenSSL with the keychain's anchors or with macOS deciding trust).
+# Run by hand, or when the probe changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - probes/macos-tls/**
+      - .github/workflows/macos-tls-probe.yml
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: probes/macos-tls/run.sh
