@@ -54,6 +54,9 @@ if role != "driver":
     sys.exit(0)
 
 prog = sys.argv[2]
+# A process started in a new console may have Ctrl-C disabled, and its
+# children inherit that: enable it (for the child), then survive it here.
+k32.SetConsoleCtrlHandler(None, False)
 keep = HANDLER(lambda t: True)                 # the driver survives the event
 k32.SetConsoleCtrlHandler(keep, True)
 t0 = time.time()
