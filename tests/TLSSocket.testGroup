@@ -1,0 +1,403 @@
+#!/usr/bin/env rexx
+/* TLSSocket, TLSOptions and Socket~startTLS. The server's side runs in
+   another activity (peer.cls), with the certificates in tests/certs/
+   (scripts/make-test-certs.sh): a test CA, which the client trusts
+   explicitly, so OpenSSL decides on every system.
+
+   The system's own decision (macOS, Windows, Linux's store) can only be
+   tested against real servers: the online tests, run when the environment
+   variable OOSOCKETS_ONLINE is 1 (the CI sets it).                      */
+
+  parse source . . fileSpec
+  group = .TestGroup~new(fileSpec)
+  group~add(.TLSSocket.testGroup)
+  if group~isAutomatedTest then return group
+  testResult = group~suite~execute~~print
+return testResult
+
+::requires 'ooTest.frm'
+::requires 'sockets.cls'
+::requires 'peer.cls'
+
+::class "TLSSocket.testGroup" subclass ooTestCase public
+
+/* ---- connecting --------------------------------------------------------- */
+
+::method test_echo_trusting_the_ca
+  peer = .Peer~new
+  msg = peer~start("tlsEcho")
+  s = .TLSSocket~new("localhost", peer~port, trustCA())
+  self~assertTrue(s~secure)
+  self~assertSame("TLSv1.3", s~protocol)
+  self~assertTrue(s~cipher \== "")
+  s~lineOut("Hello over TLS")
+  self~assertSame("Hello over TLS", s~lineIn)
+  s~lineOut("bye")
+  s~close
+  self~assertSame("bye", msg~result[2])
+  peer~close
+
+::method test_a_plain_socket_is_not_secure
+  peer = .Peer~new
+  msg = peer~start("echo")
+  s = .Socket~new("127.0.0.1", peer~port)
+  self~assertFalse(s~secure)
+  self~assertSame("", s~protocol)
+  self~assertSame("", s~cipher)
+  s~lineOut("bye")
+  s~close
+  msg~result
+  peer~close
+
+::method test_by_ip_address
+  peer = .Peer~new
+  msg = peer~start("tlsEcho")
+  s = .TLSSocket~new("127.0.0.1", peer~port, trustCA())  -- IP:127.0.0.1 in the certificate
+  s~lineOut("bye")
+  s~close
+  self~assertSame("bye", msg~result[1])
+  peer~close
+
+::method test_ipv6
+  peer = ipv6Peer()
+  if peer == .nil then do
+    say "  (no IPv6 on this machine: test_ipv6 checked nothing)"
+    return
+  end
+  msg = peer~start("tlsEcho")
+  s = .TLSSocket~new("::1", peer~port, trustCA())       -- IP:::1 in the certificate
+  s~lineOut("bye")
+  s~close
+  self~assertSame("bye", msg~result[1])
+  peer~close
+
+::method test_trusting_the_servers_own_certificate
+  peer = .Peer~new
+  msg = peer~start("tlsEcho")
+  -- server.pem is not a root: trusted explicitly, it is enough by itself
+  s = .TLSSocket~new("localhost", peer~port, .TLSOptions~new~trust(certFile("server.pem")))
+  s~lineOut("bye")
+  s~close
+  self~assertSame("bye", msg~result[1])
+  peer~close
+
+::method test_a_keytool_keystore_on_both_ends
+  peer = .Peer~new
+  msg = peer~start("tlsEcho", "keytool.p12", "123456")
+  opts = .TLSOptions~new~trust(certFile("keytool.p12"), "123456")
+  s = .TLSSocket~new("localhost", peer~port, opts)
+  s~lineOut("bye")
+  s~close
+  self~assertSame("bye", msg~result[1])
+  peer~close
+
+::method test_minVersion_1_3
+  peer = .Peer~new
+  msg = peer~start("tlsEcho")
+  opts = trustCA()
+  opts~minVersion = "1.3"
+  self~assertSame("1.3", opts~minVersion)
+  s = .TLSSocket~new("localhost", peer~port, opts)
+  self~assertSame("TLSv1.3", s~protocol)
+  s~lineOut("bye")
+  s~close
+  msg~result
+  peer~close
+
+/* ---- refused ------------------------------------------------------------ */
+
+::method test_expired
+  self~refused("expired.pem", "certificate has expired", "X509_V_ERR_CERT_HAS_EXPIRED")
+
+::method test_wrong_host
+  self~refused("wronghost.pem", "certificate does not match the host name", "X509_V_ERR_HOSTNAME_MISMATCH")
+
+::method test_self_signed
+  self~refused("selfsigned.pem", "certificate is not trusted", "X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT")
+
+-- Without TLSOptions the system decides; it has never heard of our CA.
+::method test_the_system_does_not_trust_the_test_ca
+  peer = .Peer~new
+  msg = peer~start("tlsEcho")
+  c = connectFails("localhost", peer~port, .nil)
+  self~assertSame("TLS error: certificate is not trusted (localhost, port" peer~port")", c~additional[1])
+  say "  (the system said:" c~additional[2] c~additional[3]")"
+  msg~result
+  peer~close
+
+::method test_a_server_that_does_not_speak_tls
+  peer = .Peer~new
+  msg = peer~start("send", "220 hello, in clear" || "0d0a"x)
+  c = connectFails("localhost", peer~port, trustCA())
+  self~assertSame(48.900, c~code)
+  self~assertTrue(c~additional[1]~startsWith("TLS error: handshake failed:"), c~additional[1])
+  msg~result
+  peer~close
+
+::method test_connectTimeout_covers_the_handshake
+  peer = .Peer~new
+  msg = peer~start("silentThenLine", 3, "too late")     -- accepts, says nothing
+  start = .DateTime~new
+  c = connectFails("localhost", peer~port, trustCA(), 1)
+  elapsed = (.DateTime~new - start)~totalSeconds
+  self~assertSame("TLS error: timed out (localhost, port" peer~port")", c~additional[1])
+  self~assertTrue(elapsed < 2.5, "timed out after" elapsed "seconds")
+  msg~result
+  peer~close
+
+-- connection, refusal, and the peer's side: all in one.
+::method refused private
+  use arg file, text, name
+  peer = .Peer~new
+  msg = peer~start("tlsEcho", file)
+  c = connectFails("localhost", peer~port, trustCA())
+  self~assertSame(48.900, c~code)
+  self~assertSame("TLS error:" text "(localhost, port" peer~port")", c~additional[1])
+  self~assertSame(name, c~additional[2])
+  self~assertTrue(msg~result~startsWith("TLS error: handshake failed:"))  -- the server got an alert
+  peer~close
+
+/* ---- the stream --------------------------------------------------------- */
+
+::method test_end_of_stream
+  peer = .Peer~new
+  msg = peer~start("tlsSend", "one" || "0d0a"x || "two")
+  s = .TLSSocket~new("localhost", peer~port, trustCA())
+  self~assertSame("one", s~lineIn)
+  self~assertSame("two", s~lineIn)
+  trapped = .false
+  signal on notready name eos
+  s~lineIn
+  signal eosDone
+eos:
+  trapped = .true
+eosDone:
+  signal off notready
+  self~assertTrue(trapped, "NOTREADY at the end of the stream")
+  self~assertSame("NOTREADY:EOF", s~description)
+  s~close
+  msg~result
+  peer~close
+
+-- A megabyte each way: shutdownOutput sends TLS's close_notify, and the
+-- reply still comes back.
+::method test_a_megabyte_and_shutdownOutput
+  peer = .Peer~new
+  msg = peer~start("tlsCollect")
+  s = .TLSSocket~new("localhost", peer~port, trustCA())
+  data = "0123456789abcdef"~copies(65536)
+  self~assertSame(0, s~charOut(data))
+  self~assertSame(0, s~shutdownOutput)
+  self~assertSame(data~length, s~lineIn)
+  s~close
+  self~assertTrue(msg~result == data, "the server got the same bytes")
+  peer~close
+
+-- One activity waits in lineIn while another writes: the write must not
+-- wait for the read (OpenSSL's calls are serialised, the waiting is not).
+::method test_reading_and_writing_from_two_activities
+  peer = .Peer~new
+  msg = peer~start("tlsEcho")
+  s = .TLSSocket~new("localhost", peer~port, trustCA())
+  s~readTimeout = 10
+  reader = .Reader~new~start("readLine", s)
+  call sysSleep 0.5                                  -- the reader is waiting
+  start = .DateTime~new
+  s~lineOut("ping")
+  self~assertSame("ping", reader~result)
+  self~assertTrue((.DateTime~new - start)~totalSeconds < 5)
+  s~lineOut("bye")
+  s~close
+  msg~result
+  peer~close
+
+::method test_buffered_output_is_sent_before_a_read_waits
+  peer = .Peer~new
+  msg = peer~start("tlsEcho")
+  s = .TLSSocket~new("localhost", peer~port, trustCA())
+  s~bufferOutput = .true
+  s~lineOut("kept")
+  self~assertSame("kept", s~lineIn)
+  s~lineOut("bye")
+  s~close
+  msg~result
+  peer~close
+
+/* ---- startTLS ----------------------------------------------------------- */
+
+::method test_startTLS
+  peer = .Peer~new
+  msg = peer~start("startTLSEcho")
+  s = .Socket~new("localhost", peer~port)
+  self~assertSame("220 ready", s~lineIn)
+  s~lineOut("STARTTLS")
+  self~assertSame("220 go ahead", s~lineIn)
+  self~assertSame(s, s~startTLS(, trustCA()))
+  self~assertTrue(s~secure)
+  self~assertSame("TLSv1.3", s~protocol)
+  s~lineOut("now encrypted")
+  self~assertSame("now encrypted", s~lineIn)
+  s~close
+  self~assertSame(0, msg~result)
+  peer~close
+
+-- Bytes that arrived in clear before the handshake would be taken as if
+-- they had come over TLS: refused, and the socket closed.
+::method test_startTLS_refuses_data_that_came_before
+  peer = .Peer~new
+  msg = peer~start("twoLinesAtOnce")
+  s = .Socket~new("localhost", peer~port)
+  self~assertSame("220 ready", s~lineIn)
+  call sysSleep 0.2
+  s~chars                                            -- INJECTED is in the buffer
+  signal on syntax name failed
+  s~startTLS(, trustCA())
+  self~fail("startTLS should have failed")
+failed:
+  c = condition("o")
+  self~assertSame("TLS error: data arrived before the TLS handshake (localhost, port" peer~port")", c~additional[1])
+  self~assertSame("UNKNOWN:", s~description)
+  msg~result
+  peer~close
+
+::method test_startTLS_twice
+  peer = .Peer~new
+  msg = peer~start("tlsEcho")
+  s = .TLSSocket~new("localhost", peer~port, trustCA())
+  signal on syntax name failed
+  s~startTLS
+  self~fail("a second startTLS should have failed")
+failed:
+  c = condition("o")
+  self~assertSame("TLS error: TLS has already started on this connection (localhost, port" peer~port")", c~additional[1])
+  s~lineOut("bye")
+  s~close
+  msg~result
+  peer~close
+
+/* ---- TLSOptions --------------------------------------------------------- */
+
+::method test_trust_a_file_that_is_not_there
+  c = trustFails(certFile("nothere.pem"))
+  self~assertSame(48.900, c~code)
+  self~assertTrue(c~additional[1]~startsWith("TLS error: cannot use"), c~additional[1])
+
+::method test_trust_a_file_that_is_not_a_certificate
+  c = trustFails(filespec("location", .context~package~name) || "run.rex")
+  self~assertTrue(c~additional[1]~endsWith(": not a certificate file (PEM, DER or PKCS#12)"), c~additional[1])
+
+::method test_trust_with_the_wrong_password
+  c = trustFails(certFile("keytool.p12"), "wrong")
+  self~assertTrue(c~additional[1]~endsWith(": wrong password for the PKCS#12 file"), c~additional[1])
+
+::method test_trust_counts_the_certificates
+  opts = .TLSOptions~new
+  self~assertSame(0, opts~trusted~items)
+  opts~trust(certFile("ca.pem"))~trust(certFile("server.p12"), "test")  -- the server's and the CA's
+  self~assertSame(3, opts~trusted~items)
+
+::method test_minVersion_values
+  opts = .TLSOptions~new
+  self~assertSame("1.2", opts~minVersion)
+  signal on syntax name failed
+  opts~minVersion = "1.1"
+  self~fail("minVersion 1.1 should have been refused")
+failed:
+  self~assertSame(88.900, condition("o")~code)
+
+::method test_options_must_be_TLSOptions
+  signal on syntax name failed
+  .TLSSocket~new("localhost", 1, "not options")
+  self~fail("should have failed")
+failed:
+  c = condition("o")
+  self~assertSame(88.900, c~code)
+
+/* ---- online: the system decides (OOSOCKETS_ONLINE=1) -------------------- */
+
+::method test_online_a_real_server
+  if \online() then return
+  s = .TLSSocket~new("example.com", 443, , 20)
+  s~readTimeout = 20
+  s~lineOut("HEAD / HTTP/1.1")
+  s~lineOut("Host: example.com")
+  s~lineOut("Connection: close")
+  s~lineOut("")
+  line = s~lineIn
+  self~assertTrue(line~startsWith("HTTP/1.1 "), line)
+  say "  (example.com:" s~protocol s~cipher")"
+  s~close
+
+::method test_online_expired
+  if \online() then return
+  self~onlineRefused("expired.badssl.com", "certificate has expired")
+
+::method test_online_wrong_host
+  if \online() then return
+  self~onlineRefused("wrong.host.badssl.com", "certificate does not match the host name")
+
+::method test_online_self_signed
+  if \online() then return
+  self~onlineRefused("self-signed.badssl.com", "certificate is not trusted")
+
+::method test_online_untrusted_root
+  if \online() then return
+  self~onlineRefused("untrusted-root.badssl.com", "certificate is not trusted")
+
+-- Not asked for on any system; macOS may refuse on its own. Seen, not judged.
+::method test_online_revoked_is_not_checked
+  if \online() then return
+  signal on syntax name refused
+  s = .TLSSocket~new("revoked.badssl.com", 443, , 20)
+  say "  (revoked.badssl.com: accepted)"
+  s~close
+  return
+refused:
+  c = condition("o")
+  say "  (revoked.badssl.com: refused:" c~additional[1] c~additional[2] c~additional[3]")"
+  self~assertTrue(c~additional[1]~startsWith("TLS error: certificate has been revoked"), c~additional[1])
+
+::method onlineRefused private
+  use arg host, text
+  c = connectFails(host, 443, .nil, 20)
+  say "  ("host":" c~additional[2] c~additional[3]")"
+  self~assertSame("TLS error:" text "(" || host || ", port 443)", c~additional[1])
+
+
+/* ---- helpers ------------------------------------------------------------ */
+
+::class Reader
+::method readLine
+  use arg s
+  return s~lineIn
+
+::routine trustCA
+  return .TLSOptions~new~trust(certFile("ca.pem"))
+
+-- The condition object of the SYNTAX condition TLSSocket~new raised.
+::routine connectFails
+  use arg host, port, options, timeout = 10
+  signal on syntax
+  s = .TLSSocket~new(host, port, options, timeout)
+  s~close
+  raise syntax 40.900 array("expected TLSSocket~new to fail; it connected to" host)
+syntax:
+  return condition("o")
+
+::routine trustFails
+  use arg file, password = ""
+  signal on syntax
+  .TLSOptions~new~trust(file, password)
+  raise syntax 40.900 array("expected trust to fail:" file)
+syntax:
+  return condition("o")
+
+::routine online
+  return value("OOSOCKETS_ONLINE", , "ENVIRONMENT") == 1
+
+-- A Peer on ::1, or .nil if the machine has no IPv6.
+::routine ipv6Peer
+  signal on syntax name none
+  return .Peer~new("::1")
+none:
+  return .nil

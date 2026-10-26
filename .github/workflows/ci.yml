@@ -48,16 +48,64 @@ jobs:
       - name: ooRexx version
         run: rexx -v
 
+      # OpenSSL: Linux, the system's; macOS, Homebrew's, linked statically;
+      # Windows, vcpkg's x64-windows-static-md (static libraries, the DLL C
+      # runtime), cached: building it takes ~7 minutes.
+      - name: OpenSSL (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          dpkg -s libssl-dev > /dev/null 2>&1 || sudo apt-get install -y libssl-dev
+          openssl version
+
+      - name: OpenSSL (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          p="$(brew --prefix openssl@3)"
+          ls "$p/lib/"*.a
+          "$p/bin/openssl" version
+          echo "CMAKE_EXTRA=-DOPENSSL_ROOT_DIR=$p" >> "$GITHUB_ENV"
+
+      - name: vcpkg cache (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: vcpkg-openssl-x64-windows-static-md-v1
+
+      - name: OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p "$RUNNER_TEMP/vcpkg-cache"
+          export VCPKG_BINARY_SOURCES="clear;files,$(cygpath -w "$RUNNER_TEMP/vcpkg-cache"),readwrite"
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install openssl:x64-windows-static-md > vcpkg.log 2>&1 \
+            || { tail -40 vcpkg.log; exit 1; }
+          grep -i -m3 -E "openssl:x64-windows-static-md|restored" vcpkg.log || true
+          tc="$(cygpath -m "$VCPKG_INSTALLATION_ROOT")/scripts/buildsystems/vcpkg.cmake"
+          echo "CMAKE_EXTRA=-DCMAKE_TOOLCHAIN_FILE=$tc -DVCPKG_TARGET_TRIPLET=x64-windows-static-md" >> "$GITHUB_ENV"
+
       - name: Build
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME" ${CMAKE_EXTRA:-}
           cmake --build build --config Release
+
+      # What the library loads: no OpenSSL library on macOS or Windows.
+      - name: Dependencies
+        run: |
+          case "$RUNNER_OS" in
+            Linux) ldd build/liboosockets.so ;;
+            macOS) otool -L build/liboosockets.dylib ;;
+            Windows)
+              dumpbin=$(ls "/c/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/"*/bin/Hostx64/x64/dumpbin.exe | head -1)
+              "$dumpbin" //dependents build/Release/oosockets.dll | grep -i "\.dll" ;;
+          esac
 
       - name: ooRexxUnit
         run: scripts/get-oorexxunit.sh
 
       - name: Test
         timeout-minutes: 10
+        env:
+          OOSOCKETS_ONLINE: 1          # the TLS tests against real servers
         run: |
           if [ "$RUNNER_OS" = Windows ]; then
             scripts/test.sh "$PWD/build/Release"

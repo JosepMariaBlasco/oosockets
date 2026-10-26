@@ -26,8 +26,24 @@ add_library(oosockets SHARED src/oosockets.cpp)
 target_include_directories(oosockets SYSTEM PRIVATE "${OOREXX_INCLUDE_DIR}")
 target_link_libraries(oosockets PRIVATE "${OOREXX_REXX_LIB}" "${OOREXX_REXXAPI_LIB}")
 
+# OpenSSL does the TLS. Linux: the system's (libssl-dev). macOS and
+# Windows: linked statically, since neither system ships it; point
+# OPENSSL_ROOT_DIR at it (Homebrew's openssl@3; vcpkg's
+# x64-windows-static-md, through its toolchain file).
+if(APPLE OR WIN32)
+  set(OPENSSL_USE_STATIC_LIBS TRUE)
+endif()
+find_package(OpenSSL 3.0 REQUIRED)
+target_link_libraries(oosockets PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+
+if(APPLE)
+  # macOS decides trust (SecTrustEvaluateWithError)
+  target_link_libraries(oosockets PRIVATE "-framework Security" "-framework CoreFoundation")
+endif()
+
 if(WIN32)
-  target_link_libraries(oosockets PRIVATE ws2_32)
+  # Windows decides trust (CertGetCertificateChain); OpenSSL's own needs
+  target_link_libraries(oosockets PRIVATE ws2_32 crypt32 user32 advapi32)
   target_compile_definitions(oosockets PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
 

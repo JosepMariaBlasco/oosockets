@@ -2,3 +2,5 @@
 *.testGroup linguist-language=REXX
 *.rex       linguist-language=REXX
 *.sh        text eol=lf
+*.p12       binary
+*.pem       text eol=lf

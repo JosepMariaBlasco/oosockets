@@ -62,6 +62,7 @@
 #include <cstdio>
 #include <cerrno>
 #include <chrono>
+#include <mutex>
 
 #ifdef _WIN32
   #ifndef WIN32_LEAN_AND_MEAN
@@ -70,6 +71,7 @@
   #include <winsock2.h>
   #include <ws2tcpip.h>
   #include <windows.h>
+  #include <wincrypt.h>                    // before OpenSSL, which undoes its X509_NAME
   typedef SOCKET sock_t;
   typedef int socklen_type;
   #define BAD_SOCKET INVALID_SOCKET
@@ -104,10 +106,39 @@
 // bring the old winsock.h first.
 #include "oorexxapi.h"
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/x509v3.h>
+#include <openssl/pem.h>
+#include <openssl/pkcs12.h>
+
+#ifdef __APPLE__
+  #include <Security/Security.h>
+#endif
+
+
+// Why a certificate was refused: our text, the system's name and number.
+struct TrustError
+{
+    bool set = false;
+    std::string text;
+    std::string name;
+    long long code = 0;
+};
 
 struct Sock
 {
     sock_t fd;
+    // TLS, once started: the connection's own context and SSL. OpenSSL
+    // does not allow two threads in one SSL at once, and a socket may be
+    // read in one activity and written in another; so every SSL call is
+    // made under mu, and mu is never held while waiting for the network.
+    SSL_CTX *ctx = nullptr;
+    SSL *ssl = nullptr;
+    std::mutex mu;
+    int ioError = 0;             // the last socket error the BIO met
+    std::string host;            // the name verified (client)
+    TrustError trust;            // why the system refused the certificate
     Sock(sock_t f) : fd(f) { }
 };
 
@@ -400,8 +431,20 @@ static void setCself(RexxMethodContext *context, Sock *s)
 
 static void closeSock(Sock *s)
 {
-    if (s != nullptr && s->fd != BAD_SOCKET)
+    if (s == nullptr)
     {
+        return;
+    }
+    std::lock_guard<std::mutex> guard(s->mu);
+    if (s->fd != BAD_SOCKET)
+    {
+        // TLS: tell the peer (close_notify), if the socket takes it now.
+        if (s->ssl != nullptr)
+        {
+            ERR_clear_error();
+            SSL_shutdown(s->ssl);
+            ERR_clear_error();
+        }
         // shutdown first: on Linux, close alone does not wake a recv or an
         // accept blocked in another activity on this socket.
 #ifdef _WIN32
@@ -412,6 +455,991 @@ static void closeSock(Sock *s)
         closesock(s->fd);
         s->fd = BAD_SOCKET;
     }
+}
+
+
+/*----------------------------------------------------------------------------*/
+/* TLS                                                                        */
+/*                                                                            */
+/* OpenSSL does the TLS on the three systems (linked statically on macOS and  */
+/* Windows). Who decides whether the server's certificate is good:            */
+/*   - when the program trusts certificates explicitly (TLSOptions~trust),    */
+/*     OpenSSL, with those as its only anchors, and the host name;            */
+/*   - otherwise the system: Linux, OpenSSL with the system's store; macOS,   */
+/*     SecTrustEvaluateWithError; Windows, CertGetCertificateChain and        */
+/*     CertVerifyCertificateChainPolicy (both from inside the handshake, so   */
+/*     that a refused certificate ends it with an alert).                     */
+/* Revocation is not asked for (as Java and .NET by default).                 */
+/*                                                                            */
+/* Once TLS starts, the socket is non-blocking: each SSL call is made under   */
+/* the Sock's lock, and the waiting (poll) is done outside it, so that one    */
+/* activity can read while another writes.                                    */
+/*----------------------------------------------------------------------------*/
+
+static bool wouldBlock(int code)
+{
+#ifdef _WIN32
+    return code == WSAEWOULDBLOCK;
+#else
+    return code == EAGAIN || code == EWOULDBLOCK;
+#endif
+}
+
+// Our BIO: send and recv on the Sock's socket. Not OpenSSL's socket BIO,
+// which writes with write(): on Linux, a SIGPIPE when the peer is gone.
+static int bioWrite(BIO *b, const char *data, int len)
+{
+    Sock *s = (Sock *)BIO_get_data(b);
+    BIO_clear_retry_flags(b);
+    for (;;)
+    {
+        long n = (long)send(s->fd, data, len, SEND_FLAGS);
+        if (n >= 0)
+        {
+            return (int)n;
+        }
+        int e = lastError();
+        if (interrupted(e))
+        {
+            continue;
+        }
+        s->ioError = e;
+        if (wouldBlock(e))
+        {
+            s->ioError = 0;
+            BIO_set_retry_write(b);
+        }
+        return -1;
+    }
+}
+
+static int bioRead(BIO *b, char *data, int len)
+{
+    Sock *s = (Sock *)BIO_get_data(b);
+    BIO_clear_retry_flags(b);
+    for (;;)
+    {
+        long n = (long)recv(s->fd, data, len, 0);
+        if (n > 0)
+        {
+            return (int)n;
+        }
+        if (n == 0)
+        {
+#ifdef BIO_FLAGS_IN_EOF
+            BIO_set_flags(b, BIO_FLAGS_IN_EOF);
+#endif
+            return 0;
+        }
+        int e = lastError();
+        if (interrupted(e))
+        {
+            continue;
+        }
+        s->ioError = e;
+        if (wouldBlock(e))
+        {
+            s->ioError = 0;
+            BIO_set_retry_read(b);
+        }
+        return -1;
+    }
+}
+
+static long bioCtrl(BIO *b, int cmd, long num, void *ptr)
+{
+    (void)num; (void)ptr;
+    switch (cmd)
+    {
+        case BIO_CTRL_FLUSH:
+            return 1;
+#ifdef BIO_FLAGS_IN_EOF
+        case BIO_CTRL_EOF:
+            return BIO_test_flags(b, BIO_FLAGS_IN_EOF) != 0;
+#endif
+        default:
+            (void)b;
+            return 0;
+    }
+}
+
+static int bioCreate(BIO *b)
+{
+    BIO_set_init(b, 1);
+    return 1;
+}
+
+static BIO_METHOD *sockBioMethod()
+{
+    static std::once_flag once;
+    static BIO_METHOD *method = nullptr;
+    std::call_once(once, []()
+    {
+        method = BIO_meth_new(BIO_get_new_index() | BIO_TYPE_SOURCE_SINK, "oosockets");
+        BIO_meth_set_write(method, bioWrite);
+        BIO_meth_set_read(method, bioRead);
+        BIO_meth_set_ctrl(method, bioCtrl);
+        BIO_meth_set_create(method, bioCreate);
+    });
+    return method;
+}
+
+// What a TLS operation came to.
+enum TlsStatus { TLS_OK, TLS_EOF, TLS_TIMEOUT, TLS_CLOSED, TLS_SOCKET_ERROR, TLS_SSL_ERROR };
+
+struct TlsOutcome
+{
+    TlsStatus status = TLS_OK;
+    int socketError = 0;          // TLS_SOCKET_ERROR
+    unsigned long sslError = 0;   // TLS_SSL_ERROR: ERR_get_error()'s
+    long verifyResult = X509_V_OK;
+};
+
+// Runs call(ssl) until it succeeds, retrying when OpenSSL wants to read or
+// write, waiting outside the lock (until the deadline, if there is one).
+// call returns what SSL_xxx returns: > 0 success.
+template <class Call>
+static TlsOutcome tlsRun(Sock *s, bool hasDeadline, Clock::time_point deadline, Call call)
+{
+    TlsOutcome out;
+    for (;;)
+    {
+        int rc, sslErr;
+        sock_t fd;
+        {
+            std::lock_guard<std::mutex> guard(s->mu);
+            if (s->fd == BAD_SOCKET || s->ssl == nullptr)
+            {
+                out.status = TLS_CLOSED;
+                return out;
+            }
+            fd = s->fd;
+            ERR_clear_error();
+            s->ioError = 0;
+            rc = call(s->ssl);
+            if (rc > 0)
+            {
+                out.status = TLS_OK;
+                return out;
+            }
+            sslErr = SSL_get_error(s->ssl, rc);
+            out.socketError = s->ioError;
+            out.sslError = ERR_peek_last_error();
+            out.verifyResult = SSL_get_verify_result(s->ssl);
+            ERR_clear_error();
+        }
+        if (sslErr == SSL_ERROR_WANT_READ || sslErr == SSL_ERROR_WANT_WRITE)
+        {
+            int err = 0;
+            int w = waitFor(fd, sslErr == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT, hasDeadline, deadline, &err);
+            if (w == 0)
+            {
+                out.status = TLS_TIMEOUT;
+                return out;
+            }
+            if (w < 0)
+            {
+                out.status = TLS_SOCKET_ERROR;
+                out.socketError = err;
+                return out;
+            }
+            continue;
+        }
+        if (sslErr == SSL_ERROR_ZERO_RETURN)
+        {
+            out.status = TLS_EOF;
+        }
+        else if (sslErr == SSL_ERROR_SYSCALL)
+        {
+            // A socket error; or none: the peer closed without close_notify.
+            out.status = out.socketError != 0 ? TLS_SOCKET_ERROR : TLS_EOF;
+        }
+        else
+        {
+            out.status = TLS_SSL_ERROR;
+        }
+        return out;
+    }
+}
+
+static RexxArrayObject errorArray(RexxMethodContext *context, const std::string &text,
+                                  const std::string &name, long long code)
+{
+    RexxArrayObject r = context->NewArray(4);
+    context->ArrayAppendString(r, "ERROR", 5);
+    context->ArrayAppendString(r, text.c_str(), text.size());
+    context->ArrayAppendString(r, name.c_str(), name.size());
+    context->ArrayAppend(r, context->Int64ToObject(code));
+    return r;
+}
+
+// OpenSSL's reason for an error, without its library prefix.
+static std::string sslReason(unsigned long e)
+{
+    const char *r = e != 0 ? ERR_reason_error_string(e) : nullptr;
+    if (r != nullptr)
+    {
+        return r;
+    }
+    char buf[256];
+    ERR_error_string_n(e, buf, sizeof(buf));
+    return buf;
+}
+
+// The result of a TLS read or write that failed on an established connection.
+static RexxArrayObject tlsIoResult(RexxMethodContext *context, const TlsOutcome &o)
+{
+    switch (o.status)
+    {
+        case TLS_EOF:     return statusResult(context, "EOF");
+        case TLS_TIMEOUT: return statusResult(context, "TIMEOUT");
+        case TLS_CLOSED:  return closedResult(context);
+        case TLS_SOCKET_ERROR: return errorResult(context, o.socketError);
+        default:
+            return errorArray(context, "TLS: " + sslReason(o.sslError), "SSL_ERROR_SSL",
+                              (long long)ERR_GET_REASON(o.sslError));
+    }
+}
+
+/* ---- why a certificate was refused ---------------------------------------- */
+
+// The common reasons read the same on the three systems.
+static const char *CERT_EXPIRED   = "certificate has expired";
+static const char *CERT_NOT_YET   = "certificate is not yet valid";
+static const char *CERT_HOST      = "certificate does not match the host name";
+static const char *CERT_UNTRUSTED = "certificate is not trusted";
+static const char *CERT_REVOKED   = "certificate has been revoked";
+static const char *CERT_USAGE     = "certificate is not for a TLS server";
+
+static TrustError opensslTrustError(long v)
+{
+    TrustError t;
+    t.set = true;
+    t.code = v;
+    switch (v)
+    {
+        case X509_V_ERR_CERT_HAS_EXPIRED:
+            t.name = "X509_V_ERR_CERT_HAS_EXPIRED"; t.text = CERT_EXPIRED; break;
+        case X509_V_ERR_CERT_NOT_YET_VALID:
+            t.name = "X509_V_ERR_CERT_NOT_YET_VALID"; t.text = CERT_NOT_YET; break;
+        case X509_V_ERR_HOSTNAME_MISMATCH:
+            t.name = "X509_V_ERR_HOSTNAME_MISMATCH"; t.text = CERT_HOST; break;
+        case X509_V_ERR_IP_ADDRESS_MISMATCH:
+            t.name = "X509_V_ERR_IP_ADDRESS_MISMATCH"; t.text = CERT_HOST; break;
+        case X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT:
+            t.name = "X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT"; t.text = CERT_UNTRUSTED; break;
+        case X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN:
+            t.name = "X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN"; t.text = CERT_UNTRUSTED; break;
+        case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY:
+            t.name = "X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY"; t.text = CERT_UNTRUSTED; break;
+        case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
+            t.name = "X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT"; t.text = CERT_UNTRUSTED; break;
+        case X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE:
+            t.name = "X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE"; t.text = CERT_UNTRUSTED; break;
+        case X509_V_ERR_CERT_UNTRUSTED:
+            t.name = "X509_V_ERR_CERT_UNTRUSTED"; t.text = CERT_UNTRUSTED; break;
+        case X509_V_ERR_CERT_REVOKED:
+            t.name = "X509_V_ERR_CERT_REVOKED"; t.text = CERT_REVOKED; break;
+        case X509_V_ERR_INVALID_PURPOSE:
+            t.name = "X509_V_ERR_INVALID_PURPOSE"; t.text = CERT_USAGE; break;
+        default:
+            t.name = "X509_V_ERR";
+            t.text = X509_verify_cert_error_string(v);
+    }
+    return t;
+}
+
+#ifdef __APPLE__
+
+static std::string cfString(CFStringRef s)
+{
+    char buf[1024] = "";
+    if (s != nullptr)
+    {
+        CFStringGetCString(s, buf, sizeof(buf), kCFStringEncodingUTF8);
+    }
+    return buf;
+}
+
+static SecCertificateRef toApple(X509 *x)
+{
+    unsigned char *der = nullptr;
+    int len = i2d_X509(x, &der);
+    if (len <= 0)
+    {
+        return nullptr;
+    }
+    CFDataRef d = CFDataCreate(nullptr, der, len);
+    OPENSSL_free(der);
+    SecCertificateRef c = SecCertificateCreateWithData(nullptr, d);
+    CFRelease(d);
+    return c;
+}
+
+// macOS decides, with its SSL policy for the host name.
+static bool systemTrust(const std::vector<X509 *> &chain, const std::string &host, TrustError &why)
+{
+    CFMutableArrayRef certs = CFArrayCreateMutable(nullptr, 0, &kCFTypeArrayCallBacks);
+    for (X509 *x : chain)
+    {
+        SecCertificateRef c = toApple(x);
+        if (c != nullptr)
+        {
+            CFArrayAppendValue(certs, c);
+            CFRelease(c);
+        }
+    }
+    CFStringRef h = CFStringCreateWithCString(nullptr, host.c_str(), kCFStringEncodingUTF8);
+    SecPolicyRef policy = SecPolicyCreateSSL(true, h);
+    SecTrustRef trust = nullptr;
+    bool ok = false;
+    if (SecTrustCreateWithCertificates(certs, policy, &trust) == errSecSuccess)
+    {
+        CFErrorRef err = nullptr;
+        ok = SecTrustEvaluateWithError(trust, &err);
+        if (!ok)
+        {
+            long code = err != nullptr ? (long)CFErrorGetCode(err) : 0;
+            why.set = true;
+            why.code = code;
+            switch (code)
+            {
+                case errSecCertificateExpired:
+                    why.name = "errSecCertificateExpired"; why.text = CERT_EXPIRED; break;
+                case errSecCertificateNotValidYet:
+                    why.name = "errSecCertificateNotValidYet"; why.text = CERT_NOT_YET; break;
+                case errSecHostNameMismatch:
+                    why.name = "errSecHostNameMismatch"; why.text = CERT_HOST; break;
+                case errSecNotTrusted:
+                    why.name = "errSecNotTrusted"; why.text = CERT_UNTRUSTED; break;
+                case errSecCertificateRevoked:
+                    why.name = "errSecCertificateRevoked"; why.text = CERT_REVOKED; break;
+                case errSecInvalidExtendedKeyUsage:
+                    why.name = "errSecInvalidExtendedKeyUsage"; why.text = CERT_USAGE; break;
+                default:
+                {
+                    why.name = "OSStatus";
+                    CFStringRef desc = err != nullptr ? CFErrorCopyDescription(err) : nullptr;
+                    why.text = cfString(desc);
+                    if (desc != nullptr)
+                    {
+                        CFRelease(desc);
+                    }
+                    if (why.text.empty())
+                    {
+                        why.text = CERT_UNTRUSTED;
+                    }
+                }
+            }
+        }
+        if (err != nullptr)
+        {
+            CFRelease(err);
+        }
+    }
+    else
+    {
+        why.set = true;
+        why.name = "OSStatus";
+        why.text = "the system could not evaluate the certificate";
+    }
+    if (trust != nullptr)
+    {
+        CFRelease(trust);
+    }
+    CFRelease(policy);
+    CFRelease(h);
+    CFRelease(certs);
+    return ok;
+}
+
+#elif defined(_WIN32)
+
+static PCCERT_CONTEXT toWindows(X509 *x)
+{
+    unsigned char *der = nullptr;
+    int len = i2d_X509(x, &der);
+    if (len <= 0)
+    {
+        return nullptr;
+    }
+    PCCERT_CONTEXT c = CertCreateCertificateContext(X509_ASN_ENCODING, der, (DWORD)len);
+    OPENSSL_free(der);
+    return c;
+}
+
+static void windowsTrustError(DWORD code, TrustError &why)
+{
+    why.set = true;
+    why.code = (long long)code;
+    switch (code)
+    {
+        case (DWORD)CERT_E_EXPIRED:
+            why.name = "CERT_E_EXPIRED"; why.text = CERT_EXPIRED; return;
+        case (DWORD)CERT_E_CN_NO_MATCH:
+            why.name = "CERT_E_CN_NO_MATCH"; why.text = CERT_HOST; return;
+        case (DWORD)CERT_E_UNTRUSTEDROOT:
+            why.name = "CERT_E_UNTRUSTEDROOT"; why.text = CERT_UNTRUSTED; return;
+        case (DWORD)CERT_E_CHAINING:
+            why.name = "CERT_E_CHAINING"; why.text = CERT_UNTRUSTED; return;
+        case (DWORD)CRYPT_E_REVOKED:
+            why.name = "CRYPT_E_REVOKED"; why.text = CERT_REVOKED; return;
+        case (DWORD)CERT_E_WRONG_USAGE:
+            why.name = "CERT_E_WRONG_USAGE"; why.text = CERT_USAGE; return;
+    }
+    char buf[512] = "";
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, code,
+                   MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), buf, sizeof(buf), nullptr);
+    why.name = "HRESULT";
+    why.text = buf;
+    while (!why.text.empty() && (why.text.back() == '\n' || why.text.back() == '\r' || why.text.back() == '.'))
+    {
+        why.text.pop_back();
+    }
+    if (!why.text.empty())
+    {
+        why.text[0] = (char)tolower((unsigned char)why.text[0]);
+    }
+    else
+    {
+        why.text = CERT_UNTRUSTED;
+    }
+}
+
+// Windows decides: the chain it builds (with the server's certificates as
+// extra ones), and its SSL policy for the host name.
+static bool systemTrust(const std::vector<X509 *> &chain, const std::string &host, TrustError &why)
+{
+    PCCERT_CONTEXT leaf = toWindows(chain[0]);
+    if (leaf == nullptr)
+    {
+        windowsTrustError((DWORD)CERT_E_CHAINING, why);
+        return false;
+    }
+    HCERTSTORE extra = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr);
+    for (size_t i = 1; i < chain.size(); i++)
+    {
+        PCCERT_CONTEXT c = toWindows(chain[i]);
+        if (c != nullptr)
+        {
+            CertAddCertificateContextToStore(extra, c, CERT_STORE_ADD_ALWAYS, nullptr);
+            CertFreeCertificateContext(c);
+        }
+    }
+    char serverAuth[] = szOID_PKIX_KP_SERVER_AUTH;
+    char *usage[] = { serverAuth };
+    CERT_CHAIN_PARA para;
+    memset(&para, 0, sizeof(para));
+    para.cbSize = sizeof(para);
+    para.RequestedUsage.dwType = USAGE_MATCH_TYPE_AND;
+    para.RequestedUsage.Usage.cUsageIdentifier = 1;
+    para.RequestedUsage.Usage.rgpszUsageIdentifier = usage;
+    PCCERT_CHAIN_CONTEXT ctx = nullptr;
+    bool ok = false;
+    if (!CertGetCertificateChain(nullptr, leaf, nullptr, extra, &para, 0, nullptr, &ctx))
+    {
+        windowsTrustError(GetLastError(), why);
+    }
+    else
+    {
+        std::wstring whost(host.size() + 1, L'\0');
+        int n = MultiByteToWideChar(CP_UTF8, 0, host.c_str(), -1, &whost[0], (int)whost.size());
+        whost.resize(n > 0 ? (size_t)n - 1 : 0);
+        SSL_EXTRA_CERT_CHAIN_POLICY_PARA sslPara;
+        memset(&sslPara, 0, sizeof(sslPara));
+        sslPara.cbSize = sizeof(sslPara);
+        sslPara.dwAuthType = AUTHTYPE_SERVER;
+        sslPara.pwszServerName = &whost[0];
+        CERT_CHAIN_POLICY_PARA policy;
+        memset(&policy, 0, sizeof(policy));
+        policy.cbSize = sizeof(policy);
+        policy.pvExtraPolicyPara = &sslPara;
+        CERT_CHAIN_POLICY_STATUS status;
+        memset(&status, 0, sizeof(status));
+        status.cbSize = sizeof(status);
+        if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, ctx, &policy, &status))
+        {
+            windowsTrustError(GetLastError(), why);
+        }
+        else if (status.dwError != 0)
+        {
+            windowsTrustError(status.dwError, why);
+        }
+        else
+        {
+            ok = true;
+        }
+        CertFreeCertificateChain(ctx);
+    }
+    CertCloseStore(extra, 0);
+    CertFreeCertificateContext(leaf);
+    return ok;
+}
+
+#endif
+
+#if defined(__APPLE__) || defined(_WIN32)
+// OpenSSL's verification replaced by the system's (when nothing is trusted
+// explicitly): called by OpenSSL inside the handshake.
+static int systemVerify(X509_STORE_CTX *store, void *)
+{
+    SSL *ssl = (SSL *)X509_STORE_CTX_get_ex_data(store, SSL_get_ex_data_X509_STORE_CTX_idx());
+    Sock *s = (Sock *)SSL_get_app_data(ssl);
+    std::vector<X509 *> chain;
+    X509 *leaf = X509_STORE_CTX_get0_cert(store);
+    if (leaf != nullptr)
+    {
+        chain.push_back(leaf);
+    }
+    STACK_OF(X509) *others = X509_STORE_CTX_get0_untrusted(store);
+    for (int i = 0; others != nullptr && i < sk_X509_num(others); i++)
+    {
+        X509 *x = sk_X509_value(others, i);
+        if (leaf == nullptr || X509_cmp(x, leaf) != 0)
+        {
+            chain.push_back(x);
+        }
+    }
+    if (chain.empty())
+    {
+        s->trust.set = true;
+        s->trust.name = "X509_V_ERR";
+        s->trust.text = "the server sent no certificate";
+        X509_STORE_CTX_set_error(store, X509_V_ERR_APPLICATION_VERIFICATION);
+        return 0;
+    }
+    if (!systemTrust(chain, s->host, s->trust))
+    {
+        X509_STORE_CTX_set_error(store, X509_V_ERR_APPLICATION_VERIFICATION);
+        return 0;
+    }
+    return 1;
+}
+#endif
+
+/* ---- certificate files -------------------------------------------------- */
+
+static bool readFile(const char *path, std::string &data, std::string &why)
+{
+    FILE *f = fopen(path, "rb");
+    if (f == nullptr)
+    {
+        why = strerror(errno);
+        if (!why.empty())
+        {
+            why[0] = (char)tolower((unsigned char)why[0]);
+        }
+        return false;
+    }
+    char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+    {
+        data.append(buf, n);
+    }
+    fclose(f);
+    return true;
+}
+
+// The certificates (and the private key, if asked for and there is one) in
+// a file: PEM (any number), DER (one), or PKCS#12 with its password.
+static bool loadCertificates(const std::string &data, const char *password,
+                             std::vector<X509 *> &certs, EVP_PKEY **key, std::string &why)
+{
+    ERR_clear_error();
+    // PEM
+    if (data.find("-----BEGIN") != std::string::npos)
+    {
+        BIO *b = BIO_new_mem_buf(data.data(), (int)data.size());
+        X509 *x;
+        while ((x = PEM_read_bio_X509(b, nullptr, nullptr, nullptr)) != nullptr)
+        {
+            certs.push_back(x);
+        }
+        BIO_free(b);
+        ERR_clear_error();
+        if (key != nullptr)
+        {
+            b = BIO_new_mem_buf(data.data(), (int)data.size());
+            *key = PEM_read_bio_PrivateKey(b, nullptr, nullptr, (void *)password);
+            BIO_free(b);
+            ERR_clear_error();
+        }
+        if (certs.empty())
+        {
+            why = "no certificate in the file";
+            return false;
+        }
+        return true;
+    }
+    // DER: one certificate
+    const unsigned char *p = (const unsigned char *)data.data();
+    X509 *x = d2i_X509(nullptr, &p, (long)data.size());
+    if (x != nullptr)
+    {
+        certs.push_back(x);
+        return true;
+    }
+    ERR_clear_error();
+    // PKCS#12
+    p = (const unsigned char *)data.data();
+    PKCS12 *p12 = d2i_PKCS12(nullptr, &p, (long)data.size());
+    if (p12 == nullptr)
+    {
+        ERR_clear_error();
+        why = "not a certificate file (PEM, DER or PKCS#12)";
+        return false;
+    }
+    EVP_PKEY *k = nullptr;
+    X509 *cert = nullptr;
+    STACK_OF(X509) *ca = nullptr;
+    int ok = PKCS12_parse(p12, password, &k, &cert, &ca);
+    PKCS12_free(p12);
+    if (!ok)
+    {
+        unsigned long e = ERR_peek_last_error();
+        ERR_clear_error();
+        why = ERR_GET_REASON(e) == PKCS12_R_MAC_VERIFY_FAILURE
+              ? "wrong password for the PKCS#12 file"
+              : "cannot read the PKCS#12 file: " + sslReason(e);
+        return false;
+    }
+    if (cert != nullptr)
+    {
+        certs.push_back(cert);
+    }
+    while (ca != nullptr && sk_X509_num(ca) > 0)
+    {
+        certs.push_back(sk_X509_shift(ca));
+    }
+    sk_X509_free(ca);
+    if (key != nullptr)
+    {
+        *key = k;
+    }
+    else if (k != nullptr)
+    {
+        EVP_PKEY_free(k);
+    }
+    if (certs.empty())
+    {
+        why = "no certificate in the PKCS#12 file";
+        return false;
+    }
+    return true;
+}
+
+static bool isAddress(const std::string &host)
+{
+    unsigned char buf[16];
+    std::string h = host.substr(0, host.find('%'));
+    return inet_pton(AF_INET, h.c_str(), buf) == 1 || inet_pton(AF_INET6, h.c_str(), buf) == 1;
+}
+
+// TLSOptions~nLoad(file, password): "OK" and the certificates in the file,
+// each as DER bytes; or an error ("ERROR", text, "", 0).
+RexxMethod2(RexxArrayObject, tls_load_certificates, CSTRING, file, OPTIONAL_CSTRING, password)
+{
+    std::string data, why;
+    std::vector<X509 *> certs;
+    bool ok = readFile(file, data, why) &&
+              loadCertificates(data, password != nullptr ? password : "", certs, nullptr, why);
+    if (!ok)
+    {
+        for (X509 *x : certs)
+        {
+            X509_free(x);
+        }
+        return errorArray(context, why, "", 0);
+    }
+    RexxArrayObject ders = context->NewArray(certs.size());
+    for (X509 *x : certs)
+    {
+        unsigned char *der = nullptr;
+        int len = i2d_X509(x, &der);
+        if (len > 0)
+        {
+            context->ArrayAppendString(ders, (const char *)der, (size_t)len);
+            OPENSSL_free(der);
+        }
+        X509_free(x);
+    }
+    return statusResult(context, "OK", ders);
+}
+
+// The handshake's failure, as a result: "ERROR", text, name, number.
+static RexxArrayObject handshakeFailure(RexxMethodContext *context, Sock *s, const TlsOutcome &o)
+{
+    if (o.status == TLS_TIMEOUT)
+    {
+        return statusResult(context, "TIMEOUT");
+    }
+    if (o.status == TLS_CLOSED)
+    {
+        return closedResult(context);
+    }
+    if (o.status == TLS_SOCKET_ERROR)
+    {
+        return errorResult(context, o.socketError);
+    }
+    if (o.status == TLS_EOF)
+    {
+        return errorArray(context, "the peer closed the connection during the handshake", "EOF", 0);
+    }
+    if (s->trust.set)
+    {
+        return errorArray(context, s->trust.text, s->trust.name, s->trust.code);
+    }
+    if (o.verifyResult != X509_V_OK)
+    {
+        TrustError t = opensslTrustError(o.verifyResult);
+        return errorArray(context, t.text, t.name, t.code);
+    }
+    return errorArray(context, "handshake failed: " + sslReason(o.sslError), "SSL_ERROR_SSL",
+                      (long long)ERR_GET_REASON(o.sslError));
+}
+
+static int minVersionOf(const char *v)
+{
+    return strcmp(v, "1.3") == 0 ? TLS1_3_VERSION : TLS1_2_VERSION;
+}
+
+// Puts the Sock in TLS: a new SSL over our BIO; the socket non-blocking.
+static void attachSsl(Sock *s, SSL_CTX *ctx)
+{
+    std::lock_guard<std::mutex> guard(s->mu);
+    s->ctx = ctx;
+    s->ssl = SSL_new(ctx);
+    BIO *bio = BIO_new(sockBioMethod());
+    BIO_set_data(bio, s);
+    SSL_set_bio(s->ssl, bio, bio);
+    SSL_set_app_data(s->ssl, s);
+    setBlocking(s->fd, false);
+}
+
+// nStartTLS(host, trusted, minVersion, timeout): the client's handshake.
+// trusted: an array of DER certificates; empty, the system decides.
+// "OK"; "TIMEOUT"; or "ERROR", text, name, number.
+RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxArrayObject, trusted,
+            CSTRING, minVersion, double, timeout)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    if (s->ssl != nullptr)
+    {
+        return errorArray(context, "TLS has already started on this connection", "", 0);
+    }
+    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+    SSL_CTX_set_min_proto_version(ctx, minVersionOf(minVersion));
+#ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
+    SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+#endif
+    SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+    size_t count = context->ArrayItems(trusted);
+    if (count > 0)
+    {
+        // Only these, and the host name: OpenSSL decides. A certificate
+        // that is not a root (a server's own) may be one of them.
+        X509_STORE *store = SSL_CTX_get_cert_store(ctx);
+        for (size_t i = 1; i <= count; i++)
+        {
+            RexxObjectPtr item = context->ArrayAt(trusted, i);
+            if (item == NULLOBJECT)
+            {
+                continue;
+            }
+            RexxStringObject der = context->ObjectToString(item);
+            const unsigned char *p = (const unsigned char *)context->StringData(der);
+            X509 *x = d2i_X509(nullptr, &p, (long)context->StringLength(der));
+            if (x != nullptr)
+            {
+                X509_STORE_add_cert(store, x);
+                X509_free(x);
+            }
+        }
+        X509_STORE_set_flags(store, X509_V_FLAG_PARTIAL_CHAIN);
+    }
+    else
+    {
+#if defined(__APPLE__) || defined(_WIN32)
+        SSL_CTX_set_cert_verify_callback(ctx, systemVerify, nullptr);
+#else
+        SSL_CTX_set_default_verify_paths(ctx);
+#endif
+    }
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
+
+    s->host = host;
+    s->trust = TrustError();
+    attachSsl(s, ctx);
+    {
+        std::lock_guard<std::mutex> guard(s->mu);
+        std::string h = s->host;
+        if (isAddress(h))
+        {
+            X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(s->ssl), h.substr(0, h.find('%')).c_str());
+        }
+        else
+        {
+            SSL_set_tlsext_host_name(s->ssl, h.c_str());   // SNI
+            SSL_set1_host(s->ssl, h.c_str());
+        }
+    }
+    bool hasDeadline = timeout >= 0;
+    TlsOutcome o = tlsRun(s, hasDeadline, deadlineFrom(hasDeadline ? timeout : 0),
+                          [](SSL *ssl) { return SSL_connect(ssl); });
+    if (o.status == TLS_OK)
+    {
+        return statusResult(context, "OK");
+    }
+    return handshakeFailure(context, s, o);
+}
+
+// nStartTLSServer(file, password, timeout): the server's handshake, with
+// the certificate and key in file (PKCS#12, or PEM with both).
+RexxMethod4(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file,
+            CSTRING, password, double, timeout)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    if (s->ssl != nullptr)
+    {
+        return errorArray(context, "TLS has already started on this connection", "", 0);
+    }
+    std::string data, why;
+    std::vector<X509 *> certs;
+    EVP_PKEY *key = nullptr;
+    if (!readFile(file, data, why) || !loadCertificates(data, password, certs, &key, why))
+    {
+        for (X509 *x : certs)
+        {
+            X509_free(x);
+        }
+        return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
+    }
+    if (key == nullptr)
+    {
+        for (X509 *x : certs)
+        {
+            X509_free(x);
+        }
+        return errorArray(context, "cannot use " + std::string(file) + ": no private key in the file", "", 0);
+    }
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+#ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
+    SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+#endif
+    SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+    bool ok = SSL_CTX_use_certificate(ctx, certs[0]) == 1 && SSL_CTX_use_PrivateKey(ctx, key) == 1;
+    for (size_t i = 1; ok && i < certs.size(); i++)
+    {
+        SSL_CTX_add_extra_chain_cert(ctx, certs[i]);   // takes it
+        certs[i] = nullptr;
+    }
+    unsigned long e = ERR_peek_last_error();
+    ERR_clear_error();
+    for (X509 *x : certs)
+    {
+        X509_free(x);
+    }
+    EVP_PKEY_free(key);
+    if (!ok)
+    {
+        SSL_CTX_free(ctx);
+        return errorArray(context, "cannot use " + std::string(file) + ": " + sslReason(e), "", 0);
+    }
+    s->trust = TrustError();
+    attachSsl(s, ctx);
+    bool hasDeadline = timeout >= 0;
+    TlsOutcome o = tlsRun(s, hasDeadline, deadlineFrom(hasDeadline ? timeout : 0),
+                          [](SSL *ssl) { return SSL_accept(ssl); });
+    if (o.status == TLS_OK)
+    {
+        return statusResult(context, "OK");
+    }
+    return handshakeFailure(context, s, o);
+}
+
+// nTLSInfo: "OK", protocol ("TLSv1.3"), cipher; "" and "" without TLS.
+RexxMethod1(RexxArrayObject, socket_tlsinfo, CSELF, cself)
+{
+    Sock *s = (Sock *)cself;
+    std::string protocol, cipher;
+    if (s != nullptr)
+    {
+        std::lock_guard<std::mutex> guard(s->mu);
+        if (s->ssl != nullptr)
+        {
+            protocol = SSL_get_version(s->ssl);
+            const char *c = SSL_get_cipher_name(s->ssl);
+            cipher = c != nullptr ? c : "";
+        }
+    }
+    RexxArrayObject r = context->NewArray(3);
+    context->ArrayAppendString(r, "OK", 2);
+    context->ArrayAppendString(r, protocol.c_str(), protocol.size());
+    context->ArrayAppendString(r, cipher.c_str(), cipher.size());
+    return r;
+}
+
+static bool isTls(Sock *s)
+{
+    std::lock_guard<std::mutex> guard(s->mu);
+    return s->ssl != nullptr;
+}
+
+static RexxArrayObject tlsRecv(RexxMethodContext *context, Sock *s, size_t max, double timeout)
+{
+    std::vector<char> buf(max);
+    size_t got = 0;
+    bool hasDeadline = timeout >= 0;
+    TlsOutcome o = tlsRun(s, hasDeadline, deadlineFrom(hasDeadline ? timeout : 0),
+                          [&](SSL *ssl) { return SSL_read_ex(ssl, buf.data(), max, &got); });
+    if (o.status == TLS_OK)
+    {
+        return statusResult(context, "OK", context->NewString(buf.data(), got));
+    }
+    return tlsIoResult(context, o);
+}
+
+static RexxArrayObject tlsSend(RexxMethodContext *context, Sock *s, const char *p, size_t left, double timeout)
+{
+    size_t sent = 0;
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    while (left > 0)
+    {
+        size_t n = 0;
+        TlsOutcome o = tlsRun(s, hasDeadline, deadline,
+                              [&](SSL *ssl) { return SSL_write_ex(ssl, p + sent, left, &n); });
+        if (o.status == TLS_TIMEOUT)
+        {
+            return statusResult(context, "TIMEOUT", context->StringSize(sent));
+        }
+        if (o.status == TLS_EOF)
+        {
+            o.status = TLS_SOCKET_ERROR;
+#ifdef _WIN32
+            o.socketError = WSAECONNRESET;
+#else
+            o.socketError = EPIPE;
+#endif
+        }
+        if (o.status != TLS_OK)
+        {
+            return tlsIoResult(context, o);
+        }
+        sent += n;
+        left -= n;
+    }
+    return statusResult(context, "OK", context->StringSize(sent));
 }
 
 
@@ -526,6 +1554,10 @@ RexxMethod3(RexxArrayObject, socket_recv, CSELF, cself, size_t, max, double, tim
     {
         max = 1;
     }
+    if (isTls(s))
+    {
+        return tlsRecv(context, s, max, timeout);
+    }
     if (timeout >= 0)
     {
         int err = 0;
@@ -571,6 +1603,10 @@ RexxMethod3(RexxArrayObject, socket_send, CSELF, cself, RexxStringObject, data, 
     }
     const char *p = context->StringData(data);
     size_t left = context->StringLength(data);
+    if (isTls(s))
+    {
+        return tlsSend(context, s, p, left, timeout);
+    }
     size_t sent = 0;
     bool hasDeadline = timeout >= 0;
     Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
@@ -640,6 +1676,14 @@ RexxMethod1(RexxArrayObject, socket_shutdown, CSELF, cself)
     {
         return closedResult(context);
     }
+    if (isTls(s))
+    {
+        // close_notify first: the peer reads the end of the stream from TLS.
+        std::lock_guard<std::mutex> guard(s->mu);
+        ERR_clear_error();
+        SSL_shutdown(s->ssl);
+        ERR_clear_error();
+    }
 #ifdef _WIN32
     int rc = shutdown(s->fd, SD_SEND);
 #else
@@ -667,6 +1711,14 @@ RexxMethod1(RexxObjectPtr, sock_free, CSELF, cself)
     if (s != nullptr)
     {
         closeSock(s);
+        if (s->ssl != nullptr)
+        {
+            SSL_free(s->ssl);
+        }
+        if (s->ctx != nullptr)
+        {
+            SSL_CTX_free(s->ctx);
+        }
         delete s;
         context->SetObjectVariable("CSELF", context->NewPointer(nullptr));
     }
@@ -930,6 +1982,10 @@ static RexxMethodEntry oosockets_methods[] =
     REXX_METHOD(sock_address,    sock_address),
     REXX_METHOD(server_listen,   server_listen),
     REXX_METHOD(server_accept,   server_accept),
+    REXX_METHOD(socket_starttls, socket_starttls),
+    REXX_METHOD(socket_starttls_server, socket_starttls_server),
+    REXX_METHOD(socket_tlsinfo,  socket_tlsinfo),
+    REXX_METHOD(tls_load_certificates, tls_load_certificates),
     REXX_LAST_METHOD()
 };
 

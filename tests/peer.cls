@@ -104,3 +104,96 @@ notready:
   c = srv~accept
   c~close
   return 0
+
+/* ---- TLS: the server's side (Socket~startTLSServer) ---------------------- */
+
+-- Accepts, makes the TLS handshake with the certificate in file (in
+-- tests/certs/), and echoes lines until "bye" or the end. Returns the lines
+-- it got; or, if the handshake fails, the message.
+::method tlsEcho unguarded
+  expose srv
+  use strict arg file = "server.pem", password = "test"
+  c = srv~accept
+  c~readTimeout = 10
+  signal on syntax
+  c~startTLSServer(certFile(file), password)
+  got = .array~new
+  signal on notready
+  loop
+    line = c~lineIn
+    got~append(line)
+    if line == "bye" then leave
+    c~lineOut(line)
+  end
+notready:
+  c~close
+  return got
+syntax:
+  c~close
+  return condition("o")~message
+
+-- Accepts, makes the TLS handshake, sends the bytes and closes.
+::method tlsSend unguarded
+  expose srv
+  use strict arg bytes, file = "server.pem", password = "test"
+  c = srv~accept
+  c~readTimeout = 10
+  c~startTLSServer(certFile(file), password)
+  c~charOut(bytes)
+  c~close
+  return 0
+
+-- Accepts, makes the TLS handshake, reads everything until the client
+-- shuts down its output, then sends back how many bytes it read, and
+-- closes. Returns what it read.
+::method tlsCollect unguarded
+  expose srv
+  c = srv~accept
+  c~readTimeout = 20
+  c~startTLSServer(certFile("server.pem"), "test")
+  data = .mutableBuffer~new
+  signal on notready
+  loop
+    data~append(c~read)
+  end
+notready:
+  c~lineOut(data~length)
+  c~close
+  return data~string
+
+-- A server that speaks in clear and then starts TLS when asked, as SMTP:
+-- "220 ready"; waits for "STARTTLS"; "220 go ahead"; the handshake; then
+-- echoes one line, and closes.
+::method startTLSEcho unguarded
+  expose srv
+  c = srv~accept
+  c~readTimeout = 10
+  c~lineOut("220 ready")
+  if c~lineIn \== "STARTTLS" then do
+    c~close
+    return "no STARTTLS"
+  end
+  c~lineOut("220 go ahead")
+  c~startTLSServer(certFile("server.pem"), "test")
+  c~lineOut(c~lineIn)
+  c~close
+  return 0
+
+-- Sends two lines in one write (as an attacker injecting a command after
+-- the server's reply would), then waits for the client to go away.
+::method twoLinesAtOnce unguarded
+  expose srv
+  c = srv~accept
+  c~readTimeout = 10
+  c~charOut("220 ready" || "0d0a"x || "INJECTED" || "0d0a"x)
+  signal on notready
+  c~read
+notready:
+  c~close
+  return 0
+
+
+-- The full path of a file in tests/certs/.
+::routine certFile public
+  use strict arg name
+  return filespec("location", .context~package~name) || "certs" || .file~separator || name

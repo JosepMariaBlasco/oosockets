@@ -35,7 +35,7 @@
 /*                                                                            */
 /*----------------------------------------------------------------------------*/
 
-/* sockets.cls: TCP sockets for ooRexx, IPv4 and IPv6.
+/* sockets.cls: TCP sockets for ooRexx, IPv4 and IPv6, with TLS.
 
    s = .Socket~new("localhost", 8888)      -- connects: IPv6 or IPv4
    s~lineOut("Hello")                      -- a socket is a Rexx stream
@@ -54,6 +54,8 @@
    are kept until the buffer fills, flush, close, or a read that has to
    wait (so a request is never left in the buffer while its reply is
    awaited).
+
+   s = .TLSSocket~new("www.example.com", 443)   -- certificate verified
 
    Strings are bytes, and so is the network: nothing is converted.      */
 
@@ -77,6 +79,9 @@
 ::method nFree     private external "LIBRARY oosockets sock_free"
 ::method nAddress  private unguarded external "LIBRARY oosockets sock_address"
 ::method nResolve  class private external "LIBRARY oosockets socket_resolve"
+::method nStartTLS private external "LIBRARY oosockets socket_starttls"
+::method nStartTLSServer private external "LIBRARY oosockets socket_starttls_server"
+::method nTLSInfo  private unguarded external "LIBRARY oosockets socket_tlsinfo"
 
 /* ---- class methods ------------------------------------------------------ */
 
@@ -94,16 +99,18 @@
     service name ("http"). connectTimeout in seconds (fractions allowed);
     without it, the system's. */
 ::method init
-  expose buffer atEnd closed st desc name lineEnd readTimeout writeTimeout
+  expose buffer atEnd closed st desc name lineEnd readTimeout writeTimeout peerHost peerPort tls
   self~init:super
   buffer = ""; atEnd = .false; closed = .false
   st = "READY"; desc = "READY:"
   lineEnd = "0d0a"x
   readTimeout = .nil; writeTimeout = .nil
+  tls = .false
 
   if arg() == 1, arg(1)~isA(.Pointer) then do  -- from ServerSocket~accept
     self~nAdopt(arg(1))
-    name = hostAndPort(self~remoteAddress, self~remotePort)
+    peerHost = self~remoteAddress; peerPort = self~remotePort
+    name = hostAndPort(peerHost, peerPort)
     return
   end
 
@@ -120,6 +127,7 @@
   if timeout == .nil then timeout = -1
 
   name = hostAndPort(host, port)
+  peerHost = host; peerPort = port
   r = self~nConnect(host, port, timeout)
   select
     when r[1] == "OK" then nop
@@ -389,12 +397,94 @@
     raise notready description(name) additional(self)
   end
 
+/* ---- TLS ---------------------------------------------------------------- */
+
+/** startTLS([host [, options]]): TLS on this connection from now on (what
+    SMTP, IMAP or FTP do after STARTTLS). host is the name the server's
+    certificate must have; without it, the host this socket was made with.
+    options: a TLSOptions. The handshake waits at most readTimeout. Not
+    making it is a SYNTAX condition, 48.900, and the socket is closed. */
+::method startTLS
+  expose peerHost readTimeout
+  use strict arg host = .nil, options = .nil
+  if host == .nil then host = peerHost
+  self~handshake(host~string, options, readTimeout, "Socket~startTLS")
+  return self
+
+/** .true once TLS has started (TLSSocket, or startTLS). */
+::method secure unguarded
+  expose tls
+  return tls
+
+/** The TLS protocol in use ("TLSv1.3", "TLSv1.2"); "" without TLS. */
+::method protocol unguarded
+  return self~nTLSInfo[2]
+
+/** The TLS cipher suite in use ("TLS_AES_256_GCM_SHA384"); "" without TLS. */
+::method cipher unguarded
+  return self~nTLSInfo[3]
+
+/* Provisional, until TLSServerSocket: the server's side of the handshake,
+   with the certificate and its key in file (PKCS#12 with its password, or
+   PEM with both). The tests use it. */
+::method startTLSServer
+  expose tls closed st desc peerHost peerPort readTimeout
+  use strict arg file, password = ""
+  timeout = readTimeout
+  if timeout == .nil then timeout = -1
+  r = self~nStartTLSServer(file~string, password~string, timeout)
+  if r[1] == "OK" then do
+    tls = .true
+    return self
+  end
+  self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
+  where = "(" || peerHost || ", port" peerPort")"
+  if r[1] == "TIMEOUT" then
+    raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
+  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
+
 /** host:port, as given or as accepted ("[::1]:8888" for IPv6). */
 ::method string unguarded
   expose name
   return name
 
 /* ---- private ------------------------------------------------------------ */
+
+-- The client's side of the TLS handshake. timeout: .nil, as long as it
+-- takes. On failure the socket is closed and a SYNTAX condition raised.
+::method handshake private
+  expose buffer closed st desc peerPort tls
+  use arg host, options, timeout, who
+  if options \== .nil, \options~isA(.TLSOptions) then
+    raise syntax 88.900 array(who": options must be a TLSOptions; found" options)
+  where = "(" || host || ", port" peerPort")"
+  if tls then
+    raise syntax 48.900 array("TLS error: TLS has already started on this connection" where, "", 0)
+  if closed then
+    raise syntax 48.900 array("TLS error: the socket is closed" where, "EBADF", 0)
+  if \self~sendKept then
+    raise syntax 48.900 array("TLS error: what was kept to send could not be sent" where, "", 0)
+  if buffer \== "" then do
+    -- Bytes that came before the handshake, in clear, would be taken as
+    -- if they had come over TLS (the STARTTLS injection attacks).
+    self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
+    raise syntax 48.900 array("TLS error: data arrived before the TLS handshake" where, "", 0)
+  end
+  trusted = .array~new; minVersion = "1.2"
+  if options \== .nil then do
+    trusted = options~trusted
+    minVersion = options~minVersion
+  end
+  if timeout == .nil then timeout = -1
+  r = self~nStartTLS(host, trusted, minVersion, timeout)
+  if r[1] == "OK" then do
+    tls = .true
+    return
+  end
+  self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
+  if r[1] == "TIMEOUT" then
+    raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
+  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
 
 -- Reads what arrives into the buffer. "OK", "EOF", "TIMEOUT" or "ERROR";
 -- the state is set for the last three (but not for a poll, timeout 0).
@@ -541,6 +631,85 @@
 ::attribute keepSize set private
   expose keepSize
   use arg keepSize
+
+
+/*============================================================================*/
+/* TLSSocket: a Socket over TLS                                               */
+/*============================================================================*/
+
+/* new(host, port [, options [, connectTimeout]]): connects, and makes the
+   TLS handshake. The server's certificate must be good for host: the
+   system decides (its trusted roots, its rules), unless options trust
+   certificates explicitly; then only those count. There is no way to turn
+   verification off. Not making the connection is a SYNTAX condition,
+   48.900: "TLS error: certificate has expired (expired.badssl.com, port
+   443)". connectTimeout, in seconds, covers the connection and the
+   handshake together.
+
+   Once connected, a TLSSocket is a Socket: the same methods, the same
+   NOTREADY. A peer that closes without TLS's own close (close_notify) is
+   taken as the end of the stream, as most HTTP servers do it.          */
+
+::class TLSSocket public subclass Socket
+
+::method init
+  use strict arg host, port, options = .nil, connectTimeout = .nil
+  if options \== .nil, \options~isA(.TLSOptions) then
+    raise syntax 88.900 array("TLSSocket~new: options must be a TLSOptions; found" options)
+  timeout = checkTimeout(connectTimeout, "TLSSocket~new", "connectTimeout")
+  started = .DateTime~new
+  self~init:super(host, port, timeout)
+  if timeout \== .nil then
+    timeout = max(0, timeout - (.DateTime~new - started)~totalSeconds)
+  self~handshake(host~string, options, timeout, "TLSSocket~new")
+
+
+/*============================================================================*/
+/* TLSOptions: optional settings for TLS                                      */
+/*============================================================================*/
+
+/*   opts = .TLSOptions~new~trust("mySrv.pem")
+     s = .TLSSocket~new("localhost", 9999, opts)
+
+   Nothing in it turns verification off.                                */
+
+::class TLSOptions public
+
+::method nLoad private external "LIBRARY oosockets tls_load_certificates"
+
+::method init
+  expose trusted minVersion
+  trusted = .array~new
+  minVersion = "1.2"
+
+/** trust(file [, password]): trusts the certificates in file (PEM, DER, or
+    a PKCS#12 keystore with its password, as Java's keytool makes them),
+    and from then on only the certificates trusted so: the system's roots
+    no longer count. May be called more than once. Returns the TLSOptions.
+    A file that cannot be used is a SYNTAX condition, 48.900. */
+::method trust
+  expose trusted
+  use strict arg file, password = ""
+  r = self~nLoad(file~string, password~string)
+  if r[1] \== "OK" then
+    raise syntax 48.900 array("TLS error: cannot use" file~string":" r[2], r[3], r[4])
+  trusted~appendAll(r[2])
+  return self
+
+/** The certificates trusted, as an array of DER strings (a copy). */
+::method trusted
+  expose trusted
+  return trusted~copy
+
+/** The oldest TLS version accepted: "1.2" (the default) or "1.3". */
+::attribute minVersion get
+::attribute minVersion set
+  expose minVersion
+  use strict arg value
+  value = value~string
+  if value \== "1.2", value \== "1.3" then
+    raise syntax 88.900 array("TLSOptions~minVersion=: the value must be ""1.2"" or ""1.3""; found" value)
+  minVersion = value
 
 
 /*============================================================================*/
