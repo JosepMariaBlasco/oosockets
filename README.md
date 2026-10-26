@@ -1,12 +1,12 @@
 # ooSockets
 
 Object oriented TCP/IP sockets for [ooRexx](https://www.oorexx.org/):
-IPv4 and IPv6, sockets that are Rexx streams, and (to come) TLS through
-the operating system.
+IPv4 and IPv6, sockets that are Rexx streams, and TLS with the operating
+system deciding which certificates to trust.
 
-> **Status: prototype.** The plain TCP classes work and are tested on
-> Linux, macOS and Windows; TLS and UDP are not written yet. Names and
-> behaviour may still change until 1.0.
+> **Status: prototype.** The TCP classes and the TLS client work and are
+> tested on Linux, macOS and Windows; the TLS server and UDP are not
+> written yet. Names and behaviour may still change until 1.0.
 
 ```rexx
 s = .Socket~new("localhost", 8888)        -- IPv6 or IPv4, whichever answers
@@ -57,13 +57,77 @@ client~close; srv~close
   through a namespace (`::requires "sockets.cls" namespace oo`, then
   `oo:Socket`).
 
+## TLS
+
+```rexx
+s = .TLSSocket~new("www.example.com", 443)  -- the certificate is verified
+s~lineOut("HEAD / HTTP/1.1")
+s~lineOut("Host: www.example.com")
+s~lineOut("Connection: close")
+s~lineOut("")
+say s~lineIn                                -- HTTP/1.1 200 OK
+s~close
+::requires "sockets.cls"
+```
+
+- A `TLSSocket` is a `Socket`: the same methods, the same NOTREADY.
+  `.TLSSocket~new(host, port [, options [, connectTimeout]])`;
+  `connectTimeout` covers the connection and the TLS handshake together.
+- **The certificate is always verified**, and there is no way to turn
+  that off. The operating system decides whether it is good: its trusted
+  roots, its rules (macOS: `SecTrustEvaluateWithError`; Windows:
+  `CertVerifyCertificateChainPolicy`; Linux: OpenSSL with the system's
+  certificate store). A certificate that does not verify is a SYNTAX
+  condition, 48.900: `TLS error: certificate has expired
+  (expired.badssl.com, port 443)`. The common reasons read the same on
+  the three systems (*certificate has expired*, *certificate does not
+  match the host name*, *certificate is not trusted*); the system's own
+  name and number follow in `condition("A")`.
+- **A server with its own certificate** (a test server, a classroom
+  one): trust that certificate explicitly. Then only the certificates
+  trusted so count, the system's roots do not, and OpenSSL checks them
+  (with the host name) the same way on every system:
+
+  ```rexx
+  opts = .TLSOptions~new~trust("mySrvKeystore.p12", "123456")
+  s = .TLSSocket~new("localhost", 9999, opts)
+  ```
+
+  `trust` takes PEM, DER, or a PKCS#12 keystore with its password, as
+  Java's `keytool` makes them (`keytool -genkeypair -alias mysrv -keyalg
+  RSA -dname "CN=localhost" -ext "SAN=dns:localhost,ip:127.0.0.1,ip:::1"
+  -keystore mySrvKeystore.p12 -storepass 123456`). `minVersion`: `"1.2"`
+  (the default) or `"1.3"`.
+- **STARTTLS**: `s~startTLS([host [, options]])` turns a plain `Socket`
+  into a TLS one in place, for the protocols that start in clear (SMTP,
+  IMAP, FTP). Bytes that arrived in clear before the handshake are
+  refused (they would be taken as if they had come over TLS).
+- `secure` (`.true` once TLS has started), `protocol` (`"TLSv1.3"`),
+  `cipher`.
+- A peer that closes the connection without TLS's own closing message
+  (`close_notify`), as many HTTP servers do, is taken as the end of the
+  stream.
+- **Revocation is not checked** (as in Java and .NET, by default). macOS
+  checks it on its own, as best it can, and may refuse a revoked
+  certificate; Linux and Windows do not.
+- Underneath, OpenSSL does the TLS on the three systems: the system's on
+  Linux, and on macOS and Windows linked statically into the library
+  (neither system ships it), so there is nothing else to install.
+
 ## Building
 
-Needs CMake, a C++11 compiler and an installed ooRexx 5.x (the family of
-projects this belongs to uses trunk r13297, see `scripts/oorexx-version.sh`).
+Needs CMake, a C++11 compiler, an installed ooRexx 5.x (the family of
+projects this belongs to uses trunk r13297, see `scripts/oorexx-version.sh`)
+and OpenSSL 3: on Linux the system's development package (`libssl-dev`);
+on macOS Homebrew's `openssl@3`; on Windows vcpkg's
+`openssl:x64-windows-static-md` (`.github/workflows/ci.yml` has the
+details).
 
 ```sh
 cmake -S . -B build -DOOREXX_HOME=/usr/local     # where include/oorexxapi.h is
+#   macOS:   -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
+#   Windows: -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
+#            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
 cmake --build build --config Release
 ```
 
@@ -79,7 +143,10 @@ scripts/test.sh            # fetches ooRexxUnit the first time
 ```
 
 The tests use ooRexxUnit, ooRexx's own test framework, from ooRexx's test
-suite at the revision in `scripts/oorexx-version.sh`.
+suite at the revision in `scripts/oorexx-version.sh`. The TLS tests use
+the certificates in `tests/certs/` (made by `scripts/make-test-certs.sh`);
+those that need real servers (badssl.com) run only with
+`OOSOCKETS_ONLINE=1`, as the CI does.
 
 ## Licence
 
