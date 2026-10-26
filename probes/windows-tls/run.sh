@@ -30,8 +30,13 @@ done
 
 echo; echo "######## local servers, TLS 1.3 only, five kinds of certificate, trusted explicitly"
 O=openssl                     # Git for Windows' own
-$O version
-KT="$JAVA_HOME/bin/keytool"; "$KT" -version 2>&1 | head -1 || true
+$O version | head -1
+# keytool: the runner's default JDK (JAVA_HOME may not be set).
+KT="$(command -v keytool || true)"
+for j in "${JAVA_HOME:-}" "${JAVA_HOME_21_X64:-}" "${JAVA_HOME_17_X64:-}"; do
+  [ -z "$KT" ] && [ -n "$j" ] && [ -x "$j/bin/keytool.exe" ] && KT="$j/bin/keytool.exe"
+done
+echo "keytool: $KT"; java -version 2>&1 | head -1
 export MSYS_NO_PATHCONV=1     # keep -subj /CN=... as it is
 $O req -x509 -newkey rsa:2048 -nodes -keyout k1.pem -out c1.pem -days 30 -subj /CN=localhost \
    -addext subjectAltName=DNS:localhost 2>/dev/null
@@ -39,7 +44,7 @@ $O req -x509 -newkey rsa:2048 -nodes -keyout k2.pem -out c2.pem -days 30 -subj /
    -addext subjectAltName=DNS:localhost -addext extendedKeyUsage=serverAuth \
    -addext basicConstraints=critical,CA:FALSE 2>/dev/null
 kt() { "$KT" -genkeypair -alias mysrv -keyalg RSA -dname "CN=localhost" -ext "SAN=dns:localhost,ip:127.0.0.1,ip:::1" \
-         -validity "$2" -keystore ks$1.p12 -storepass 123456 "${@:3}" 2>/dev/null
+         -validity "$2" -keystore ks$1.p12 -storepass 123456 "${@:3}" 2>&1 | grep -v -i "generating" 
        $O pkcs12 -in ks$1.p12 -passin pass:123456 -nodes -nocerts -out k$1.pem 2>/dev/null
        $O pkcs12 -in ks$1.p12 -passin pass:123456 -nokeys -clcerts -out c$1.pem 2>/dev/null; }
 kt 3 30                       # the line sent to Rony on 25/10 (validity shortened)
