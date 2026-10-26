@@ -97,3 +97,12 @@ OpenSSL, linked statically, does the TLS on macOS. Trust:
   the program names the one certificate it trusts, and without them the
   same keytool certificate works on every system (rows 1–5 above: all OK
   with OpenSSL).
+
+## Revocation: decision (26/10/2026)
+
+`TLSSocket` does not ask for revocation checking on any system, as Java
+(`com.sun.net.ssl.checkRevocation` unset) and .NET
+(`CertificateRevocationCheckMode` = `NoCheck`) by default. macOS may
+still refuse a revoked certificate on its own (above); that is the
+system's, and is documented. An option to ask for it can be added later
+if someone needs it (it would only take effect on Windows).
