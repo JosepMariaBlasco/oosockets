@@ -31,12 +31,13 @@ done
 echo; echo "######## local servers, TLS 1.3 only, five kinds of certificate, trusted explicitly"
 O=openssl                     # Git for Windows' own
 $O version | head -1
-# keytool: the runner's default JDK (JAVA_HOME may not be set).
-KT="$(command -v keytool || true)"
-for j in "${JAVA_HOME:-}" "${JAVA_HOME_21_X64:-}" "${JAVA_HOME_17_X64:-}"; do
+# keytool: a recent JDK (the default on PATH may be Java 8's, which makes
+# JKS keystores and prompts for the key password).
+KT=""
+for j in "${JAVA_HOME_21_X64:-}" "${JAVA_HOME_17_X64:-}" "${JAVA_HOME:-}"; do
   [ -z "$KT" ] && [ -n "$j" ] && [ -x "$j/bin/keytool.exe" ] && KT="$j/bin/keytool.exe"
 done
-echo "keytool: $KT"; java -version 2>&1 | head -1
+echo "keytool: $KT"; "$(dirname "$KT")/java" -version 2>&1 | head -1
 export MSYS_NO_PATHCONV=1     # keep -subj /CN=... as it is
 $O req -x509 -newkey rsa:2048 -nodes -keyout k1.pem -out c1.pem -days 30 -subj /CN=localhost \
    -addext subjectAltName=DNS:localhost 2>/dev/null
