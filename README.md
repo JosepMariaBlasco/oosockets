@@ -1,12 +1,12 @@
 # ooSockets
 
 Object oriented TCP/IP sockets for [ooRexx](https://www.oorexx.org/):
-IPv4 and IPv6, sockets that are Rexx streams, and TLS with the operating
-system deciding which certificates to trust.
+IPv4 and IPv6, sockets that are Rexx streams, TLS with the operating
+system deciding which certificates to trust, and UDP.
 
-> **Status: prototype.** The TCP classes, the TLS client and the TLS
-> server work and are tested on Linux, macOS and Windows; UDP is not
-> written yet. Names and behaviour may still change until 1.0.
+> **Status: prototype.** The TCP classes, the TLS client, the TLS
+> server and UDP work and are tested on Linux, macOS and Windows. Names
+> and behaviour may still change until 1.0.
 
 ```rexx
 s = .Socket~new("localhost", 8888)        -- IPv6 or IPv4, whichever answers
@@ -189,6 +189,58 @@ samples worked with such a keystore as `keyStore` and as `trustStore`
   keystore can be converted: `keytool -importkeystore -srckeystore
   old.jks -destkeystore new.p12 -deststoretype pkcs12`. Its certificate
   may still be refused (expired, RSA 1024, SHA-1, no SAN).
+
+## UDP
+
+A `DatagramSocket` is not a stream: each `send` is one datagram, which
+arrives whole or not at all, and `receive` returns the next one with who
+sent it.
+
+```rexx
+s = .DatagramSocket~new(5000)             -- every address, IPv6 and IPv4
+loop
+  d = s~receive                           -- waits; returns a .Datagram
+  say "From" d~address":"d~port":" d~data
+  s~send(d~data~upper, d~address, d~port) -- the answer, to its sender
+end
+::requires "sockets.cls"
+```
+
+```rexx
+c = .DatagramSocket~new                   -- a port the system chooses
+c~receiveTimeout = 2
+c~send("hello", "localhost", 5000)
+d = c~receive
+if d == .nil then say "No answer in 2 seconds"
+             else say d                   -- HELLO (a Datagram's string is its data)
+::requires "sockets.cls"
+```
+
+- `.DatagramSocket~new([port [, address]])`: without a port (or with 0),
+  one the system chooses (`localPort`); without an address, every
+  address, IPv6 and IPv4 (IPv4 senders read as `127.0.0.1`, not
+  `::ffff:127.0.0.1`).
+- `send(data, host, port)`: one datagram. The host, a name or an
+  address, is resolved on every send; a name with IPv4 and IPv6 addresses
+  (`localhost`) is sent to over IPv4 when the socket can (as Java does by
+  default: UDP cannot try the next address, as TCP does, when nobody
+  answers). Up to 65,507 bytes over IPv4 (65,527 over IPv6); more is an
+  error, `message too long`. Nothing says whether a datagram arrived.
+- `receive` returns a `Datagram` (`data`, `address`, `port`); a datagram
+  is never truncated. With a `receiveTimeout` (seconds, `.nil` by
+  default) that expires, `receive` returns `.nil`.
+- `connect(host, port)`: from then on `send(data)` goes there and only
+  its datagrams are received (`remoteAddress`, `remotePort`). A datagram
+  sent to a port where nobody listens can then make the next `receive`
+  fail with `connection refused`; without `connect`, nothing is said, on
+  the three systems (Windows would say it, and ooSockets asks it not to).
+- `broadcast = .true` allows sending to broadcast addresses.
+- Every error is a SYNTAX condition, **48.900**: `Socket error: unknown
+  host (no-such-host.invalid, port 5000)`. There is no NOTREADY: there
+  is no stream, and no connection to lose.
+- `close` from another activity ends a `receive` waiting there (48.900,
+  `the datagram socket is closed`).
+- Not supported yet: multicast; DTLS (TLS over UDP).
 
 ## Building
 

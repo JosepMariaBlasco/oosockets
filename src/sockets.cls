@@ -35,7 +35,7 @@
 /*                                                                            */
 /*----------------------------------------------------------------------------*/
 
-/* sockets.cls: TCP sockets for ooRexx, IPv4 and IPv6, with TLS.
+/* sockets.cls: TCP and UDP sockets for ooRexx, IPv4 and IPv6, with TLS.
 
    s = .Socket~new("localhost", 8888)      -- connects: IPv6 or IPv4
    s~lineOut("Hello")                      -- a socket is a Rexx stream
@@ -57,6 +57,10 @@
 
    s = .TLSSocket~new("www.example.com", 443)   -- certificate verified
    srv = .TLSServerSocket~new(9999, .TLSOptions~new~certificate("srv.p12", "pw"))
+
+   u = .DatagramSocket~new                 -- UDP: datagrams, not a stream
+   u~send("ping", "localhost", 5000)
+   d = u~receive                           -- a .Datagram: data, address, port
 
    Strings are bytes, and so is the network: nothing is converted.      */
 
@@ -875,6 +879,209 @@
 
 
 /*============================================================================*/
+/* DatagramSocket: a UDP socket                                               */
+/*============================================================================*/
+
+/* Not a stream: each send is one datagram, which arrives whole or not at
+   all, and receive returns the next one with who sent it.
+
+   s = .DatagramSocket~new(5000)            -- every address, IPv6 and IPv4
+   d = s~receive                            -- waits; a .Datagram
+   s~send(d~data~upper, d~address, d~port)  -- an answer to its sender
+
+   Every error is a SYNTAX condition, 48.900:
+     "Socket error: message too long (localhost, port 5000)".          */
+
+::class DatagramSocket public
+
+::method nOpen      private external "LIBRARY oosockets udp_open"
+::method nConnect   private external "LIBRARY oosockets udp_connect"
+::method nSend      private unguarded external "LIBRARY oosockets udp_send"
+::method nReceive   private unguarded external "LIBRARY oosockets udp_receive"
+::method nBroadcast private unguarded external "LIBRARY oosockets udp_broadcast"
+::method nClose     private unguarded external "LIBRARY oosockets sock_close"
+::method nFree      private external "LIBRARY oosockets sock_free"
+::method nAddress   private unguarded external "LIBRARY oosockets sock_address"
+
+/** new([port [, address]]): a UDP socket on port (without it, or 0, one
+    the system chooses: see localPort). Without an address, on every
+    address, IPv6 and IPv4. */
+::method init
+  expose port closed peer receiveTimeout
+  use strict arg port = 0, address = ""
+  port = port~string; address = address~string
+  if \port~dataType("W") then
+    raise syntax 88.900 array("DatagramSocket~new: the port must be a whole number; found" port)
+  if port < 0 | port > 65535 then
+    raise syntax 88.900 array("DatagramSocket~new: the port must be between 0 and 65535; found" port)
+  port = port + 0
+  closed = .false; peer = .nil; receiveTimeout = .nil
+  r = self~nOpen(port, address)
+  if r[1] \== "OK" then do
+    where = "port" port
+    if address \== "" then where = address || "," where
+    raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4])
+  end
+  if port == 0 then port = self~localPort
+
+::method uninit
+  self~nFree
+
+/** send(data, host, port): data as one datagram to host (a name or an
+    address) and port. On a connected socket, send(data). */
+::method send unguarded
+  expose peer
+  if peer == .nil then do
+    use strict arg data, host, port
+    host = host~string
+    if host == "" then
+      raise syntax 88.900 array("DatagramSocket~send: the host must not be empty")
+    port = checkPort(port, "DatagramSocket~send")
+  end
+  else do
+    if arg() > 1 then
+      raise syntax 88.900 array("DatagramSocket~send: the socket is connected to" hostAndPort(peer[1], peer[2]) || "; send takes only the data")
+    use strict arg data
+    host = ""; port = ""
+  end
+  self~checkOpen
+  r = self~nSend(data~string, host, port)
+  if r[1] == "OK" then return
+  self~raiseError(r, host, port)
+
+/** receive: waits for the next datagram and returns it as a .Datagram.
+    With a receiveTimeout that expires, returns .nil. */
+::method receive unguarded
+  expose receiveTimeout
+  self~checkOpen
+  timeout = receiveTimeout
+  if timeout == .nil then timeout = -1
+  r = self~nReceive(timeout)
+  select
+    when r[1] == "OK" then return .Datagram~new(r[2], r[3], r[4])
+    when r[1] == "TIMEOUT" then return .nil
+    otherwise self~raiseError(r, "", "")
+  end
+
+/** connect(host, port): from now on send(data) goes there, and only its
+    datagrams are received. A datagram to a port where nobody listens can
+    then make the next receive (or send) fail with "connection refused". */
+::method connect
+  expose peer
+  use strict arg host, port
+  host = host~string
+  if host == "" then
+    raise syntax 88.900 array("DatagramSocket~connect: the host must not be empty")
+  port = checkPort(port, "DatagramSocket~connect")
+  self~checkOpen
+  r = self~nConnect(host, port)
+  if r[1] \== "OK" then self~raiseError(r, host, port)
+  peer = .array~of(host, port)
+
+/** .true once connect has been made. */
+::method connected unguarded
+  expose peer
+  return peer \== .nil
+
+::method close unguarded
+  expose closed
+  self~nClose
+  closed = .true
+
+/** Seconds receive may wait; .nil, the default: as long as it takes. */
+::attribute receiveTimeout get unguarded
+::attribute receiveTimeout set unguarded
+  expose receiveTimeout
+  use strict arg value
+  receiveTimeout = checkTimeout(value, "DatagramSocket~receiveTimeout=", "value")
+
+/** .true when datagrams may be sent to broadcast addresses
+    (255.255.255.255, or a network's own); .false, the default. */
+::attribute broadcast get unguarded
+  r = self~nBroadcast(-1)
+  if r[1] == "OK" then return r[2] == 1
+  return .false
+::attribute broadcast set unguarded
+  use strict arg value
+  if value \== .true & value \== .false then
+    raise syntax 88.900 array("DatagramSocket~broadcast=: the value must be .true or .false; found" value)
+  self~checkOpen
+  r = self~nBroadcast(value)
+  if r[1] \== "OK" then self~raiseError(r, "", "")
+
+::method localAddress unguarded
+  r = self~nAddress("L")
+  if r[1] == "OK" then return r[2]
+  return ""
+
+::method localPort unguarded
+  r = self~nAddress("L")
+  if r[1] == "OK" then return r[3]
+  return 0
+
+/** The connected peer's address and port ("" and 0 if not connected). */
+::method remoteAddress unguarded
+  r = self~nAddress("R")
+  if r[1] == "OK" then return r[2]
+  return ""
+
+::method remotePort unguarded
+  r = self~nAddress("R")
+  if r[1] == "OK" then return r[3]
+  return 0
+
+::method string unguarded
+  expose port
+  return "a DatagramSocket on port" port
+
+::method checkOpen private unguarded
+  expose closed port
+  if closed then
+    raise syntax 48.900 array("Socket error: the datagram socket is closed (port" port")", "EBADF", 0)
+
+-- 48.900 for a failure; where is host and port, the connected peer's, or
+-- this socket's own port.
+::method raiseError private unguarded
+  expose closed port peer
+  use arg r, host, port2
+  if closed then
+    raise syntax 48.900 array("Socket error: the datagram socket is closed (port" port")", "EBADF", 0)
+  select
+    when host \== "" then where = host || ", port" port2
+    when peer \== .nil then where = peer[1] || ", port" peer[2]
+    otherwise where = "port" port
+  end
+  raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4])
+
+
+/*============================================================================*/
+/* Datagram: what DatagramSocket~receive returns                              */
+/*============================================================================*/
+
+::class Datagram public
+
+/** new(data, address, port) */
+::method init
+  expose data address port
+  use strict arg data, address, port
+
+/** The bytes received. */
+::attribute data get
+/** Who sent them: an address (IPv4 as "127.0.0.1", IPv6 as "::1") and a port. */
+::attribute address get
+::attribute port get
+
+/** The data, so that say d shows it. */
+::method string
+  expose data
+  return data
+
+::method makeString
+  expose data
+  return data
+
+
+/*============================================================================*/
 /* Helpers                                                                    */
 /*============================================================================*/
 
@@ -888,6 +1095,16 @@
   if identity == .nil then
     raise syntax 88.900 array(who": options must have the server's certificate (TLSOptions~certificate)")
   return identity
+
+-- A port: a whole number 0..65535, or a service name ("domain").
+::routine checkPort
+  use arg port, who
+  port = port~string
+  if port == "" then raise syntax 88.900 array(who": the port must not be empty")
+  if \port~dataType("W") then return port
+  if port < 0 | port > 65535 then
+    raise syntax 88.900 array(who": the port must be between 0 and 65535; found" port)
+  return port + 0
 
 -- .nil, or a non-negative number of seconds.
 ::routine checkTimeout

@@ -39,7 +39,7 @@
  * oosockets: the native layer of sockets.cls.
  *
  * Deliberately small. It opens, connects, listens, accepts, sends and
- * receives bytes, with optional timeouts, on IPv4 and IPv6, on Linux,
+ * receives bytes (and UDP datagrams), with optional timeouts, on IPv4 and IPv6, on Linux,
  * macOS and Windows. Everything a Rexx programmer sees (streams, lines,
  * NOTREADY, SYNTAX 48.900 and its message) is done in sockets.cls.
  *
@@ -63,6 +63,7 @@
 #include <cerrno>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 #ifdef _WIN32
   #ifndef WIN32_LEAN_AND_MEAN
@@ -72,6 +73,10 @@
   #include <ws2tcpip.h>
   #include <windows.h>
   #include <wincrypt.h>                    // before OpenSSL, which undoes its X509_NAME
+  #include <mstcpip.h>
+  #ifndef SIO_UDP_CONNRESET
+    #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+  #endif
   typedef SOCKET sock_t;
   typedef int socklen_type;
   #define BAD_SOCKET INVALID_SOCKET
@@ -139,6 +144,9 @@ struct Sock
     int ioError = 0;             // the last socket error the BIO met
     std::string host;            // the name verified (client)
     TrustError trust;            // why the system refused the certificate
+    std::atomic<bool> closing{false};  // close has started (UDP: a recv it
+                                       // wakes must not read as a datagram)
+    bool connected = false;      // UDP: connect was made
     Sock(sock_t f) : fd(f) { }
 };
 
@@ -174,6 +182,7 @@ static ErrInfo errInfo(int code)
         case WSAEAFNOSUPPORT:  return {"EAFNOSUPPORT",  "address family not supported"};
         case WSAENOTSOCK:      return {"ENOTSOCK",      "socket is closed"};
         case WSAEINVAL:        return {"EINVAL",        "invalid argument"};
+        case WSAEMSGSIZE:      return {"EMSGSIZE",      "message too long"};
     }
 #else
     switch (code)
@@ -193,6 +202,7 @@ static ErrInfo errInfo(int code)
         case EBADF:         return {"EBADF",         "socket is closed"};
         case ENOTSOCK:      return {"ENOTSOCK",      "socket is closed"};
         case EINVAL:        return {"EINVAL",        "invalid argument"};
+        case EMSGSIZE:      return {"EMSGSIZE",      "message too long"};
     }
 #endif
     return {"", nullptr};
@@ -435,6 +445,7 @@ static void closeSock(Sock *s)
     {
         return;
     }
+    s->closing = true;
     std::lock_guard<std::mutex> guard(s->mu);
     if (s->fd != BAD_SOCKET)
     {
@@ -2066,6 +2077,408 @@ RexxMethod2(RexxArrayObject, server_accept, CSELF, cself, double, timeout)
 
 
 /*----------------------------------------------------------------------------*/
+/* DatagramSocket (UDP)                                                       */
+/*                                                                            */
+/* One socket, bound at creation. Without an address, IPv6 and IPv4 on one    */
+/* socket (IPv4 only where there is no IPv6), as ServerSocket. A host to      */
+/* send to is resolved on every send; when it has IPv4 and IPv6 addresses,    */
+/* IPv4 is used if the socket takes it (as Java does by default), since UDP,  */
+/* unlike TCP, cannot try the next address when nobody answers.              */
+/*----------------------------------------------------------------------------*/
+
+// Windows reports an ICMP "port unreachable" as WSAECONNRESET on the next
+// recvfrom, even on a socket that is not connected, where Linux and macOS
+// say nothing: off until connect, which turns it on (so that "connection
+// refused" is seen, as on the other two).
+static void connReset(sock_t fd, bool on)
+{
+#ifdef _WIN32
+    BOOL value = on ? TRUE : FALSE;
+    DWORD bytes = 0;
+    WSAIoctl(fd, SIO_UDP_CONNRESET, &value, sizeof(value), nullptr, 0, &bytes, nullptr, nullptr);
+#else
+    (void)fd;
+    (void)on;
+#endif
+}
+
+// A datagram of up to 65507 bytes (IPv4's maximum) must be able to go
+// out and come in: macOS limits a datagram to the send buffer (9216
+// bytes by default).
+static void datagramBuffers(sock_t fd)
+{
+    int want = 2 * 65536;
+    int opts[2] = {SO_SNDBUF, SO_RCVBUF};
+    for (int opt : opts)
+    {
+        int size = 0;
+        socklen_type len = sizeof(size);
+        if (getsockopt(fd, SOL_SOCKET, opt, (char *)&size, &len) == 0 && size < want)
+        {
+            setsockopt(fd, SOL_SOCKET, opt, (const char *)&want, sizeof(want));
+        }
+    }
+}
+
+static int bindDatagram(sock_t fd, const struct sockaddr *sa, socklen_type len)
+{
+#ifdef _WIN32
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&one, sizeof(one));
+#endif
+    // No SO_REUSEADDR: for UDP it would let a second socket take the port.
+    if (bind(fd, sa, len) != 0)
+    {
+        return lastError();
+    }
+    return 0;
+}
+
+static RexxArrayObject datagramOpened(RexxMethodContext *context, sock_t fd)
+{
+    datagramBuffers(fd);
+    connReset(fd, false);
+    setCself(context, new Sock(fd));
+    return statusResult(context, "OK");
+}
+
+// nOpen(port, address): address "" means every address.
+RexxMethod2(RexxArrayObject, udp_open, CSTRING, port, CSTRING, address)
+{
+    if (address[0] == '\0')
+    {
+        int portNumber = atoi(port);
+        sock_t fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+        if (fd != BAD_SOCKET)
+        {
+            prepareSocket(fd);
+            int zero = 0;
+            setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&zero, sizeof(zero));
+            struct sockaddr_in6 sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.sin6_family = AF_INET6;
+            sa.sin6_addr = in6addr_any;
+            sa.sin6_port = htons((unsigned short)portNumber);
+            int err = bindDatagram(fd, (struct sockaddr *)&sa, sizeof(sa));
+            if (err == 0)
+            {
+                return datagramOpened(context, fd);
+            }
+            closesock(fd);
+#ifdef _WIN32
+            if (err == WSAEADDRINUSE || err == WSAEACCES)
+#else
+            if (err == EADDRINUSE || err == EACCES)
+#endif
+            {
+                return errorResult(context, err);
+            }
+        }
+        fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (fd == BAD_SOCKET)
+        {
+            return errorResult(context, lastError());
+        }
+        prepareSocket(fd);
+        struct sockaddr_in sa4;
+        memset(&sa4, 0, sizeof(sa4));
+        sa4.sin_family = AF_INET;
+        sa4.sin_addr.s_addr = htonl(INADDR_ANY);
+        sa4.sin_port = htons((unsigned short)portNumber);
+        int err = bindDatagram(fd, (struct sockaddr *)&sa4, sizeof(sa4));
+        if (err != 0)
+        {
+            closesock(fd);
+            return errorResult(context, err);
+        }
+        return datagramOpened(context, fd);
+    }
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    hints.ai_flags = AI_PASSIVE;
+    struct addrinfo *list = nullptr;
+    int rc = getaddrinfo(address, port, &hints, &list);
+    if (rc != 0)
+    {
+        return gaiErrorResult(context, rc);
+    }
+    int lastErr = 0;
+    for (struct addrinfo *ai = list; ai != nullptr; ai = ai->ai_next)
+    {
+        sock_t fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd == BAD_SOCKET)
+        {
+            lastErr = lastError();
+            continue;
+        }
+        prepareSocket(fd);
+        int err = bindDatagram(fd, ai->ai_addr, (socklen_type)ai->ai_addrlen);
+        if (err == 0)
+        {
+            freeaddrinfo(list);
+            return datagramOpened(context, fd);
+        }
+        lastErr = err;
+        closesock(fd);
+    }
+    freeaddrinfo(list);
+    return errorResult(context, lastErr);
+}
+
+// The address to send to (or connect to): host and port resolved, in the
+// form the socket takes (IPv4 as ::ffff:a.b.c.d on an IPv6 socket that
+// takes IPv4). Returns nullptr and fills to/len, or an error result.
+static RexxArrayObject datagramTarget(RexxMethodContext *context, Sock *s, const char *host, const char *port,
+                                      struct sockaddr_storage &to, socklen_type &toLen)
+{
+    struct sockaddr_storage me;
+    socklen_type meLen = sizeof(me);
+    if (getsockname(s->fd, (struct sockaddr *)&me, &meLen) != 0)
+    {
+        return errorResult(context, lastError());
+    }
+    bool takes4 = me.ss_family == AF_INET;
+    bool takes6 = me.ss_family == AF_INET6;
+    if (takes6)
+    {
+        int v6only = 0;
+        socklen_type len = sizeof(v6only);
+        getsockopt(s->fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *)&v6only, &len);
+        takes4 = v6only == 0;
+    }
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    struct addrinfo *list = nullptr;
+    int rc = getaddrinfo(host, port, &hints, &list);
+    if (rc != 0)
+    {
+        return gaiErrorResult(context, rc);
+    }
+    struct addrinfo *v4 = nullptr, *v6 = nullptr;
+    for (struct addrinfo *ai = list; ai != nullptr; ai = ai->ai_next)
+    {
+        if (ai->ai_family == AF_INET && v4 == nullptr)
+        {
+            v4 = ai;
+        }
+        if (ai->ai_family == AF_INET6 && v6 == nullptr)
+        {
+            v6 = ai;
+        }
+    }
+    memset(&to, 0, sizeof(to));
+    bool found = true;
+    if (v4 != nullptr && takes4 && me.ss_family == AF_INET)
+    {
+        memcpy(&to, v4->ai_addr, v4->ai_addrlen);
+        toLen = (socklen_type)v4->ai_addrlen;
+    }
+    else if (v4 != nullptr && takes4)
+    {
+        const struct sockaddr_in *a = (const struct sockaddr_in *)v4->ai_addr;
+        struct sockaddr_in6 *m = (struct sockaddr_in6 *)&to;
+        m->sin6_family = AF_INET6;
+        m->sin6_port = a->sin_port;
+        unsigned char *b = (unsigned char *)&m->sin6_addr;
+        b[10] = 0xff;
+        b[11] = 0xff;
+        memcpy(b + 12, &a->sin_addr, 4);
+        toLen = sizeof(struct sockaddr_in6);
+    }
+    else if (v6 != nullptr && takes6)
+    {
+        memcpy(&to, v6->ai_addr, v6->ai_addrlen);
+        toLen = (socklen_type)v6->ai_addrlen;
+    }
+    else
+    {
+        found = false;
+    }
+    freeaddrinfo(list);
+    if (!found)
+    {
+#ifdef _WIN32
+        return errorResult(context, WSAEAFNOSUPPORT);
+#else
+        return errorResult(context, EAFNOSUPPORT);
+#endif
+    }
+    return nullptr;
+}
+
+// nConnect(host, port): from now on, send goes there and only its
+// datagrams are received.
+RexxMethod3(RexxArrayObject, udp_connect, CSELF, cself, CSTRING, host, CSTRING, port)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    struct sockaddr_storage to;
+    socklen_type toLen = 0;
+    RexxArrayObject bad = datagramTarget(context, s, host, port, to, toLen);
+    if (bad != nullptr)
+    {
+        return bad;
+    }
+    if (connect(s->fd, (struct sockaddr *)&to, toLen) != 0)
+    {
+        return errorResult(context, lastError());
+    }
+    s->connected = true;
+    connReset(s->fd, true);
+    return statusResult(context, "OK");
+}
+
+// nSend(data, host, port): one datagram; host "" on a connected socket.
+RexxMethod4(RexxArrayObject, udp_send, CSELF, cself, RexxStringObject, data, CSTRING, host, CSTRING, port)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    const char *p = context->StringData(data);
+    size_t size = context->StringLength(data);
+    if (size > 0x7fffffff)
+    {
+#ifdef _WIN32
+        return errorResult(context, WSAEMSGSIZE);
+#else
+        return errorResult(context, EMSGSIZE);
+#endif
+    }
+    struct sockaddr_storage to;
+    socklen_type toLen = 0;
+    if (host[0] != '\0')
+    {
+        RexxArrayObject bad = datagramTarget(context, s, host, port, to, toLen);
+        if (bad != nullptr)
+        {
+            return bad;
+        }
+    }
+    for (;;)
+    {
+        long n = host[0] != '\0'
+                 ? (long)sendto(s->fd, p, (int)size, SEND_FLAGS, (struct sockaddr *)&to, toLen)
+                 : (long)send(s->fd, p, (int)size, SEND_FLAGS);
+        if (n >= 0)
+        {
+            return statusResult(context, "OK");
+        }
+        int e = lastError();
+        if (interrupted(e))
+        {
+            continue;
+        }
+        return errorResult(context, e);
+    }
+}
+
+// nReceive(timeout): "OK", data, address, port; or "TIMEOUT"; or an error.
+// timeout < 0: as long as it takes.
+RexxMethod2(RexxArrayObject, udp_receive, CSELF, cself, double, timeout)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET || s->closing)
+    {
+        return closedResult(context);
+    }
+    sock_t fd = s->fd;
+    if (timeout >= 0)
+    {
+        int err = 0;
+        int w = waitFor(fd, POLLIN, true, deadlineFrom(timeout), &err);
+        if (s->closing)
+        {
+            return closedResult(context);
+        }
+        if (w == 0)
+        {
+            return statusResult(context, "TIMEOUT");
+        }
+        if (w < 0)
+        {
+            return errorResult(context, err);
+        }
+    }
+    std::vector<char> buf(65536);
+    for (;;)
+    {
+        struct sockaddr_storage from;
+        socklen_type fromLen = sizeof(from);
+        memset(&from, 0, sizeof(from));
+        long n = (long)recvfrom(fd, buf.data(), (int)buf.size(), 0, (struct sockaddr *)&from, &fromLen);
+        // close in another activity wakes recvfrom (Linux: as an empty
+        // datagram); that is not something received.
+        if (s->closing)
+        {
+            return closedResult(context);
+        }
+        if (n >= 0)
+        {
+            std::string host;
+            int port = 0;
+            addressText((struct sockaddr *)&from, host, port);
+            RexxArrayObject r = context->NewArray(4);
+            context->ArrayAppendString(r, "OK", 2);
+            context->ArrayAppend(r, context->NewString(buf.data(), (size_t)n));
+            context->ArrayAppendString(r, host.c_str(), host.size());
+            context->ArrayAppend(r, context->WholeNumber(port));
+            return r;
+        }
+        int e = lastError();
+        if (interrupted(e))
+        {
+            continue;
+        }
+#ifdef _WIN32
+        if (e == WSAECONNRESET && s->connected)
+        {
+            e = WSAECONNREFUSED;     // the "port unreachable" that Linux and macOS call so
+        }
+#endif
+        return errorResult(context, e);
+    }
+}
+
+// nBroadcast(value): SO_BROADCAST. value 1 or 0 sets it, -1 only asks.
+RexxMethod2(RexxArrayObject, udp_broadcast, CSELF, cself, int, value)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    if (value >= 0)
+    {
+        int flag = value ? 1 : 0;
+        if (setsockopt(s->fd, SOL_SOCKET, SO_BROADCAST, (const char *)&flag, sizeof(flag)) != 0)
+        {
+            return errorResult(context, lastError());
+        }
+    }
+    int flag = 0;
+    socklen_type len = sizeof(flag);
+    if (getsockopt(s->fd, SOL_SOCKET, SO_BROADCAST, (char *)&flag, &len) != 0)
+    {
+        return errorResult(context, lastError());
+    }
+    return statusResult(context, "OK", context->WholeNumber(flag ? 1 : 0));
+}
+
+
+/*----------------------------------------------------------------------------*/
 /* The package                                                                */
 /*----------------------------------------------------------------------------*/
 
@@ -2097,6 +2510,11 @@ static RexxMethodEntry oosockets_methods[] =
     REXX_METHOD(server_tls,      server_tls),
     REXX_METHOD(tls_check_identity, tls_check_identity),
     REXX_METHOD(tls_load_certificates, tls_load_certificates),
+    REXX_METHOD(udp_open,        udp_open),
+    REXX_METHOD(udp_connect,     udp_connect),
+    REXX_METHOD(udp_send,        udp_send),
+    REXX_METHOD(udp_receive,     udp_receive),
+    REXX_METHOD(udp_broadcast,   udp_broadcast),
     REXX_LAST_METHOD()
 };
 
