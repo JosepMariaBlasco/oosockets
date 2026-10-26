@@ -1,0 +1,251 @@
+#!/usr/bin/env rexx
+/* HALT (Ctrl-C) while a call waits for the network: it stops waiting,
+   and the HALT reaches the caller's line, where SIGNAL ON HALT catches
+   it. Each test halts a waiting activity with Message~halt, which is
+   what Ctrl-C does to every activity.                                  */
+
+  parse source . . fileSpec
+  group = .TestGroup~new(fileSpec)
+  group~add(.Halt.testGroup)
+  if group~isAutomatedTest then return group
+  testResult = group~suite~execute~~print
+return testResult
+
+::requires 'ooTest.frm'
+::requires 'sockets.cls'
+::requires 'peer.cls'
+
+::class "Halt.testGroup" subclass ooTestCase public
+
+-- Starts what~run(args) in an activity, halts it once it is waiting, and
+-- returns what it returned ("HALT at <line>" when it trapped the HALT)
+-- and how long the HALT took to arrive.
+::method halted private
+  use arg waiter, method, arg1 = .nil, arg2 = .nil
+  msg = waiter~start(method, arg1, arg2)
+  call sysSleep 0.5                          -- it is waiting by now
+  self~assertFalse(msg~completed, "the call did not wait")
+  started = time("E")
+  msg~halt
+  do 100 while \msg~completed                -- 5 s at most
+    call sysSleep 0.05
+  end
+  took = time("E") - started
+  self~assertTrue(msg~completed, "the HALT did not stop the wait")
+  if \msg~completed then return .array~of("still waiting", took)
+  self~assertTrue(took < 2, "the HALT took" took "s")
+  return .array~of(msg~result, took)
+
+::method test_udp_receive
+  s = .DatagramSocket~new(0, "127.0.0.1")
+  r = self~halted(.Waiter~new, "receive", s)
+  self~assertSame("HALT at" .Waiter~line("receive"), r[1])
+  s~close
+
+::method test_lineIn
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  c = .Socket~new("127.0.0.1", srv~localPort)
+  peer = srv~accept
+  r = self~halted(.Waiter~new, "lineIn", c)
+  self~assertSame("HALT at" .Waiter~line("lineIn"), r[1])
+  -- the socket goes on working: nothing that arrives later is lost
+  peer~lineOut("after the HALT")
+  c~readTimeout = 5
+  self~assertSame("after the HALT", c~lineIn)
+  peer~close; c~close; srv~close
+
+::method test_lineIn_with_a_readTimeout
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  c = .Socket~new("127.0.0.1", srv~localPort)
+  peer = srv~accept
+  c~readTimeout = 60
+  r = self~halted(.Waiter~new, "lineIn", c)
+  self~assertSame("HALT at" .Waiter~line("lineIn"), r[1])
+  peer~close; c~close; srv~close
+
+::method test_charIn_and_read
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  c = .Socket~new("127.0.0.1", srv~localPort)
+  peer = srv~accept
+  r = self~halted(.Waiter~new, "charIn", c)
+  self~assertSame("HALT at" .Waiter~line("charIn"), r[1])
+  r = self~halted(.Waiter~new, "read", c)
+  self~assertSame("HALT at" .Waiter~line("read"), r[1])
+  peer~close; c~close; srv~close
+
+::method test_accept
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  r = self~halted(.Waiter~new, "accept", srv)
+  self~assertSame("HALT at" .Waiter~line("accept"), r[1])
+  -- the server goes on accepting
+  srv~acceptTimeout = 5
+  c = .Socket~new("127.0.0.1", srv~localPort)
+  peer = srv~accept
+  self~assertTrue(peer~isA(.Socket))
+  peer~close; c~close; srv~close
+
+::method test_lineOut_to_a_peer_that_does_not_read
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  c = .Socket~new("127.0.0.1", srv~localPort)
+  peer = srv~accept                          -- never reads
+  r = self~halted(.Waiter~new, "flood", c)
+  self~assertSame("HALT at" .Waiter~line("flood"), r[1])
+  peer~close; c~close; srv~close
+
+::method test_lineOut_buffered_to_a_peer_that_does_not_read
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  c = .Socket~new("127.0.0.1", srv~localPort)
+  peer = srv~accept
+  c~bufferOutput = .true
+  r = self~halted(.Waiter~new, "flood", c)
+  self~assertSame("HALT at" .Waiter~line("flood"), r[1])
+  peer~close; c~close; srv~close
+
+::method test_tls_handshake_with_a_server_that_says_nothing
+  srv = .ServerSocket~new(0, "127.0.0.1")    -- plain TCP: never answers the ClientHello
+  r = self~halted(.Waiter~new, "tls", "127.0.0.1", srv~localPort)
+  self~assertSame("HALT at" .Waiter~line("tls"), r[1])
+  srv~close
+
+::method test_tls_lineIn
+  srv = .TLSServerSocket~new(0, serverOptions("server.p12"), "127.0.0.1")
+  helper = .Acceptor~new~start("acceptAndWait", srv)
+  c = .TLSSocket~new("localhost", srv~localPort, .TLSOptions~new~trust(certFile("ca.pem")))
+  r = self~halted(.Waiter~new, "lineIn", c)
+  self~assertSame("HALT at" .Waiter~line("lineIn"), r[1])
+  c~close
+  helper~result
+  srv~close
+
+::method test_connect_that_hangs
+  -- 192.0.2.1 is TEST-NET-1 (RFC 5737): nothing answers there. Where the
+  -- system says at once that it cannot be reached, nothing is checked.
+  w = .Waiter~new
+  msg = w~start("connect", "192.0.2.1", 9)
+  call sysSleep 0.5
+  if msg~completed then do
+    say "  (192.0.2.1 is refused at once here:" msg~result"; test_connect_that_hangs checked nothing)"
+    return
+  end
+  msg~halt
+  do 100 while \msg~completed; call sysSleep 0.05; end
+  self~assertTrue(msg~completed, "the HALT did not stop the connect")
+  self~assertSame("HALT at" .Waiter~line("connect"), msg~result)
+
+::method test_untrapped_halt_ends_the_activity_with_error_4
+  s = .DatagramSocket~new(0, "127.0.0.1")
+  msg = .Waiter~new~start("receiveUntrapped", s)
+  call sysSleep 0.5
+  msg~halt
+  do 100 while \msg~completed; call sysSleep 0.05; end
+  self~assertTrue(msg~hasError)
+  c = msg~errorCondition
+  self~assertSame("SYNTAX", c~condition)
+  self~assertSame(4.1, c~code)               -- "Program interrupted with HALT condition"
+  -- raised from sockets.cls (its "raise propagate"), with the caller's
+  -- line next in the traceback
+  tb = c~traceback~makeArray~makeString("L", "|")
+  self~assertTrue(tb~pos("raise propagate") > 0, tb)
+  self~assertTrue(tb~pos(.Waiter~line("receiveUntrapped") "*-* d = s~receive") > 0, tb)
+  s~close
+
+
+-- Each method waits in one call, on the line after its "-- waits:" (the
+-- line number that the class method line finds), and traps the HALT.
+::class Waiter
+::method line class
+  use arg name
+  src = .context~package~source
+  inMethod = .false
+  do i = 1 to src~items
+    if src[i]~strip~caselessEquals("::method" name) then inMethod = .true
+    else if inMethod, src[i]~strip == "-- waits:" then return i + 1
+  end
+  return -1
+
+::method receive
+  use arg s
+  signal on halt
+  -- waits:
+  d = s~receive
+  return "received" d
+halt: return "HALT at" sigl
+
+::method receiveUntrapped
+  use arg s
+  -- waits:
+  d = s~receive
+  return "received" d
+
+::method lineIn
+  use arg s
+  signal on halt
+  -- waits:
+  line = s~lineIn
+  return "line" line
+halt: return "HALT at" sigl
+
+::method charIn
+  use arg s
+  signal on halt
+  -- waits:
+  c = s~charIn
+  return "char" c
+halt: return "HALT at" sigl
+
+::method read
+  use arg s
+  signal on halt
+  -- waits:
+  data = s~read
+  return "read" data
+halt: return "HALT at" sigl
+
+::method accept
+  use arg srv
+  signal on halt
+  -- waits:
+  c = srv~accept
+  return "accepted" c
+halt: return "HALT at" sigl
+
+::method flood
+  use arg s
+  signal on halt
+  line = copies("x", 1000)
+  loop 1000000                               -- 1 GB: the buffers fill long before
+    -- waits:
+    s~lineOut(line)
+  end
+  return "all written?!"
+halt: return "HALT at" sigl
+
+::method tls
+  use arg host, port
+  signal on halt
+  -- waits:
+  s = .TLSSocket~new(host, port, .TLSOptions~new)
+  return "connected?!"
+halt: return "HALT at" sigl
+
+::method connect
+  use arg host, port
+  signal on halt
+  signal on syntax
+  -- waits:
+  s = .Socket~new(host, port)
+  return "connected?!"
+halt: return "HALT at" sigl
+syntax: return condition("O")~message
+
+
+::class Acceptor
+::method acceptAndWait
+  use arg srv
+  c = srv~accept
+  c~readTimeout = 10
+  signal on notready
+  c~lineIn                                   -- makes the handshake, then waits
+notready:
+  c~close
+  return 0

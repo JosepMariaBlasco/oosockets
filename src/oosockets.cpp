@@ -48,6 +48,8 @@
  *   "OK"       [, value]
  *   "EOF"                       (recv: the peer closed its side)
  *   "TIMEOUT"
+ *   "AGAIN", ...                (the call waited SLICE_MS and must be made
+ *                                again: see waitSlice)
  *   "ERROR", text, name, number (text in English, the same on the three
  *                                systems for the common errors; name as
  *                                POSIX's, e.g. "ECONNREFUSED"; number the
@@ -147,6 +149,12 @@ struct Sock
     std::atomic<bool> closing{false};  // close has started (UDP: a recv it
                                        // wakes must not read as a datagram)
     bool connected = false;      // UDP: connect was made
+    // TCP connect in progress (socket_connect, socket_connect_more)
+    std::vector<struct sockaddr_storage> addrs;
+    std::vector<socklen_type> addrLens;
+    size_t nextAddr = 0;
+    sock_t trying = BAD_SOCKET;
+    int connectErr = 0;
     Sock(sock_t f) : fd(f) { }
 };
 
@@ -286,6 +294,17 @@ static RexxArrayObject statusResult(RexxMethodContext *context, const char *stat
     return r;
 }
 
+// "AGAIN", the bytes sent so far, the seconds left: a send to be made
+// again with the rest.
+static RexxArrayObject againSent(RexxMethodContext *context, size_t sent, double left)
+{
+    RexxArrayObject r = context->NewArray(3);
+    context->ArrayAppendString(r, "AGAIN", 5);
+    context->ArrayAppend(r, context->StringSize(sent));
+    context->ArrayAppend(r, context->DoubleToObject(left));
+    return r;
+}
+
 static RexxArrayObject closedResult(RexxMethodContext *context)
 {
 #ifdef _WIN32
@@ -400,6 +419,60 @@ static Clock::time_point deadlineFrom(double seconds)
     return Clock::now() + std::chrono::milliseconds((long long)(seconds * 1000.0 + 0.5));
 }
 
+// HALT. ooRexx's HALT (Ctrl-C, SIGTERM, a HALT from the API) is a flag on
+// the Rexx activation that called a native method, seen only when that
+// activation runs its next clause: a native call that waits for the
+// network until something arrives would keep it waiting forever. So no
+// native call waits more than SLICE_MS: it returns "AGAIN" (with the time
+// left), and sockets.cls calls it again, running a clause in between,
+// where a HALT is raised. On Unix, a signal also ends the wait at once
+// (poll is interrupted).
+static const int SLICE_MS = 100;
+
+// As waitFor, but for SLICE_MS at most: 1 ready, 0 the deadline came, 2
+// the slice ended first (or a signal came), -1 error (code in *err).
+static int waitSlice(sock_t fd, short events, bool hasDeadline, Clock::time_point deadline, int *err)
+{
+    int ms = msLeft(hasDeadline, deadline);
+    bool sliced = false;
+    if (ms < 0 || ms > SLICE_MS)
+    {
+        ms = SLICE_MS;
+        sliced = true;
+    }
+    struct pollfd p;
+    p.fd = fd;
+    p.events = events;
+    p.revents = 0;
+    int rc = pollsock(&p, 1, ms);
+    if (rc > 0)
+    {
+        return 1;
+    }
+    if (rc == 0)
+    {
+        return sliced ? 2 : 0;
+    }
+    int e = lastError();
+    if (interrupted(e))
+    {
+        return 2;
+    }
+    *err = e;
+    return -1;
+}
+
+// Seconds left until the deadline (never negative); -1 without one.
+static double secondsLeft(bool hasDeadline, Clock::time_point deadline)
+{
+    if (!hasDeadline)
+    {
+        return -1;
+    }
+    double left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count() / 1000.0;
+    return left < 0 ? 0 : left;
+}
+
 // An address as text: IPv6 as "::1", IPv4-mapped IPv6 as plain IPv4.
 static void addressText(const struct sockaddr *sa, std::string &host, int &port)
 {
@@ -447,6 +520,11 @@ static void closeSock(Sock *s)
     }
     s->closing = true;
     std::lock_guard<std::mutex> guard(s->mu);
+    if (s->trying != BAD_SOCKET)
+    {
+        closesock(s->trying);
+        s->trying = BAD_SOCKET;
+    }
     if (s->fd != BAD_SOCKET)
     {
         // TLS: tell the peer (close_notify), if the socket takes it now.
@@ -608,7 +686,7 @@ static BIO_METHOD *sockBioMethod()
 }
 
 // What a TLS operation came to.
-enum TlsStatus { TLS_OK, TLS_EOF, TLS_TIMEOUT, TLS_CLOSED, TLS_SOCKET_ERROR, TLS_SSL_ERROR };
+enum TlsStatus { TLS_OK, TLS_EOF, TLS_TIMEOUT, TLS_AGAIN, TLS_CLOSED, TLS_SOCKET_ERROR, TLS_SSL_ERROR };
 
 struct TlsOutcome
 {
@@ -620,7 +698,9 @@ struct TlsOutcome
 };
 
 // Runs call(ssl) until it succeeds, retrying when OpenSSL wants to read or
-// write, waiting outside the lock (until the deadline, if there is one).
+// write, waiting outside the lock (until the deadline, if there is one;
+// TLS_AGAIN after SLICE_MS of waiting: see waitSlice; calling it again
+// goes on where it was).
 // call returns what SSL_xxx returns: > 0 success.
 template <class Call>
 static TlsOutcome tlsRun(Sock *s, bool hasDeadline, Clock::time_point deadline, Call call)
@@ -656,10 +736,15 @@ static TlsOutcome tlsRun(Sock *s, bool hasDeadline, Clock::time_point deadline, 
         if (sslErr == SSL_ERROR_WANT_READ || sslErr == SSL_ERROR_WANT_WRITE)
         {
             int err = 0;
-            int w = waitFor(fd, sslErr == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT, hasDeadline, deadline, &err);
+            int w = waitSlice(fd, sslErr == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT, hasDeadline, deadline, &err);
             if (w == 0)
             {
                 out.status = TLS_TIMEOUT;
+                return out;
+            }
+            if (w == 2)
+            {
+                out.status = TLS_AGAIN;
                 return out;
             }
             if (w < 0)
@@ -1243,7 +1328,25 @@ static int minVersionOf(const char *v)
     return strcmp(v, "1.3") == 0 ? TLS1_3_VERSION : TLS1_2_VERSION;
 }
 
-// Puts the Sock in TLS: a new SSL over our BIO; the socket non-blocking.
+// Either side's handshake, for SLICE_MS at most: "OK", "AGAIN" and the
+// seconds left, "TIMEOUT", or the failure.
+static RexxArrayObject handshakeStep(RexxMethodContext *context, Sock *s, double timeout)
+{
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    TlsOutcome o = tlsRun(s, hasDeadline, deadline, [](SSL *ssl) { return SSL_do_handshake(ssl); });
+    if (o.status == TLS_OK)
+    {
+        return statusResult(context, "OK");
+    }
+    if (o.status == TLS_AGAIN)
+    {
+        return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+    }
+    return handshakeFailure(context, s, o);
+}
+
+// Puts the Sock in TLS: a new SSL over our BIO.
 static void attachSsl(Sock *s, SSL_CTX *ctx)
 {
     std::lock_guard<std::mutex> guard(s->mu);
@@ -1327,14 +1430,19 @@ RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxA
             SSL_set1_host(s->ssl, h.c_str());
         }
     }
-    bool hasDeadline = timeout >= 0;
-    TlsOutcome o = tlsRun(s, hasDeadline, deadlineFrom(hasDeadline ? timeout : 0),
-                          [](SSL *ssl) { return SSL_connect(ssl); });
-    if (o.status == TLS_OK)
+    SSL_set_connect_state(s->ssl);
+    return handshakeStep(context, s, timeout);
+}
+
+// nTLSMore(timeout): goes on with a handshake that returned "AGAIN".
+RexxMethod2(RexxArrayObject, socket_tls_more, CSELF, cself, double, timeout)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET || s->ssl == nullptr)
     {
-        return statusResult(context, "OK");
+        return closedResult(context);
     }
-    return handshakeFailure(context, s, o);
+    return handshakeStep(context, s, timeout);
 }
 
 // A server's TLS context, with the certificate and key in file (PKCS#12
@@ -1432,14 +1540,8 @@ RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
     }
     s->trust = TrustError();
     attachSsl(s, ctx);
-    bool hasDeadline = timeout >= 0;
-    TlsOutcome o = tlsRun(s, hasDeadline, deadlineFrom(hasDeadline ? timeout : 0),
-                          [](SSL *ssl) { return SSL_accept(ssl); });
-    if (o.status == TLS_OK)
-    {
-        return statusResult(context, "OK");
-    }
-    return handshakeFailure(context, s, o);
+    SSL_set_accept_state(s->ssl);
+    return handshakeStep(context, s, timeout);
 }
 
 // TLSServerSocket's nTLS(file, password, minVersion): the context every
@@ -1503,11 +1605,16 @@ static RexxArrayObject tlsRecv(RexxMethodContext *context, Sock *s, size_t max, 
     std::vector<char> buf(max);
     size_t got = 0;
     bool hasDeadline = timeout >= 0;
-    TlsOutcome o = tlsRun(s, hasDeadline, deadlineFrom(hasDeadline ? timeout : 0),
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    TlsOutcome o = tlsRun(s, hasDeadline, deadline,
                           [&](SSL *ssl) { return SSL_read_ex(ssl, buf.data(), max, &got); });
     if (o.status == TLS_OK)
     {
         return statusResult(context, "OK", context->NewString(buf.data(), got));
+    }
+    if (o.status == TLS_AGAIN)
+    {
+        return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
     }
     return tlsIoResult(context, o);
 }
@@ -1525,6 +1632,10 @@ static RexxArrayObject tlsSend(RexxMethodContext *context, Sock *s, const char *
         if (o.status == TLS_TIMEOUT)
         {
             return statusResult(context, "TIMEOUT", context->StringSize(sent));
+        }
+        if (o.status == TLS_AGAIN)
+        {
+            return againSent(context, sent, secondsLeft(hasDeadline, deadline));
         }
         if (o.status == TLS_EOF)
         {
@@ -1550,7 +1661,78 @@ static RexxArrayObject tlsSend(RexxMethodContext *context, Sock *s, const char *
 /* Socket                                                                     */
 /*----------------------------------------------------------------------------*/
 
+// One step of a connect: tries the addresses in turn, waiting SLICE_MS at
+// most. "OK" (the Sock has its socket), "AGAIN" and the seconds left,
+// "TIMEOUT", or the last address's error.
+static RexxArrayObject connectStep(RexxMethodContext *context, Sock *s, double timeout)
+{
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    for (;;)
+    {
+        if (s->trying == BAD_SOCKET)
+        {
+            if (s->nextAddr >= s->addrs.size())
+            {
+                return errorResult(context, s->connectErr);
+            }
+            size_t i = s->nextAddr++;
+            const struct sockaddr *sa = (const struct sockaddr *)&s->addrs[i];
+            sock_t fd = socket(sa->sa_family, SOCK_STREAM, IPPROTO_TCP);
+            if (fd == BAD_SOCKET)
+            {
+                s->connectErr = lastError();
+                continue;
+            }
+            prepareSocket(fd);
+            setBlocking(fd, false);
+            if (connect(fd, sa, s->addrLens[i]) == 0)
+            {
+                s->fd = fd;
+                return statusResult(context, "OK");
+            }
+            int e = lastError();
+            if (!inProgress(e))
+            {
+                s->connectErr = e;
+                closesock(fd);
+                continue;
+            }
+            s->trying = fd;
+        }
+        int err = 0;
+        int w = waitSlice(s->trying, POLLOUT, hasDeadline, deadline, &err);
+        if (w == 2)
+        {
+            return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+        }
+        if (w == 0)
+        {
+            closesock(s->trying);
+            s->trying = BAD_SOCKET;
+            return statusResult(context, "TIMEOUT");   // the deadline is for the whole connect
+        }
+        if (w > 0)
+        {
+            int soerr = 0;
+            socklen_type len = sizeof(soerr);
+            getsockopt(s->trying, SOL_SOCKET, SO_ERROR, (char *)&soerr, &len);
+            err = soerr;
+        }
+        if (err == 0)
+        {
+            s->fd = s->trying;
+            s->trying = BAD_SOCKET;
+            return statusResult(context, "OK");
+        }
+        s->connectErr = err;
+        closesock(s->trying);
+        s->trying = BAD_SOCKET;
+    }
+}
+
 // nConnect(host, port, timeout): timeout < 0 means none (the system's).
+// The Sock is made at once, without a socket; see connectStep.
 RexxMethod3(RexxArrayObject, socket_connect, CSTRING, host, CSTRING, port, double, timeout)
 {
     struct addrinfo hints;
@@ -1581,60 +1763,29 @@ RexxMethod3(RexxArrayObject, socket_connect, CSTRING, host, CSTRING, port, doubl
     {
         return gaiErrorResult(context, rc);
     }
-
-    bool hasDeadline = timeout >= 0;
-    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
-    int lastErr = 0;
-    bool timedOut = false;
-
+    Sock *s = new Sock(BAD_SOCKET);
     for (struct addrinfo *ai = list; ai != nullptr; ai = ai->ai_next)
     {
-        sock_t fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (fd == BAD_SOCKET)
-        {
-            lastErr = lastError();
-            continue;
-        }
-        prepareSocket(fd);
-        setBlocking(fd, false);
-        int err = 0;
-        if (connect(fd, ai->ai_addr, (socklen_type)ai->ai_addrlen) != 0)
-        {
-            err = lastError();
-            if (inProgress(err))
-            {
-                int w = waitFor(fd, POLLOUT, hasDeadline, deadline, &err);
-                if (w == 0)
-                {
-                    timedOut = true;
-                    closesock(fd);
-                    break;          // the deadline is for the whole connect
-                }
-                if (w > 0)
-                {
-                    int soerr = 0;
-                    socklen_type len = sizeof(soerr);
-                    getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&soerr, &len);
-                    err = soerr;
-                }
-            }
-        }
-        if (err == 0)
-        {
-            setBlocking(fd, true);
-            freeaddrinfo(list);
-            setCself(context, new Sock(fd));
-            return statusResult(context, "OK");
-        }
-        lastErr = err;
-        closesock(fd);
+        struct sockaddr_storage ss;
+        memset(&ss, 0, sizeof(ss));
+        memcpy(&ss, ai->ai_addr, ai->ai_addrlen);
+        s->addrs.push_back(ss);
+        s->addrLens.push_back((socklen_type)ai->ai_addrlen);
     }
     freeaddrinfo(list);
-    if (timedOut)
+    setCself(context, s);
+    return connectStep(context, s, timeout);
+}
+
+// nConnectMore(timeout): goes on with a connect that returned "AGAIN".
+RexxMethod2(RexxArrayObject, socket_connect_more, CSELF, cself, double, timeout)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr)
     {
-        return statusResult(context, "TIMEOUT");
+        return closedResult(context);
     }
-    return errorResult(context, lastErr);
+    return connectStep(context, s, timeout);
 }
 
 // nAdopt(pointer): a socket that ServerSocket~accept made.
@@ -1645,7 +1796,8 @@ RexxMethod1(RexxObjectPtr, socket_adopt, POINTER, p)
 }
 
 // nRecv(max, timeout): up to max bytes, waiting at most timeout seconds
-// (< 0: as long as it takes; 0: only what is already there).
+// (< 0: as long as it takes; 0: only what is already there); "AGAIN" and
+// the seconds left after SLICE_MS.
 RexxMethod3(RexxArrayObject, socket_recv, CSELF, cself, size_t, max, double, timeout)
 {
     Sock *s = (Sock *)cself;
@@ -1661,23 +1813,17 @@ RexxMethod3(RexxArrayObject, socket_recv, CSELF, cself, size_t, max, double, tim
     {
         return tlsRecv(context, s, max, timeout);
     }
-    if (timeout >= 0)
-    {
-        int err = 0;
-        int w = waitFor(s->fd, POLLIN, true, deadlineFrom(timeout), &err);
-        if (w == 0)
-        {
-            return statusResult(context, "TIMEOUT");
-        }
-        if (w < 0)
-        {
-            return errorResult(context, err);
-        }
-    }
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
     std::vector<char> buf(max);
     for (;;)
     {
-        long n = (long)recv(s->fd, buf.data(), (int)max, 0);
+        sock_t fd = s->fd;
+        if (fd == BAD_SOCKET)
+        {
+            return closedResult(context);
+        }
+        long n = (long)recv(fd, buf.data(), (int)max, 0);
         if (n > 0)
         {
             return statusResult(context, "OK", context->NewString(buf.data(), (size_t)n));
@@ -1691,12 +1837,30 @@ RexxMethod3(RexxArrayObject, socket_recv, CSELF, cself, size_t, max, double, tim
         {
             continue;
         }
-        return errorResult(context, e);
+        if (!wouldBlock(e))
+        {
+            return errorResult(context, e);
+        }
+        int err = 0;
+        int w = waitSlice(fd, POLLIN, hasDeadline, deadline, &err);
+        if (w == 0)
+        {
+            return statusResult(context, "TIMEOUT");
+        }
+        if (w == 2)
+        {
+            return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+        }
+        if (w < 0)
+        {
+            return errorResult(context, err);
+        }
     }
 }
 
 // nSend(data, timeout): all of data, or an error / timeout. The result
-// has, after the status, how many bytes went out.
+// has, after the status, how many bytes went out; "AGAIN", those, and the
+// seconds left after SLICE_MS (to be called again with the rest).
 RexxMethod3(RexxArrayObject, socket_send, CSELF, cself, RexxStringObject, data, double, timeout)
 {
     Sock *s = (Sock *)cself;
@@ -1715,32 +1879,42 @@ RexxMethod3(RexxArrayObject, socket_send, CSELF, cself, RexxStringObject, data, 
     Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
     while (left > 0)
     {
-        if (hasDeadline)
+        sock_t fd = s->fd;
+        if (fd == BAD_SOCKET)
         {
-            int err = 0;
-            int w = waitFor(s->fd, POLLOUT, true, deadline, &err);
-            if (w == 0)
-            {
-                return statusResult(context, "TIMEOUT", context->StringSize(sent));
-            }
-            if (w < 0)
-            {
-                return errorResult(context, err);
-            }
+            return closedResult(context);
         }
         int chunk = left > 0x40000000 ? 0x40000000 : (int)left;
-        long n = (long)send(s->fd, p + sent, chunk, SEND_FLAGS);
-        if (n < 0)
+        long n = (long)send(fd, p + sent, chunk, SEND_FLAGS);
+        if (n >= 0)
         {
-            int e = lastError();
-            if (interrupted(e))
-            {
-                continue;
-            }
+            sent += (size_t)n;
+            left -= (size_t)n;
+            continue;
+        }
+        int e = lastError();
+        if (interrupted(e))
+        {
+            continue;
+        }
+        if (!wouldBlock(e))
+        {
             return errorResult(context, e);
         }
-        sent += (size_t)n;
-        left -= (size_t)n;
+        int err = 0;
+        int w = waitSlice(fd, POLLOUT, hasDeadline, deadline, &err);
+        if (w == 0)
+        {
+            return statusResult(context, "TIMEOUT", context->StringSize(sent));
+        }
+        if (w == 2)
+        {
+            return againSent(context, sent, secondsLeft(hasDeadline, deadline));
+        }
+        if (w < 0)
+        {
+            return errorResult(context, err);
+        }
     }
     return statusResult(context, "OK", context->StringSize(sent));
 }
@@ -1946,6 +2120,7 @@ RexxMethod3(RexxArrayObject, server_listen, CSTRING, port, CSTRING, address, int
             int err = bindAndListen(fd, (struct sockaddr *)&sa, sizeof(sa), backlog);
             if (err == 0)
             {
+                setBlocking(fd, false);
                 setCself(context, new Sock(fd));
                 return statusResult(context, "OK");
             }
@@ -1978,6 +2153,7 @@ RexxMethod3(RexxArrayObject, server_listen, CSTRING, port, CSTRING, address, int
             closesock(fd);
             return errorResult(context, err);
         }
+        setBlocking(fd, false);
         setCself(context, new Sock(fd));
         return statusResult(context, "OK");
     }
@@ -2008,6 +2184,7 @@ RexxMethod3(RexxArrayObject, server_listen, CSTRING, port, CSTRING, address, int
         if (err == 0)
         {
             freeaddrinfo(list);
+            setBlocking(fd, false);
             setCself(context, new Sock(fd));
             return statusResult(context, "OK");
         }
@@ -2019,7 +2196,7 @@ RexxMethod3(RexxArrayObject, server_listen, CSTRING, port, CSTRING, address, int
 }
 
 // nAccept(timeout): "OK" and a .Pointer for Socket's nAdopt, or
-// "TIMEOUT", or an error.
+// "TIMEOUT", or "AGAIN" and the seconds left, or an error.
 RexxMethod2(RexxArrayObject, server_accept, CSELF, cself, double, timeout)
 {
     Sock *s = (Sock *)cself;
@@ -2027,26 +2204,20 @@ RexxMethod2(RexxArrayObject, server_accept, CSELF, cself, double, timeout)
     {
         return closedResult(context);
     }
-    if (timeout >= 0)
-    {
-        int err = 0;
-        int w = waitFor(s->fd, POLLIN, true, deadlineFrom(timeout), &err);
-        if (w == 0)
-        {
-            return statusResult(context, "TIMEOUT");
-        }
-        if (w < 0)
-        {
-            return errorResult(context, err);
-        }
-    }
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
     for (;;)
     {
-        sock_t fd = accept(s->fd, nullptr, nullptr);
+        sock_t lfd = s->fd;
+        if (lfd == BAD_SOCKET)
+        {
+            return closedResult(context);
+        }
+        sock_t fd = accept(lfd, nullptr, nullptr);
         if (fd != BAD_SOCKET)
         {
             prepareSocket(fd);
-            setBlocking(fd, true);
+            setBlocking(fd, false);
             Sock *c = new Sock(fd);
             SSL_CTX *ctx;
             {
@@ -2071,7 +2242,24 @@ RexxMethod2(RexxArrayObject, server_accept, CSELF, cself, double, timeout)
         {
             continue;
         }
-        return errorResult(context, e);
+        if (!wouldBlock(e))
+        {
+            return errorResult(context, e);
+        }
+        int err = 0;
+        int w = waitSlice(lfd, POLLIN, hasDeadline, deadline, &err);
+        if (w == 0)
+        {
+            return statusResult(context, "TIMEOUT");
+        }
+        if (w == 2)
+        {
+            return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+        }
+        if (w < 0)
+        {
+            return errorResult(context, err);
+        }
     }
 }
 
@@ -2138,6 +2326,7 @@ static RexxArrayObject datagramOpened(RexxMethodContext *context, sock_t fd)
 {
     datagramBuffers(fd);
     connReset(fd, false);
+    setBlocking(fd, false);
     setCself(context, new Sock(fd));
     return statusResult(context, "OK");
 }
@@ -2381,11 +2570,22 @@ RexxMethod4(RexxArrayObject, udp_send, CSELF, cself, RexxStringObject, data, CST
         {
             continue;
         }
+        if (wouldBlock(e))
+        {
+            // The send buffer is full: it empties at the network's pace.
+            int err = 0;
+            if (waitFor(s->fd, POLLOUT, false, Clock::now(), &err) < 0)
+            {
+                return errorResult(context, err);
+            }
+            continue;
+        }
         return errorResult(context, e);
     }
 }
 
-// nReceive(timeout): "OK", data, address, port; or "TIMEOUT"; or an error.
+// nReceive(timeout): "OK", data, address, port; or "TIMEOUT"; or "AGAIN"
+// and the seconds left; or an error.
 // timeout < 0: as long as it takes.
 RexxMethod2(RexxArrayObject, udp_receive, CSELF, cself, double, timeout)
 {
@@ -2395,23 +2595,8 @@ RexxMethod2(RexxArrayObject, udp_receive, CSELF, cself, double, timeout)
         return closedResult(context);
     }
     sock_t fd = s->fd;
-    if (timeout >= 0)
-    {
-        int err = 0;
-        int w = waitFor(fd, POLLIN, true, deadlineFrom(timeout), &err);
-        if (s->closing)
-        {
-            return closedResult(context);
-        }
-        if (w == 0)
-        {
-            return statusResult(context, "TIMEOUT");
-        }
-        if (w < 0)
-        {
-            return errorResult(context, err);
-        }
-    }
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
     std::vector<char> buf(65536);
     for (;;)
     {
@@ -2419,7 +2604,7 @@ RexxMethod2(RexxArrayObject, udp_receive, CSELF, cself, double, timeout)
         socklen_type fromLen = sizeof(from);
         memset(&from, 0, sizeof(from));
         long n = (long)recvfrom(fd, buf.data(), (int)buf.size(), 0, (struct sockaddr *)&from, &fromLen);
-        // close in another activity wakes recvfrom (Linux: as an empty
+        // close in another activity wakes the wait (Linux: as an empty
         // datagram); that is not something received.
         if (s->closing)
         {
@@ -2440,6 +2625,28 @@ RexxMethod2(RexxArrayObject, udp_receive, CSELF, cself, double, timeout)
         int e = lastError();
         if (interrupted(e))
         {
+            continue;
+        }
+        if (wouldBlock(e))
+        {
+            int err = 0;
+            int w = waitSlice(fd, POLLIN, hasDeadline, deadline, &err);
+            if (s->closing)
+            {
+                return closedResult(context);
+            }
+            if (w == 0)
+            {
+                return statusResult(context, "TIMEOUT");
+            }
+            if (w == 2)
+            {
+                return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+            }
+            if (w < 0)
+            {
+                return errorResult(context, err);
+            }
             continue;
         }
 #ifdef _WIN32
@@ -2493,6 +2700,8 @@ static void RexxEntry oosocketsLoader(RexxThreadContext *)
 static RexxMethodEntry oosockets_methods[] =
 {
     REXX_METHOD(socket_connect,  socket_connect),
+    REXX_METHOD(socket_connect_more, socket_connect_more),
+    REXX_METHOD(socket_tls_more, socket_tls_more),
     REXX_METHOD(socket_adopt,    socket_adopt),
     REXX_METHOD(socket_recv,     socket_recv),
     REXX_METHOD(socket_send,     socket_send),

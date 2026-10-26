@@ -51,6 +51,15 @@ client~close; srv~close
 - Each blocking call waits in its own activity without stopping the
   others: a server can serve every client in an activity of its own, and
   one activity can read while another writes on the same socket.
+- **Ctrl-C (HALT) stops a wait**: a `lineIn`, `accept`, `receive`, a
+  write to a peer that does not read, a connection or a TLS handshake
+  that hangs. The HALT is raised at the program's own line, where `signal
+  on halt` catches it (within 0.1 s; on Linux and macOS, at once). A
+  socket whose read was halted goes on working, and nothing that arrives
+  later is lost; a write may have sent part of its data; after a halted
+  TLS handshake, close the socket. An idle wait costs nothing measurable
+  (it wakes 10 times a second: 0.2 % of a CPU on Linux). The time spent
+  looking up a host name cannot be halted.
 - `rxsock`, `socket.cls` and `streamsocket.cls` are untouched. A program
   that requires both `socket.cls` (or `smtp.cls`, which requires it) and
   `sockets.cls` should require `sockets.cls` first, or refer to the classes

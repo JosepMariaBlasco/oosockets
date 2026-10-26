@@ -66,6 +66,12 @@
 
 ::requires "oosockets" LIBRARY
 
+/* HALT (Ctrl-C). The methods that wait for the network trap HALT and pass
+   it on to their caller ("halted: raise propagate"), so that it reaches
+   the program at the line that called them, and its own SIGNAL ON HALT
+   catches it: without that, a HALT raised inside a method of this package
+   would end the program from there, past the program's own trap.      */
+
 
 /*============================================================================*/
 /* Socket: a connected TCP socket, either end                                 */
@@ -75,6 +81,8 @@
 
 /* ---- the native layer (oosockets.cpp) ---------------------------------- */
 ::method nConnect  private external "LIBRARY oosockets socket_connect"
+::method nConnectMore private external "LIBRARY oosockets socket_connect_more"
+::method nTLSMore  private external "LIBRARY oosockets socket_tls_more"
 ::method nAdopt    private external "LIBRARY oosockets socket_adopt"
 ::method nRecv     private external "LIBRARY oosockets socket_recv"
 ::method nSend     private unguarded external "LIBRARY oosockets socket_send"
@@ -105,6 +113,7 @@
     without it, the system's. */
 ::method init
   expose buffer atEnd closed st desc name lineEnd readTimeout writeTimeout peerHost peerPort tls
+  signal on halt name halted          -- to the caller: see "halted" below
   self~init:super
   buffer = ""; atEnd = .false; closed = .false
   st = "READY"; desc = "READY:"
@@ -135,6 +144,9 @@
   name = hostAndPort(host, port)
   peerHost = host; peerPort = port
   r = self~nConnect(host, port, timeout)
+  loop while r[1] == "AGAIN"                 -- see "HALT" in oosockets.cpp
+    r = self~nConnectMore(r[2])
+  end
   select
     when r[1] == "OK" then nop
     when r[1] == "TIMEOUT" then
@@ -142,6 +154,9 @@
     otherwise
       raise syntax 48.900 array("Socket error:" r[2] "(" || host || ", port" port")", r[3], r[4])
   end
+  return
+halted:
+  raise propagate
 
 ::method uninit
   self~nFree
@@ -153,6 +168,7 @@
     without LF is returned; after it, NOTREADY. */
 ::method lineIn
   expose buffer atEnd closed st desc name readTimeout
+  signal on halt name halted
   use strict arg line = .nil, count = 1
   if line \== .nil then
     raise syntax 93.900 array("Socket~lineIn: a socket has no line positions")
@@ -182,11 +198,15 @@
     if r == "TIMEOUT" | r == "ERROR" then
       raise notready description(name) additional(self) return ""
   end
+  return
+halted:
+  raise propagate
 
 /** charIn(, n): exactly n bytes (default 1), waiting for them; fewer only
     at the end of the connection, and then NOTREADY. */
 ::method charIn
   expose buffer atEnd closed name readTimeout
+  signal on halt name halted
   use strict arg start = .nil, length = 1
   if start \== .nil then
     raise syntax 93.900 array("Socket~charIn: a socket has no character positions")
@@ -206,12 +226,15 @@
   data = buffer~left(length); buffer = buffer~substr(length + 1)
   self~ready
   return data
+halted:
+  raise propagate
 
 /** read([max]): whatever has arrived, up to max bytes (default 65536),
     waiting only if nothing has. At the end of the connection, NOTREADY
     and "". */
 ::method read
   expose buffer atEnd closed name readTimeout
+  signal on halt name halted
   use strict arg max = 65536
   if \max~dataType("W") | max < 1 then
     raise syntax 93.900 array("Socket~read: max must be a positive whole number; found" max)
@@ -227,6 +250,8 @@
   data = buffer~left(min(max, buffer~length)); buffer = buffer~substr(data~length + 1)
   self~ready
   return data
+halted:
+  raise propagate
 
 /** chars: the bytes that have arrived; 1 if none have yet but the
     connection is open (more may come); 0 at its end. Never waits. */
@@ -253,15 +278,19 @@
     otherwise). 0 when written; 1 and NOTREADY when not. */
 ::method lineOut unguarded
   expose lineEnd name
+  signal on halt name halted
   use strict arg text = .nil
   if text == .nil then return 0
   if self~put(text~string || lineEnd) then return 0
   raise notready description(name) additional(self) return (1)
+halted:
+  raise propagate
 
 /** charOut(text): the bytes. 0 when written; else the number of bytes
     not written, and NOTREADY. */
 ::method charOut unguarded
   expose name
+  signal on halt name halted
   use strict arg text = .nil, start = .nil
   if start \== .nil then
     raise syntax 93.900 array("Socket~charOut: a socket has no character positions")
@@ -269,20 +298,28 @@
   text = text~string
   if self~put(text) then return 0
   raise notready description(name) additional(self) return (text~length)
+halted:
+  raise propagate
 
 /** say(text): as lineOut, so that a socket can be .output's destination. */
 ::method say unguarded
   expose lineEnd name
+  signal on halt name halted
   use strict arg text = ""
   if self~put(text~string || lineEnd) then return 0
   raise notready description(name) additional(self) return (1)
+halted:
+  raise propagate
 
 /** flush: sends what bufferOutput has kept. "READY:" when sent (or when
     nothing was kept); else NOTREADY, and the description. */
 ::method flush unguarded
   expose desc name
+  signal on halt name halted
   if self~sendKept then return "READY:"
   raise notready description(name) additional(self) return (desc)
+halted:
+  raise propagate
 
 /* ---- the connection ----------------------------------------------------- */
 
@@ -292,6 +329,7 @@
     harmless. */
 ::method close unguarded
   expose closed st desc name
+  signal on halt name halted
   sent = .true
   if \closed then sent = self~sendKept
   failure = desc
@@ -300,17 +338,22 @@
   st = "UNKNOWN"; desc = "UNKNOWN:"
   if sent then return "READY:"
   raise notready description(name) additional(self) return (failure)
+halted:
+  raise propagate
 
 /** shutdownOutput: tells the peer nothing more is coming (it reads the
     end of the stream); this end can still read. */
 ::method shutdownOutput unguarded
   expose name
+  signal on halt name halted
   if \self~sendKept then
     raise notready description(name) additional(self) return (1)
   r = self~nShutdown
   if r[1] == "OK" then return 0
   self~failed(r)
   raise notready description(name) additional(self) return (1)
+halted:
+  raise propagate
 
 ::method state unguarded
   expose st
@@ -373,6 +416,7 @@
   return self~keepSize > 0
 ::attribute bufferOutput set unguarded
   expose name
+  signal on halt name halted
   use strict arg value
   select
     when value == .true then size = 65536
@@ -384,6 +428,9 @@
   if \self~sendKept then
     raise notready description(name) additional(self)
   self~keepSize = size
+  return
+halted:
+  raise propagate
 
 /** .true when small writes go out at once (TCP_NODELAY), .false (the
     system's default) when the system may wait briefly to join them
@@ -412,10 +459,13 @@
     making it is a SYNTAX condition, 48.900, and the socket is closed. */
 ::method startTLS
   expose peerHost readTimeout
+  signal on halt name halted
   use strict arg host = .nil, options = .nil
   if host == .nil then host = peerHost
   self~handshake(host~string, options, readTimeout, "Socket~startTLS")
   return self
+halted:
+  raise propagate
 
 /** .true once TLS has started (TLSSocket, or startTLS). */
 ::method secure unguarded
@@ -437,6 +487,7 @@
     socket is closed. */
 ::method startTLSServer
   expose tls closed st desc peerHost peerPort readTimeout
+  signal on halt name halted
   use strict arg options
   identity = serverIdentity(options, "Socket~startTLSServer")
   where = "(" || peerHost || ", port" peerPort")"
@@ -444,6 +495,9 @@
   timeout = readTimeout
   if timeout == .nil then timeout = -1
   r = self~nStartTLSServer(identity[1], identity[2], options~minVersion, timeout)
+  loop while r[1] == "AGAIN"
+    r = self~nTLSMore(r[2])
+  end
   if r[1] == "OK" then do
     tls = .true
     return self
@@ -452,6 +506,8 @@
   if r[1] == "TIMEOUT" then
     raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
   raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
+halted:
+  raise propagate
 
 /** host:port, as given or as accepted ("[::1]:8888" for IPv6). */
 ::method string unguarded
@@ -464,6 +520,7 @@
 -- takes. On failure the socket is closed and a SYNTAX condition raised.
 ::method handshake private
   expose closed st desc peerPort tls
+  signal on halt name halted
   use arg host, options, timeout, who
   if options \== .nil, \options~isA(.TLSOptions) then
     raise syntax 88.900 array(who": options must be a TLSOptions; found" options)
@@ -476,6 +533,9 @@
   end
   if timeout == .nil then timeout = -1
   r = self~nStartTLS(host, trusted, minVersion, timeout)
+  loop while r[1] == "AGAIN"
+    r = self~nTLSMore(r[2])
+  end
   if r[1] == "OK" then do
     tls = .true
     return
@@ -484,10 +544,13 @@
   if r[1] == "TIMEOUT" then
     raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
   raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
+halted:
+  raise propagate
 
 -- What must hold before either side's handshake.
 ::method beforeHandshake private
   expose buffer closed st desc tls
+  signal on halt name halted
   use arg where
   if tls then
     raise syntax 48.900 array("TLS error: TLS has already started on this connection" where, "", 0)
@@ -501,11 +564,15 @@
     self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
     raise syntax 48.900 array("TLS error: data arrived before the TLS handshake" where, "", 0)
   end
+  return
+halted:
+  raise propagate
 
 -- Reads what arrives into the buffer. "OK", "EOF", "TIMEOUT" or "ERROR";
 -- the state is set for the last three (but not for a poll, timeout 0).
 ::method fill private
   expose buffer atEnd closed st desc
+  signal on halt name halted
   use arg timeout
   if closed then do
     st = "NOTREADY"; desc = "NOTREADY:closed"
@@ -520,6 +587,9 @@
       return "ERROR"
     end
   r = self~nRecv(65536, timeout)
+  loop while r[1] == "AGAIN"                 -- see "HALT" in oosockets.cpp
+    r = self~nRecv(65536, r[2])
+  end
   select
     when r[1] == "OK" then do
       buffer = buffer || r[2]
@@ -539,11 +609,15 @@
       self~failed(r)
       return "ERROR"
   end
+  return
+halted:
+  raise propagate
 
 -- Writes all of data (or keeps it, see bufferOutput). .true when written
 -- or kept; else the state says why.
 ::method put private unguarded
   expose closed st desc writeTimeout
+  signal on halt name halted
   use arg data
   if closed then do
     st = "NOTREADY"; desc = "NOTREADY:closed"
@@ -552,11 +626,14 @@
   timeout = writeTimeout
   if timeout == .nil then timeout = -1
   return self~sent(self~keep(data, timeout))
+halted:
+  raise propagate
 
 -- Sends what was kept. .true when sent (or nothing was kept); else the
 -- state says why.
 ::method sendKept private unguarded
   expose closed st desc writeTimeout
+  signal on halt name halted
   if self~keptLength == 0 then return .true
   if closed then do
     st = "NOTREADY"; desc = "NOTREADY:closed"
@@ -565,6 +642,8 @@
   timeout = writeTimeout
   if timeout == .nil then timeout = -1
   return self~sent(self~sendAllKept(timeout))
+halted:
+  raise propagate
 
 -- The state after a send's result.
 ::method sent private unguarded
@@ -611,28 +690,55 @@
 -- the buffer is full.
 ::method keep private
   expose kept keepSize
+  signal on halt name halted
   use arg data, timeout
   if var("kept") == 0 then kept = .mutableBuffer~new
   if var("keepSize") == 0 then keepSize = 0
-  if keepSize == 0, kept~length == 0 then return self~nSend(data, timeout)
+  if keepSize == 0, kept~length == 0 then return self~sendAll(data, timeout)
   kept~append(data)
   if kept~length < keepSize then return .array~of("OK", 0)
   return self~sendAllKept(timeout)
+halted:
+  raise propagate
 
 -- Sends all that is kept. On a timeout, what did not go out stays kept;
 -- on an error, it is dropped (the connection is broken).
 ::method sendAllKept private
   expose kept
+  signal on halt name halted
   use arg timeout
   if var("kept") == 0 then kept = .mutableBuffer~new
   if kept~length == 0 then return .array~of("OK", 0)
   r = self~nSend(kept~string, timeout)
+  loop while r[1] == "AGAIN"               -- see "HALT" in oosockets.cpp
+    kept = .mutableBuffer~new(kept~substr(r[2] + 1))   -- what went out is not kept
+    r = self~nSend(kept~string, r[3])
+  end
   select
     when r[1] == "OK" then kept~setBufferSize(0)
     when r[1] == "TIMEOUT" then kept = .mutableBuffer~new(kept~substr(r[2] + 1))
     otherwise kept~setBufferSize(0)
   end
   return r
+halted:
+  raise propagate
+
+-- nSend, going on after each "AGAIN" (see "HALT" in oosockets.cpp); the
+-- count of bytes sent in the result is the whole call's.
+::method sendAll private
+  signal on halt name halted
+  use arg data, timeout
+  total = 0
+  r = self~nSend(data, timeout)
+  loop while r[1] == "AGAIN"
+    total += r[2]
+    data = data~substr(r[2] + 1)
+    r = self~nSend(data, r[3])
+  end
+  if r~items > 1, r[2]~dataType("W") then r[2] = r[2] + total
+  return r
+halted:
+  raise propagate
 
 -- Bytes kept, without waiting for the lock.
 ::method keptLength private unguarded
@@ -669,6 +775,7 @@
 ::class TLSSocket public subclass Socket
 
 ::method init
+  signal on halt name halted
   if arg() == 1, arg(1)~isA(.Pointer) then do  -- from TLSServerSocket~accept
     self~init:super(arg(1))
     return
@@ -682,6 +789,9 @@
   if timeout \== .nil then
     timeout = max(0, timeout - (.DateTime~new - started)~totalSeconds)
   self~handshake(host~string, options, timeout, "TLSSocket~new")
+  return
+halted:
+  raise propagate
 
 
 /*============================================================================*/
@@ -797,17 +907,24 @@
     acceptTimeout that expires, returns .nil. */
 ::method accept
   expose port closed acceptTimeout
+  signal on halt name halted
   if closed then
     raise syntax 48.900 array("Socket error: the server socket is closed (port" port")", "EBADF", 0)
   timeout = acceptTimeout
   if timeout == .nil then timeout = -1
   r = self~nAccept(timeout)
+  loop while r[1] == "AGAIN"                 -- see "HALT" in oosockets.cpp
+    r = self~nAccept(r[2])
+  end
   select
     when r[1] == "OK" then return self~accepted(r[2])
     when r[1] == "TIMEOUT" then return .nil
     otherwise
       raise syntax 48.900 array("Socket error:" r[2] "(accepting on port" port")", r[3], r[4])
   end
+  return
+halted:
+  raise propagate
 
 ::method close unguarded
   expose closed
@@ -953,15 +1070,22 @@
     With a receiveTimeout that expires, returns .nil. */
 ::method receive unguarded
   expose receiveTimeout
+  signal on halt name halted
   self~checkOpen
   timeout = receiveTimeout
   if timeout == .nil then timeout = -1
   r = self~nReceive(timeout)
+  loop while r[1] == "AGAIN"                 -- see "HALT" in oosockets.cpp
+    r = self~nReceive(r[2])
+  end
   select
     when r[1] == "OK" then return .Datagram~new(r[2], r[3], r[4])
     when r[1] == "TIMEOUT" then return .nil
     otherwise self~raiseError(r, "", "")
   end
+  return
+halted:
+  raise propagate
 
 /** connect(host, port): from now on send(data) goes there, and only its
     datagrams are received. A datagram to a port where nobody listens can
