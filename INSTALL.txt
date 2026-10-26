@@ -22,11 +22,15 @@ DYLD_LIBRARY_PATH on macOS, LD_LIBRARY_PATH on Linux) for the library.
 
 What each zip needs:
 
-  Windows: ooRexx 5.x, 64-bit. OpenSSL is inside oosockets.dll.
-  macOS:   ooRexx 5.x; macOS 11 or later on Apple Silicon, 10.14 or
-           later on Intel. OpenSSL is inside liboosockets.dylib.
-  Linux:   ooRexx 5.x, x86_64; glibc 2.35 or later and OpenSSL 3
+  Windows: 64-bit. OpenSSL is inside oosockets.dll.
+  macOS:   macOS 11 or later on Apple Silicon, 10.14 or later on Intel.
+           OpenSSL is inside liboosockets.dylib.
+  Linux:   x86_64; glibc 2.35 or later and OpenSSL 3
            (libssl.so.3), as in Ubuntu 22.04 and later, Debian 12,
            Fedora, and others.
 
-Tested with ooRexx 5.3.0 beta (trunk r13297) and ooRexx 5.2.0.
+ooRexx: 5.3.0 beta, trunk r13297 or later (tested with r13297 and the
+newest beta build). ooSockets is a beta, as ooRexx 5.3.0 is, and leaves
+beta with it. ooRexx 5.2.0 is not supported: its interpreter crashes now
+and then in programs with several activities (a server that serves each
+client in an activity of its own), which 5.3.0 has fixed.

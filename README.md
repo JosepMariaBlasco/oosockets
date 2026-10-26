@@ -4,9 +4,11 @@ Object oriented TCP/IP sockets for [ooRexx](https://www.oorexx.org/):
 IPv4 and IPv6, sockets that are Rexx streams, TLS with the operating
 system deciding which certificates to trust, and UDP.
 
-> **Status: prototype.** The TCP classes, the TLS client, the TLS
-> server and UDP work and are tested on Linux, macOS and Windows. Names
-> and behaviour may still change until 1.0.
+> **Status: beta**, as ooRexx 5.3.0 is; 1.0 comes with ooRexx 5.3.0.
+> The TCP classes, the TLS client, the TLS server and UDP work and are
+> tested on Linux, macOS and Windows. Needs ooRexx 5.3.0 beta (trunk
+> r13297 or later), not 5.2.0: see `INSTALL.txt`. Names and behaviour may
+> still change until 1.0.
 
 ```rexx
 s = .Socket~new("localhost", 8888)        -- IPv6 or IPv4, whichever answers

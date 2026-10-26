@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Fetches a portable ooRexx from SourceForge and unpacks it.
 #   scripts/get-oorexx.sh <version> <build> <dest>
-#   version: "trunk" (the family's revision, scripts/oorexx-version.sh) or "5.2.0"
+#   version: "trunk" (the family's revision, scripts/oorexx-version.sh), or
+#            "latest" (the newest 5.3.0 beta build SourceForge has for this
+#            platform: builds appear there as trunk moves, platform by
+#            platform), or "5.2.0"
 #   build:   SourceForge's platform name, e.g. ubuntu2204.x86_64,
 #            macos.arm64.x86_64, windows.x86_64
 # Prints the ooRexx home directory (with bin/, lib/, include/).
@@ -12,6 +15,14 @@ case "$version" in
   trunk)
     . "$here/oorexx-version.sh"
     name="oorexx-5.3.0-$OOREXX_REV.$build-portable-release"
+    url="https://downloads.sourceforge.net/project/oorexx/oorexx/5.3.0beta/portable/$name.zip" ;;
+  latest)
+    rev="$(curl -fsSL --retry 3 "https://sourceforge.net/projects/oorexx/files/oorexx/5.3.0beta/portable/" \
+           | grep -o "oorexx-5\.3\.0-[0-9]*\.$build-portable-release\.zip" \
+           | sed 's/^oorexx-5\.3\.0-\([0-9]*\)\..*/\1/' | sort -n | tail -1)"
+    [ -n "$rev" ] || { echo "no 5.3.0 beta build found for $build" >&2; exit 1; }
+    echo "ooRexx 5.3.0 beta, the newest build for $build: r$rev" >&2
+    name="oorexx-5.3.0-$rev.$build-portable-release"
     url="https://downloads.sourceforge.net/project/oorexx/oorexx/5.3.0beta/portable/$name.zip" ;;
   5.2.0)
     name="oorexx-5.2.0-13156.$build-portable-release"

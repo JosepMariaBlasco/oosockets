@@ -2,9 +2,12 @@ name: Release
 
 # A tag vX.Y.Z (X.Y.Z = CMakeLists.txt's project version) builds the three
 # zips, tests each as unpacked and as installed (INSTALL.txt), with ooRexx
-# 5.3.0 beta (the family's revision) and 5.2.0, and makes a DRAFT release
-# with them, to be published by hand. Run by hand (workflow_dispatch), it
-# does all but the release.
+# 5.3.0 beta: the family's revision and the newest build ("latest"), and
+# makes a DRAFT pre-release with them, to be published by hand (ooSockets
+# leaves beta with ooRexx 5.3.0). ooRexx 5.2.0 is not supported: its
+# interpreter crashes now and then in programs with several activities
+# (fixed in 5.3.0; state, design sketch). Run by hand (workflow_dispatch),
+# it does all but the release.
 on:
   push:
     tags: ['v*']
@@ -149,14 +152,14 @@ jobs:
       matrix:
         include:
           - { zip: linux-x86_64, runner: ubuntu-24.04, container: 'ubuntu:22.04', where: ubuntu-22.04, oorexx: trunk, build: ubuntu2204.x86_64 }
-          - { zip: linux-x86_64, runner: ubuntu-24.04, container: 'debian:12', where: debian-12, oorexx: 5.2.0, build: debian12.x86_64 }
-          - { zip: linux-x86_64, runner: ubuntu-24.04, container: '', where: ubuntu-24.04, oorexx: 5.2.0, build: ubuntu2404.x86_64 }
+          - { zip: linux-x86_64, runner: ubuntu-24.04, container: 'debian:12', where: debian-12, oorexx: latest, build: debian12.x86_64 }
+          - { zip: linux-x86_64, runner: ubuntu-24.04, container: '', where: ubuntu-24.04, oorexx: latest, build: ubuntu2404.x86_64 }
           - { zip: macos-universal, runner: macos-15, container: '', where: arm64, oorexx: trunk, build: macos.arm64.x86_64 }
-          - { zip: macos-universal, runner: macos-15, container: '', where: arm64, oorexx: 5.2.0, build: macos.arm64.x86_64 }
+          - { zip: macos-universal, runner: macos-15, container: '', where: arm64, oorexx: latest, build: macos.arm64.x86_64 }
           - { zip: macos-universal, runner: macos-15-intel, container: '', where: x86_64, oorexx: trunk, build: macos.arm64.x86_64 }
-          - { zip: macos-universal, runner: macos-15-intel, container: '', where: x86_64, oorexx: 5.2.0, build: macos.arm64.x86_64 }
+          - { zip: macos-universal, runner: macos-15-intel, container: '', where: x86_64, oorexx: latest, build: macos.arm64.x86_64 }
           - { zip: windows-x86_64, runner: windows-2022, container: '', where: '', oorexx: trunk, build: windows.x86_64 }
-          - { zip: windows-x86_64, runner: windows-2022, container: '', where: '', oorexx: 5.2.0, build: windows.x86_64 }
+          - { zip: windows-x86_64, runner: windows-2022, container: '', where: '', oorexx: latest, build: windows.x86_64 }
     defaults:
       run:
         shell: bash
@@ -222,7 +225,8 @@ jobs:
             echo "ooSockets $V: TCP, TLS and UDP sockets for ooRexx, IPv4 and IPv6."
             echo
             echo "Each zip has the native library, \`sockets.cls\`, the README, the licence and \`INSTALL.txt\`."
-            echo "Tested with ooRexx 5.3.0 beta and 5.2.0."
+            echo "A beta, as ooRexx 5.3.0 is: needs ooRexx 5.3.0 beta (trunk r13297 or later); not ooRexx 5.2.0."
+            echo "Tested with ooRexx 5.3.0 beta r13297 and the newest beta build."
             echo
             echo "| File | SHA-256 |"
             echo "|---|---|"
@@ -230,4 +234,4 @@ jobs:
           } > notes.md
           cat notes.md
           gh release create "$GITHUB_REF_NAME" *.zip --repo "$GITHUB_REPOSITORY" \
-            --draft --title "ooSockets $V" --notes-file notes.md
+            --draft --prerelease --title "ooSockets $V (beta)" --notes-file notes.md
