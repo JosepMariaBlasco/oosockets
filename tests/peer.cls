@@ -116,7 +116,7 @@ notready:
   c = srv~accept
   c~readTimeout = 10
   signal on syntax
-  c~startTLSServer(certFile(file), password)
+  c~startTLSServer(serverOptions(file, password))
   got = .array~new
   signal on notready
   loop
@@ -138,7 +138,7 @@ syntax:
   use strict arg bytes, file = "server.pem", password = "test"
   c = srv~accept
   c~readTimeout = 10
-  c~startTLSServer(certFile(file), password)
+  c~startTLSServer(serverOptions(file, password))
   c~charOut(bytes)
   c~close
   return 0
@@ -150,7 +150,7 @@ syntax:
   expose srv
   c = srv~accept
   c~readTimeout = 20
-  c~startTLSServer(certFile("server.pem"), "test")
+  c~startTLSServer(serverOptions("server.pem"))
   data = .mutableBuffer~new
   signal on notready
   loop
@@ -174,7 +174,7 @@ notready:
     return "no STARTTLS"
   end
   c~lineOut("220 go ahead")
-  c~startTLSServer(certFile("server.pem"), "test")
+  c~startTLSServer(serverOptions("server.pem"))
   c~lineOut(c~lineIn)
   c~close
   return 0
@@ -192,6 +192,11 @@ notready:
   c~close
   return 0
 
+
+-- TLSOptions with a certificate from tests/certs/.
+::routine serverOptions public
+  use strict arg file, password = "test"
+  return .TLSOptions~new~certificate(certFile(file), password)
 
 -- The full path of a file in tests/certs/.
 ::routine certFile public

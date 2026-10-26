@@ -605,6 +605,7 @@ struct TlsOutcome
     int socketError = 0;          // TLS_SOCKET_ERROR
     unsigned long sslError = 0;   // TLS_SSL_ERROR: ERR_get_error()'s
     long verifyResult = X509_V_OK;
+    bool handshaking = false;     // the handshake had not finished
 };
 
 // Runs call(ssl) until it succeeds, retrying when OpenSSL wants to read or
@@ -635,6 +636,7 @@ static TlsOutcome tlsRun(Sock *s, bool hasDeadline, Clock::time_point deadline, 
                 return out;
             }
             sslErr = SSL_get_error(s->ssl, rc);
+            out.handshaking = !SSL_is_init_finished(s->ssl);
             out.socketError = s->ioError;
             out.sslError = ERR_peek_last_error();
             out.verifyResult = SSL_get_verify_result(s->ssl);
@@ -698,6 +700,8 @@ static std::string sslReason(unsigned long e)
     return buf;
 }
 
+static TrustError opensslTrustError(long v);
+
 // The result of a TLS read or write that failed on an established connection.
 static RexxArrayObject tlsIoResult(RexxMethodContext *context, const TlsOutcome &o)
 {
@@ -708,8 +712,16 @@ static RexxArrayObject tlsIoResult(RexxMethodContext *context, const TlsOutcome 
         case TLS_CLOSED:  return closedResult(context);
         case TLS_SOCKET_ERROR: return errorResult(context, o.socketError);
         default:
-            return errorArray(context, "TLS: " + sslReason(o.sslError), "SSL_ERROR_SSL",
-                              (long long)ERR_GET_REASON(o.sslError));
+            // "ERROR:TLS handshake failed: tlsv1 alert unknown ca" as the
+            // description (the handshake of an accepted socket happens on
+            // its first read or write).
+            if (o.handshaking && o.verifyResult != X509_V_OK && o.verifyResult != X509_V_ERR_APPLICATION_VERIFICATION)
+            {
+                return errorArray(context, opensslTrustError(o.verifyResult).text, "TLS",
+                                  (long long)o.verifyResult);
+            }
+            return errorArray(context, (o.handshaking ? "handshake failed: " : "") + sslReason(o.sslError),
+                              "TLS", (long long)ERR_GET_REASON(o.sslError));
     }
 }
 
@@ -1314,10 +1326,83 @@ RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxA
     return handshakeFailure(context, s, o);
 }
 
-// nStartTLSServer(file, password, timeout): the server's handshake, with
-// the certificate and key in file (PKCS#12, or PEM with both).
-RexxMethod4(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file,
-            CSTRING, password, double, timeout)
+// A server's TLS context, with the certificate and key in file (PKCS#12
+// with its password, or PEM with both); nullptr and why if it cannot be.
+static SSL_CTX *serverContext(const char *file, const char *password, const char *minVersion, std::string &why)
+{
+    std::string data;
+    std::vector<X509 *> certs;
+    EVP_PKEY *key = nullptr;
+    if (!readFile(file, data, why) || !loadCertificates(data, password, certs, &key, why))
+    {
+        for (X509 *x : certs)
+        {
+            X509_free(x);
+        }
+        return nullptr;
+    }
+    if (key == nullptr)
+    {
+        for (X509 *x : certs)
+        {
+            X509_free(x);
+        }
+        why = "no private key in the file";
+        return nullptr;
+    }
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+    SSL_CTX_set_min_proto_version(ctx, minVersionOf(minVersion));
+#ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
+    SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+#endif
+    SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+    // No session resumption here, so no TLS 1.3 tickets: a client that
+    // never reads them would close with a reset.
+    SSL_CTX_set_num_tickets(ctx, 0);
+    ERR_clear_error();
+    bool ok = SSL_CTX_use_certificate(ctx, certs[0]) == 1 && SSL_CTX_use_PrivateKey(ctx, key) == 1
+              && SSL_CTX_check_private_key(ctx) == 1;
+    unsigned long e = ERR_peek_last_error();
+    for (size_t i = 1; ok && i < certs.size(); i++)
+    {
+        SSL_CTX_add_extra_chain_cert(ctx, certs[i]);   // takes it
+        certs[i] = nullptr;
+    }
+    ERR_clear_error();
+    for (X509 *x : certs)
+    {
+        X509_free(x);
+    }
+    EVP_PKEY_free(key);
+    if (!ok)
+    {
+        SSL_CTX_free(ctx);
+        why = ERR_GET_REASON(e) == X509_R_KEY_VALUES_MISMATCH
+              ? "the private key is not the certificate's"
+              : sslReason(e);
+        return nullptr;
+    }
+    return ctx;
+}
+
+// TLSOptions~nCheckIdentity(file, password): "OK" if the file has a
+// certificate and its key; else "ERROR", why.
+RexxMethod2(RexxArrayObject, tls_check_identity, CSTRING, file, CSTRING, password)
+{
+    std::string why;
+    SSL_CTX *ctx = serverContext(file, password, "1.2", why);
+    if (ctx == nullptr)
+    {
+        return errorArray(context, why, "", 0);
+    }
+    SSL_CTX_free(ctx);
+    return statusResult(context, "OK");
+}
+
+// nStartTLSServer(file, password, minVersion, timeout): the server's
+// handshake on a connected socket (STARTTLS, server side), now.
+RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file,
+            CSTRING, password, CSTRING, minVersion, double, timeout)
 {
     Sock *s = (Sock *)cself;
     if (s == nullptr || s->fd == BAD_SOCKET)
@@ -1328,51 +1413,11 @@ RexxMethod4(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
     {
         return errorArray(context, "TLS has already started on this connection", "", 0);
     }
-    std::string data, why;
-    std::vector<X509 *> certs;
-    EVP_PKEY *key = nullptr;
-    if (!readFile(file, data, why) || !loadCertificates(data, password, certs, &key, why))
+    std::string why;
+    SSL_CTX *ctx = serverContext(file, password, minVersion, why);
+    if (ctx == nullptr)
     {
-        for (X509 *x : certs)
-        {
-            X509_free(x);
-        }
         return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
-    }
-    if (key == nullptr)
-    {
-        for (X509 *x : certs)
-        {
-            X509_free(x);
-        }
-        return errorArray(context, "cannot use " + std::string(file) + ": no private key in the file", "", 0);
-    }
-    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
-    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
-    // No session resumption here, so no TLS 1.3 tickets: a client that
-    // never reads them would close with a reset.
-    SSL_CTX_set_num_tickets(ctx, 0);
-#ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
-    SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
-#endif
-    SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
-    bool ok = SSL_CTX_use_certificate(ctx, certs[0]) == 1 && SSL_CTX_use_PrivateKey(ctx, key) == 1;
-    for (size_t i = 1; ok && i < certs.size(); i++)
-    {
-        SSL_CTX_add_extra_chain_cert(ctx, certs[i]);   // takes it
-        certs[i] = nullptr;
-    }
-    unsigned long e = ERR_peek_last_error();
-    ERR_clear_error();
-    for (X509 *x : certs)
-    {
-        X509_free(x);
-    }
-    EVP_PKEY_free(key);
-    if (!ok)
-    {
-        SSL_CTX_free(ctx);
-        return errorArray(context, "cannot use " + std::string(file) + ": " + sslReason(e), "", 0);
     }
     s->trust = TrustError();
     attachSsl(s, ctx);
@@ -1386,25 +1431,53 @@ RexxMethod4(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
     return handshakeFailure(context, s, o);
 }
 
-// nTLSInfo: "OK", protocol ("TLSv1.3"), cipher; "" and "" without TLS.
+// TLSServerSocket's nTLS(file, password, minVersion): the context every
+// accepted connection will share. "OK"; or "ERROR", why.
+RexxMethod4(RexxArrayObject, server_tls, CSELF, cself, CSTRING, file, CSTRING, password, CSTRING, minVersion)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    std::string why;
+    SSL_CTX *ctx = serverContext(file, password, minVersion, why);
+    if (ctx == nullptr)
+    {
+        return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
+    }
+    std::lock_guard<std::mutex> guard(s->mu);
+    if (s->ctx != nullptr)
+    {
+        SSL_CTX_free(s->ctx);
+    }
+    s->ctx = ctx;
+    return statusResult(context, "OK");
+}
+
+// nTLSInfo: "OK", protocol ("TLSv1.3"), cipher, 1 if TLS is on (else 0).
+// Protocol and cipher are "" until the handshake has finished.
 RexxMethod1(RexxArrayObject, socket_tlsinfo, CSELF, cself)
 {
     Sock *s = (Sock *)cself;
     std::string protocol, cipher;
+    bool on = false;
     if (s != nullptr)
     {
         std::lock_guard<std::mutex> guard(s->mu);
-        if (s->ssl != nullptr)
+        on = s->ssl != nullptr;
+        if (on && SSL_is_init_finished(s->ssl))
         {
             protocol = SSL_get_version(s->ssl);
             const char *c = SSL_get_cipher_name(s->ssl);
             cipher = c != nullptr ? c : "";
         }
     }
-    RexxArrayObject r = context->NewArray(3);
+    RexxArrayObject r = context->NewArray(4);
     context->ArrayAppendString(r, "OK", 2);
     context->ArrayAppendString(r, protocol.c_str(), protocol.size());
     context->ArrayAppendString(r, cipher.c_str(), cipher.size());
+    context->ArrayAppend(r, context->WholeNumber(on ? 1 : 0));
     return r;
 }
 
@@ -1963,7 +2036,24 @@ RexxMethod2(RexxArrayObject, server_accept, CSELF, cself, double, timeout)
         {
             prepareSocket(fd);
             setBlocking(fd, true);
-            return statusResult(context, "OK", context->NewPointer(new Sock(fd)));
+            Sock *c = new Sock(fd);
+            SSL_CTX *ctx;
+            {
+                std::lock_guard<std::mutex> guard(s->mu);
+                ctx = s->ctx;
+                if (ctx != nullptr)
+                {
+                    SSL_CTX_up_ref(ctx);
+                }
+            }
+            if (ctx != nullptr)
+            {
+                // TLSServerSocket: the handshake happens on the first read
+                // or write, in whatever activity serves this client.
+                attachSsl(c, ctx);
+                SSL_set_accept_state(c->ssl);
+            }
+            return statusResult(context, "OK", context->NewPointer(c));
         }
         int e = lastError();
         if (interrupted(e))
@@ -2004,6 +2094,8 @@ static RexxMethodEntry oosockets_methods[] =
     REXX_METHOD(socket_starttls, socket_starttls),
     REXX_METHOD(socket_starttls_server, socket_starttls_server),
     REXX_METHOD(socket_tlsinfo,  socket_tlsinfo),
+    REXX_METHOD(server_tls,      server_tls),
+    REXX_METHOD(tls_check_identity, tls_check_identity),
     REXX_METHOD(tls_load_certificates, tls_load_certificates),
     REXX_LAST_METHOD()
 };

@@ -56,6 +56,7 @@
    awaited).
 
    s = .TLSSocket~new("www.example.com", 443)   -- certificate verified
+   srv = .TLSServerSocket~new(9999, .TLSOptions~new~certificate("srv.p12", "pw"))
 
    Strings are bytes, and so is the network: nothing is converted.      */
 
@@ -109,6 +110,7 @@
 
   if arg() == 1, arg(1)~isA(.Pointer) then do  -- from ServerSocket~accept
     self~nAdopt(arg(1))
+    tls = self~nTLSInfo[4] == 1                -- from TLSServerSocket~accept
     peerHost = self~remoteAddress; peerPort = self~remotePort
     name = hostAndPort(peerHost, peerPort)
     return
@@ -424,21 +426,25 @@
 ::method cipher unguarded
   return self~nTLSInfo[3]
 
-/* Provisional, until TLSServerSocket: the server's side of the handshake,
-   with the certificate and its key in file (PKCS#12 with its password, or
-   PEM with both). The tests use it. */
+/** startTLSServer(options): the server's side of TLS on this connection,
+    from now on (an SMTP server after STARTTLS). options: a TLSOptions with
+    the server's certificate. The handshake is made now, waiting at most
+    readTimeout; not making it is a SYNTAX condition, 48.900, and the
+    socket is closed. */
 ::method startTLSServer
   expose tls closed st desc peerHost peerPort readTimeout
-  use strict arg file, password = ""
+  use strict arg options
+  identity = serverIdentity(options, "Socket~startTLSServer")
+  where = "(" || peerHost || ", port" peerPort")"
+  self~beforeHandshake(where)
   timeout = readTimeout
   if timeout == .nil then timeout = -1
-  r = self~nStartTLSServer(file~string, password~string, timeout)
+  r = self~nStartTLSServer(identity[1], identity[2], options~minVersion, timeout)
   if r[1] == "OK" then do
     tls = .true
     return self
   end
   self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
-  where = "(" || peerHost || ", port" peerPort")"
   if r[1] == "TIMEOUT" then
     raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
   raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
@@ -453,23 +459,12 @@
 -- The client's side of the TLS handshake. timeout: .nil, as long as it
 -- takes. On failure the socket is closed and a SYNTAX condition raised.
 ::method handshake private
-  expose buffer closed st desc peerPort tls
+  expose closed st desc peerPort tls
   use arg host, options, timeout, who
   if options \== .nil, \options~isA(.TLSOptions) then
     raise syntax 88.900 array(who": options must be a TLSOptions; found" options)
   where = "(" || host || ", port" peerPort")"
-  if tls then
-    raise syntax 48.900 array("TLS error: TLS has already started on this connection" where, "", 0)
-  if closed then
-    raise syntax 48.900 array("TLS error: the socket is closed" where, "EBADF", 0)
-  if \self~sendKept then
-    raise syntax 48.900 array("TLS error: what was kept to send could not be sent" where, "", 0)
-  if buffer \== "" then do
-    -- Bytes that came before the handshake, in clear, would be taken as
-    -- if they had come over TLS (the STARTTLS injection attacks).
-    self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
-    raise syntax 48.900 array("TLS error: data arrived before the TLS handshake" where, "", 0)
-  end
+  self~beforeHandshake(where)
   trusted = .array~new; minVersion = "1.2"
   if options \== .nil then do
     trusted = options~trusted
@@ -485,6 +480,23 @@
   if r[1] == "TIMEOUT" then
     raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
   raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
+
+-- What must hold before either side's handshake.
+::method beforeHandshake private
+  expose buffer closed st desc tls
+  use arg where
+  if tls then
+    raise syntax 48.900 array("TLS error: TLS has already started on this connection" where, "", 0)
+  if closed then
+    raise syntax 48.900 array("TLS error: the socket is closed" where, "EBADF", 0)
+  if \self~sendKept then
+    raise syntax 48.900 array("TLS error: what was kept to send could not be sent" where, "", 0)
+  if buffer \== "" then do
+    -- Bytes that came before the handshake, in clear, would be taken as
+    -- if they had come over TLS (the STARTTLS injection attacks).
+    self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
+    raise syntax 48.900 array("TLS error: data arrived before the TLS handshake" where, "", 0)
+  end
 
 -- Reads what arrives into the buffer. "OK", "EOF", "TIMEOUT" or "ERROR";
 -- the state is set for the last three (but not for a poll, timeout 0).
@@ -653,6 +665,10 @@
 ::class TLSSocket public subclass Socket
 
 ::method init
+  if arg() == 1, arg(1)~isA(.Pointer) then do  -- from TLSServerSocket~accept
+    self~init:super(arg(1))
+    return
+  end
   use strict arg host, port, options = .nil, connectTimeout = .nil
   if options \== .nil, \options~isA(.TLSOptions) then
     raise syntax 88.900 array("TLSSocket~new: options must be a TLSOptions; found" options)
@@ -676,6 +692,7 @@
 ::class TLSOptions public
 
 ::method nLoad private external "LIBRARY oosockets tls_load_certificates"
+::method nCheckIdentity private external "LIBRARY oosockets tls_check_identity"
 
 ::method init
   expose trusted minVersion
@@ -695,6 +712,28 @@
     raise syntax 48.900 array("TLS error: cannot use" file~string":" r[2], r[3], r[4])
   trusted~appendAll(r[2])
   return self
+
+/** certificate(file [, password]): this end's certificate and its private
+    key, in file: a PKCS#12 keystore with its password (as keytool makes
+    them), or PEM with both. What a TLSServerSocket presents to its
+    clients. Returns the TLSOptions. A file that cannot be used is a
+    SYNTAX condition, 48.900. */
+::method certificate
+  expose identity
+  use strict arg file, password = ""
+  file = file~string; password = password~string
+  r = self~nCheckIdentity(file, password)
+  if r[1] \== "OK" then
+    raise syntax 48.900 array("TLS error: cannot use" file":" r[2], r[3], r[4])
+  identity = .array~of(file, password)
+  return self
+
+/** The certificate's file and password, as an array, or .nil if none was
+    given (for TLSServerSocket and startTLSServer). */
+::method identity
+  expose identity
+  if var("identity") == 0 then return .nil
+  return identity~copy
 
 /** The certificates trusted, as an array of DER strings (a copy). */
 ::method trusted
@@ -760,7 +799,7 @@
   if timeout == .nil then timeout = -1
   r = self~nAccept(timeout)
   select
-    when r[1] == "OK" then return .Socket~new(r[2])
+    when r[1] == "OK" then return self~accepted(r[2])
     when r[1] == "TIMEOUT" then return .nil
     otherwise
       raise syntax 48.900 array("Socket error:" r[2] "(accepting on port" port")", r[3], r[4])
@@ -771,6 +810,11 @@
   self~nClose
   closed = .true
   return "READY:"
+
+-- The Socket for an accepted connection.
+::method accepted private
+  use arg pointer
+  return .Socket~new(pointer)
 
 ::method localAddress unguarded
   r = self~nAddress("L")
@@ -795,8 +839,55 @@
 
 
 /*============================================================================*/
+/* TLSServerSocket: a listening socket whose connections are TLS              */
+/*============================================================================*/
+
+/* new(port, options [, address [, backlog]]): listens, as ServerSocket.
+   options: a TLSOptions with the server's certificate (certificate(file
+   [, password])). accept returns a TLSSocket at once; its TLS handshake
+   happens on its first read or write, in the activity that serves it, so
+   a client that fails the handshake (a browser that does not trust the
+   certificate, a port scanner) or never makes it does not stop the
+   server: that socket gets NOTREADY, its description says why ("ERROR:TLS
+   handshake failed: tlsv1 alert unknown ca"), and the handshake waits at
+   most readTimeout (or writeTimeout, if it starts with a write).      */
+
+::class TLSServerSocket public subclass ServerSocket
+
+::method nTLS private external "LIBRARY oosockets server_tls"
+
+::method init
+  use strict arg port, options, address = "", backlog = 0
+  identity = serverIdentity(options, "TLSServerSocket~new")
+  self~init:super(port, address, backlog)
+  r = self~nTLS(identity[1], identity[2], options~minVersion)
+  if r[1] \== "OK" then do
+    self~close
+    raise syntax 48.900 array("TLS error:" r[2], r[3], r[4])
+  end
+
+::method accepted private
+  use arg pointer
+  return .TLSSocket~new(pointer)
+
+::method string unguarded
+  return "a TLSServerSocket on port" self~localPort
+
+
+/*============================================================================*/
 /* Helpers                                                                    */
 /*============================================================================*/
+
+-- The certificate file and password of options, a TLSOptions that must
+-- have one.
+::routine serverIdentity
+  use arg options, who
+  if \options~isA(.TLSOptions) then
+    raise syntax 88.900 array(who": options must be a TLSOptions; found" options)
+  identity = options~identity
+  if identity == .nil then
+    raise syntax 88.900 array(who": options must have the server's certificate (TLSOptions~certificate)")
+  return identity
 
 -- .nil, or a non-negative number of seconds.
 ::routine checkTimeout

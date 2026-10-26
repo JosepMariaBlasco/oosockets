@@ -1,0 +1,260 @@
+#!/usr/bin/env rexx
+/* TLSServerSocket and Socket~startTLSServer. The clients run in another
+   activity (the Client class below), trusting the test CA in tests/certs/.
+   The handshake of an accepted socket happens on its first read or
+   write: a client that fails it must not stop the server.               */
+
+  parse source . . fileSpec
+  group = .TestGroup~new(fileSpec)
+  group~add(.TLSServerSocket.testGroup)
+  if group~isAutomatedTest then return group
+  testResult = group~suite~execute~~print
+return testResult
+
+::requires 'ooTest.frm'
+::requires 'sockets.cls'
+::requires 'peer.cls'
+
+::class "TLSServerSocket.testGroup" subclass ooTestCase public
+
+/* ---- serving ------------------------------------------------------------ */
+
+::method test_echo
+  srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
+  msg = .Client~new~start("echoOnce", srv~localPort, "Hello, TLS server")
+  c = srv~accept
+  self~assertTrue(c~isA(.TLSSocket))
+  self~assertTrue(c~secure)
+  self~assertSame("", c~protocol)                  -- no handshake yet
+  c~readTimeout = 10
+  self~assertSame("Hello, TLS server", c~lineIn)   -- the handshake, then the line
+  self~assertSame("TLSv1.3", c~protocol)
+  c~lineOut("echo")
+  self~assertSame("echo", msg~result)
+  c~close
+  srv~close
+
+-- Rony's classroom case: one keytool keystore on both ends.
+::method test_a_keytool_keystore_on_both_ends
+  srv = .TLSServerSocket~new(0, serverOptions("keytool.p12", "123456"), "127.0.0.1")
+  opts = .TLSOptions~new~trust(certFile("keytool.p12"), "123456")
+  msg = .Client~new~start("echoOnce", srv~localPort, "keytool", opts)
+  c = srv~accept
+  c~readTimeout = 10
+  c~lineOut(c~lineIn)
+  self~assertSame("keytool", msg~result)
+  c~close
+  srv~close
+
+-- The server's first move is a write: the handshake happens there.
+::method test_the_server_writes_first
+  srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
+  msg = .Client~new~start("readOne", srv~localPort)
+  c = srv~accept
+  c~writeTimeout = 10
+  self~assertSame(0, c~lineOut("220 welcome"))
+  self~assertSame("220 welcome", msg~result)
+  c~close
+  srv~close
+
+-- The usual server: each client in an activity of its own.
+::method test_one_activity_per_client
+  srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
+  clients = .array~new
+  do i = 1 to 3
+    clients~append(.Client~new~start("echoOnce", srv~localPort, "client" i))
+  end
+  do 3
+    .Session~new~start("serve", srv~accept)
+  end
+  got = .array~new
+  do m over clients
+    got~append(m~result)
+  end
+  self~assertSame("client 1,client 2,client 3", got~makeString("L", ","))
+  srv~close
+
+/* ---- clients that fail -------------------------------------------------- */
+
+-- A client that does not trust the certificate (the system decides, and it
+-- has never heard of the test CA): its own TLSSocket~new fails; on the
+-- server, NOTREADY on that socket, and the next client is served.
+::method test_a_client_that_refuses_the_certificate
+  srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
+  bad = .Client~new~start("connectOnly", srv~localPort, .nil)
+  c = srv~accept
+  c~readTimeout = 10
+  self~notready(c)
+  self~assertSame("ERROR", c~state)
+  self~assertTrue(c~description~startsWith("ERROR:TLS handshake failed: "), c~description)
+  say "  (the server's side:" c~description")"
+  self~assertTrue(bad~result~startsWith("TLS error: certificate"), bad~result)
+  c~close
+  -- the server goes on
+  msg = .Client~new~start("echoOnce", srv~localPort, "next")
+  c = srv~accept
+  c~readTimeout = 10
+  c~lineOut(c~lineIn)
+  self~assertSame("next", msg~result)
+  c~close
+  srv~close
+
+-- A client that does not speak TLS (telnet, a browser on http://).
+::method test_a_client_in_clear
+  srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
+  msg = .Client~new~start("plainLine", srv~localPort, "GET / HTTP/1.0")
+  c = srv~accept
+  c~readTimeout = 10
+  self~notready(c)
+  self~assertTrue(c~description~startsWith("ERROR:TLS handshake failed: "), c~description)
+  say "  (the server's side:" c~description")"
+  c~close
+  msg~result
+  srv~close
+
+-- A client that connects and says nothing waits only in its own activity,
+-- and only for readTimeout; accept goes on meanwhile.
+::method test_a_silent_client_does_not_block_accept
+  srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
+  silent = .Socket~new("127.0.0.1", srv~localPort)
+  quiet = srv~accept                                 -- returns at once
+  msg = .Client~new~start("echoOnce", srv~localPort, "not blocked")
+  c = srv~accept
+  c~readTimeout = 10
+  c~lineOut(c~lineIn)
+  self~assertSame("not blocked", msg~result)
+  c~close
+  quiet~readTimeout = 0.5
+  self~notready(quiet)
+  self~assertSame("NOTREADY:TIMEOUT", quiet~description)
+  quiet~close; silent~close
+  srv~close
+
+::method test_acceptTimeout
+  srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
+  srv~acceptTimeout = 0.2
+  self~assertSame(.nil, srv~accept)
+  srv~close
+
+/* ---- the server's certificate -------------------------------------------- */
+
+::method test_without_a_certificate
+  c = newFails(.TLSOptions~new~trust(certFile("ca.pem")))
+  self~assertSame(88.900, c~code)
+  self~assertTrue(c~additional[1]~pos("certificate") > 0, c~additional[1])
+
+::method test_options_must_be_TLSOptions
+  c = newFails("server.pem")
+  self~assertSame(88.900, c~code)
+
+::method test_a_certificate_without_its_key
+  c = certificateFails(certFile("ca.pem"))
+  self~assertSame(48.900, c~code)
+  self~assertTrue(c~additional[1]~endsWith(": no private key in the file"), c~additional[1])
+
+::method test_a_key_that_is_not_the_certificates
+  c = certificateFails(certFile("mismatch.pem"))
+  self~assertTrue(c~additional[1]~endsWith(": the private key is not the certificate's"), c~additional[1])
+
+::method test_the_wrong_password
+  c = certificateFails(certFile("keytool.p12"), "wrong")
+  self~assertTrue(c~additional[1]~endsWith(": wrong password for the PKCS#12 file"), c~additional[1])
+
+::method test_string
+  srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
+  self~assertSame("a TLSServerSocket on port" srv~localPort, srv~string)
+  srv~close
+
+/* ---- startTLSServer ----------------------------------------------------- */
+
+::method test_startTLSServer_needs_a_certificate
+  peer = .Peer~new
+  msg = peer~start("acceptAndClose")
+  s = .Socket~new("127.0.0.1", peer~port)
+  signal on syntax name failed
+  s~startTLSServer(.TLSOptions~new)
+  self~fail("should have failed")
+failed:
+  self~assertSame(88.900, condition("o")~code)
+  s~close
+  msg~result
+  peer~close
+
+/* ---- helpers ------------------------------------------------------------ */
+
+-- Reads a line, expecting NOTREADY.
+::method notready private
+  use arg c
+  trapped = .false
+  signal on notready
+  c~lineIn
+  signal done
+notready:
+  trapped = .true
+done:
+  self~assertTrue(trapped, "NOTREADY expected")
+
+
+::class Session
+::method serve
+  use arg c
+  c~readTimeout = 10
+  signal on notready
+  c~lineOut(c~lineIn)
+notready:
+  c~close
+
+-- The client's side, in another activity.
+::class Client
+::method echoOnce
+  use arg port, line, options = (trustCA())
+  s = .TLSSocket~new("localhost", port, options, 10)
+  s~readTimeout = 10
+  s~lineOut(line)
+  reply = s~lineIn
+  s~close
+  return reply
+::method readOne
+  use arg port
+  s = .TLSSocket~new("localhost", port, trustCA(), 10)
+  s~readTimeout = 10
+  reply = s~lineIn
+  s~close
+  return reply
+::method connectOnly
+  use arg port, options
+  signal on syntax
+  s = .TLSSocket~new("localhost", port, options, 10)
+  s~close
+  return "connected"
+syntax:
+  return condition("o")~additional[1]
+::method plainLine
+  use arg port, line
+  s = .Socket~new("127.0.0.1", port)
+  s~readTimeout = 10
+  s~lineOut(line)
+  signal on notready
+  s~read
+notready:
+  s~close
+  return 0
+
+::routine trustCA
+  return .TLSOptions~new~trust(certFile("ca.pem"))
+
+::routine newFails
+  use arg options
+  signal on syntax
+  .TLSServerSocket~new(0, options, "127.0.0.1")
+  raise syntax 40.900 array("expected TLSServerSocket~new to fail")
+syntax:
+  return condition("o")
+
+::routine certificateFails
+  use arg file, password = ""
+  signal on syntax
+  .TLSOptions~new~certificate(file, password)
+  raise syntax 40.900 array("expected certificate to fail:" file)
+syntax:
+  return condition("o")

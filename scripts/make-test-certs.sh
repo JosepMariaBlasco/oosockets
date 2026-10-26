@@ -11,6 +11,7 @@
 #   selfsigned.pem    localhost, self-signed (not by the CA)
 #   keytool.p12       localhost, made with keytool as the line given to Rony
 #                     (plus serverAuth), password 123456
+#   mismatch.pem      server.pem's certificate with wronghost.pem's key
 set -euo pipefail
 cd "$(dirname "$0")/../tests"
 rm -rf certs; mkdir certs; cd certs
@@ -68,6 +69,8 @@ cat "$w/self.crt" "$w/self.key" > selfsigned.pem
 keytool -genkeypair -alias mysrv -keyalg RSA -dname "CN=localhost" \
   -ext "SAN=dns:localhost,ip:127.0.0.1,ip:::1" -ext EKU=serverAuth -validity $days \
   -keystore keytool.p12 -storepass 123456 2>/dev/null
+
+{ openssl x509 -in server.pem; openssl pkey -in wronghost.pem; } > mismatch.pem
 
 rm -f ca.srl
 ls -l

@@ -4,8 +4,8 @@ Object oriented TCP/IP sockets for [ooRexx](https://www.oorexx.org/):
 IPv4 and IPv6, sockets that are Rexx streams, and TLS with the operating
 system deciding which certificates to trust.
 
-> **Status: prototype.** The TCP classes and the TLS client work and are
-> tested on Linux, macOS and Windows; the TLS server and UDP are not
+> **Status: prototype.** The TCP classes, the TLS client and the TLS
+> server work and are tested on Linux, macOS and Windows; UDP is not
 > written yet. Names and behaviour may still change until 1.0.
 
 ```rexx
@@ -101,7 +101,7 @@ s~close
   IMAP, FTP). Bytes that arrived in clear before the handshake are
   refused (they would be taken as if they had come over TLS).
 - `secure` (`.true` once TLS has started), `protocol` (`"TLSv1.3"`),
-  `cipher`.
+  `cipher` (both `""` until the handshake has been made).
 - A peer that closes the connection without TLS's own closing message
   (`close_notify`), as many HTTP servers do, is taken as the end of the
   stream.
@@ -111,6 +111,52 @@ s~close
 - Underneath, OpenSSL does the TLS on the three systems: the system's on
   Linux, and on macOS and Windows linked statically into the library
   (neither system ships it), so there is nothing else to install.
+
+### A TLS server
+
+```rexx
+opts = .TLSOptions~new~certificate("mySrvKeystore.p12", "123456")
+srv = .TLSServerSocket~new(9999, opts)
+do forever
+  .Session~new(srv~accept)~start("serve")   -- each client in its own activity
+end
+::class Session
+::method init
+  expose s; use strict arg s
+::method serve
+  expose s
+  s~readTimeout = 30
+  signal on notready                        -- the client went away, or failed TLS
+  do forever
+    line = s~lineIn
+    if line = "bye" then leave
+    s~lineOut("You said:" line)
+  end
+notready:
+  s~close
+::requires "sockets.cls"
+```
+
+- `.TLSServerSocket~new(port, options [, address [, backlog]])`, as
+  `ServerSocket`; `options` must have the server's certificate and key:
+  `certificate(file [, password])`, a PKCS#12 keystore (as keytool makes
+  them) or PEM with both. A file that cannot be used (no key, the wrong
+  password, a key that is not the certificate's) is a SYNTAX condition,
+  48.900, at `certificate`.
+- `accept` returns a `TLSSocket` at once. **Its TLS handshake happens on
+  its first read or write**, in the activity that serves it (as Java's
+  `SSLServerSocket` does). So a client that fails the handshake — a
+  browser that does not trust a self-signed certificate, a port scanner,
+  `telnet` — does not stop the server: that socket gets NOTREADY, its
+  `description` says why (`ERROR:TLS handshake failed: tlsv1 alert
+  unknown ca`), and the usual `signal on notready` closes it. A client
+  that connects and says nothing waits only in its own activity, for
+  `readTimeout` at most.
+- **STARTTLS, the server's side**: `s~startTLSServer(options)` on an
+  accepted plain `Socket`, after the protocol's own command (SMTP's
+  `STARTTLS`): the handshake is made then, and failing it is a SYNTAX
+  condition, 48.900, as for `startTLS`.
+- Client certificates (mutual TLS) are not supported yet.
 
 ### A certificate for a test server, with Java's keytool
 
