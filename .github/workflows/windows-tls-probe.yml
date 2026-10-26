@@ -1,0 +1,22 @@
+name: Windows TLS probe
+
+# Measures OpenSSL over our own socket on Windows with Windows deciding
+# trust (CertVerifyCertificateChainPolicy), and the alternatives.
+# Run by hand, or when the probe changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - probes/windows-tls/**
+      - .github/workflows/windows-tls-probe.yml
+
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - run: probes/windows-tls/run.sh
