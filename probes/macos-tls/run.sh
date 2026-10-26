@@ -19,13 +19,16 @@ echo "(end of matches)"
 
 # Every probe gets 30 s at most (macOS has no timeout(1)).
 lim() { perl -e 'alarm 30; exec @ARGV' "$@" || echo "  (exit $?)"; }
+# A handshake cut off by the server (OpenSSL reports no reason: "(null)")
+# is a connection failure, not a result: try once more.
+limr() { out="$(lim "$@")"; if grep -q '(null)' <<<"$out"; then sleep 3; echo "  (cut off; again)"; out="$(lim "$@")"; fi; echo "$out"; }
 
 hosts="example.com expired.badssl.com wrong.host.badssl.com self-signed.badssl.com untrusted-root.badssl.com revoked.badssl.com"
 for h in $hosts; do
   echo; echo "######## $h"
   lim ./st "$h"
   lim ./nw "$h"
-  for m in anchors certpem sectrust sectrust-rev; do lim ./ossl $m "$h"; done
+  for m in anchors certpem sectrust sectrust-rev; do limr ./ossl $m "$h"; done
 done
 
 echo; echo "######## local servers, TLS 1.3 only, four kinds of certificate, trusted explicitly"
