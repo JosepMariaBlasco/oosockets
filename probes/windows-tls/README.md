@@ -81,3 +81,10 @@ on macOS: TLS 1.3, every bad certificate refused with a reason, and
 nothing to ship but our own library. Explicit trust with OpenSSL gives
 the same answers as on macOS (and Windows itself would agree). SChannel
 was not measured.
+
+## Decision (26/10/2026)
+
+As on macOS: OpenSSL, linked statically, does the TLS; Windows decides
+trust (`wintrust`); an explicitly trusted certificate is OpenSSL's
+(`pin`). One TLS code path for Linux, macOS and Windows. Revocation is
+still to be decided.
