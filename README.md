@@ -54,7 +54,8 @@ client~close; srv~close
 - **Ctrl-C (HALT) stops a wait**: a `lineIn`, `accept`, `receive`, a
   write to a peer that does not read, a connection or a TLS handshake
   that hangs. The HALT is raised at the program's own line, where `signal
-  on halt` catches it (within 0.1 s; on Linux and macOS, at once). A
+  on halt` catches it (measured: about 5 ms on Linux after SIGINT or
+  SIGTERM; 0.05 s on Windows after a console Ctrl-C). A
   socket whose read was halted goes on working, and nothing that arrives
   later is lost; a write may have sent part of its data; after a halted
   TLS handshake, close the socket. An idle wait costs nothing measurable
