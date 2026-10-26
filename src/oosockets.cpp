@@ -444,6 +444,18 @@ static void closeSock(Sock *s)
             ERR_clear_error();
             SSL_shutdown(s->ssl);
             ERR_clear_error();
+            // What has arrived and was not read (TLS 1.3 session tickets,
+            // typically) would make the close a reset (RST), and the peer
+            // could lose what it has not read yet: drop it first.
+            char junk[16384];
+            for (int i = 0; i < 64; i++)
+            {
+                long n = (long)recv(s->fd, junk, sizeof(junk), 0);   // non-blocking
+                if (n <= 0)
+                {
+                    break;
+                }
+            }
         }
         // shutdown first: on Linux, close alone does not wake a recv or an
         // accept blocked in another activity on this socket.
@@ -751,6 +763,8 @@ static TrustError opensslTrustError(long v)
 
 #ifdef __APPLE__
 
+static const char *CERT_TOO_LONG  = "certificate is valid for longer than the system allows";
+
 static std::string cfString(CFStringRef s)
 {
     char buf[1024] = "";
@@ -816,6 +830,8 @@ static bool systemTrust(const std::vector<X509 *> &chain, const std::string &hos
                     why.name = "errSecCertificateRevoked"; why.text = CERT_REVOKED; break;
                 case errSecInvalidExtendedKeyUsage:
                     why.name = "errSecInvalidExtendedKeyUsage"; why.text = CERT_USAGE; break;
+                case errSecCertificateValidityPeriodTooLong:
+                    why.name = "errSecCertificateValidityPeriodTooLong"; why.text = CERT_TOO_LONG; break;
                 default:
                 {
                     why.name = "OSStatus";
@@ -1333,6 +1349,9 @@ RexxMethod4(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
     }
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
     SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+    // No session resumption here, so no TLS 1.3 tickets: a client that
+    // never reads them would close with a reset.
+    SSL_CTX_set_num_tickets(ctx, 0);
 #ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
     SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
 #endif

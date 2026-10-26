@@ -120,14 +120,19 @@ return testResult
   peer = .Peer~new
   msg = peer~start("tlsEcho")
   c = connectFails("localhost", peer~port, .nil)
-  self~assertSame("TLS error: certificate is not trusted (localhost, port" peer~port")", c~additional[1])
   say "  (the system said:" c~additional[2] c~additional[3]")"
+  -- macOS objects first to the test certificates' hundred years (it
+  -- allows 825 days, even for a root it would trust).
+  if c~additional[2] == "errSecCertificateValidityPeriodTooLong" then
+    self~assertSame("TLS error: certificate is valid for longer than the system allows (localhost, port" peer~port")", c~additional[1])
+  else
+    self~assertSame("TLS error: certificate is not trusted (localhost, port" peer~port")", c~additional[1])
   msg~result
   peer~close
 
 ::method test_a_server_that_does_not_speak_tls
   peer = .Peer~new
-  msg = peer~start("send", "220 hello, in clear" || "0d0a"x)
+  msg = peer~start("twoLinesAtOnce")                      -- and waits
   c = connectFails("localhost", peer~port, trustCA())
   self~assertSame(48.900, c~code)
   self~assertTrue(c~additional[1]~startsWith("TLS error: handshake failed:"), c~additional[1])
@@ -138,9 +143,11 @@ return testResult
   peer = .Peer~new
   msg = peer~start("silentThenLine", 3, "too late")     -- accepts, says nothing
   start = .DateTime~new
-  c = connectFails("localhost", peer~port, trustCA(), 1)
+  -- 127.0.0.1: on Windows, "localhost" tries ::1 first, and a refused
+  -- connection there takes it about two seconds.
+  c = connectFails("127.0.0.1", peer~port, trustCA(), 1)
   elapsed = (.DateTime~new - start)~totalSeconds
-  self~assertSame("TLS error: timed out (localhost, port" peer~port")", c~additional[1])
+  self~assertSame("TLS error: timed out (127.0.0.1, port" peer~port")", c~additional[1])
   self~assertTrue(elapsed < 2.5, "timed out after" elapsed "seconds")
   msg~result
   peer~close
@@ -317,7 +324,8 @@ failed:
 
 ::method test_online_a_real_server
   if \online() then return
-  s = .TLSSocket~new("example.com", 443, , 20)
+  s = onlineConnect("example.com")
+  if s == .nil then return
   s~readTimeout = 20
   s~lineOut("HEAD / HTTP/1.1")
   s~lineOut("Host: example.com")
@@ -347,19 +355,24 @@ failed:
 -- Not asked for on any system; macOS may refuse on its own. Seen, not judged.
 ::method test_online_revoked_is_not_checked
   if \online() then return
-  signal on syntax name refused
-  s = .TLSSocket~new("revoked.badssl.com", 443, , 20)
-  say "  (revoked.badssl.com: accepted)"
-  s~close
-  return
-refused:
-  c = condition("o")
-  say "  (revoked.badssl.com: refused:" c~additional[1] c~additional[2] c~additional[3]")"
-  self~assertTrue(c~additional[1]~startsWith("TLS error: certificate has been revoked"), c~additional[1])
+  r = onlineConnect("revoked.badssl.com")
+  if r == .nil then return
+  if r~isA(.Socket) then do
+    say "  (revoked.badssl.com: accepted)"
+    r~close
+    return
+  end
+  say "  (revoked.badssl.com: refused:" r~additional[1] r~additional[2] r~additional[3]")"
+  self~assertTrue(r~additional[1]~startsWith("TLS error: certificate has been revoked"), r~additional[1])
 
 ::method onlineRefused private
   use arg host, text
-  c = connectFails(host, 443, .nil, 20)
+  c = onlineConnect(host)
+  if c == .nil then return
+  if c~isA(.Socket) then do
+    c~close
+    self~fail(host "was accepted")
+  end
   say "  ("host":" c~additional[2] c~additional[3]")"
   self~assertSame("TLS error:" text "(" || host || ", port 443)", c~additional[1])
 
@@ -389,6 +402,28 @@ syntax:
   signal on syntax
   .TLSOptions~new~trust(file, password)
   raise syntax 40.900 array("expected trust to fail:" file)
+syntax:
+  return condition("o")
+
+-- A TLSSocket to host:443 (the system decides); or the condition object
+-- if it was refused; or .nil (said) if the network failed three times:
+-- badssl.com sometimes resets a connection, which is not a result.
+::routine onlineConnect
+  use arg host
+  do attempt = 1 to 3
+    r = tryConnect(host)
+    if r~isA(.Socket) then return r
+    if wordpos(r~additional[2], "ECONNRESET ECONNABORTED EOF ETIMEDOUT") == 0 then return r
+    say "  ("host": attempt" attempt":" r~additional[1]")"
+    call sysSleep 3
+  end
+  say "  ("host": the network failed; nothing checked)"
+  return .nil
+
+::routine tryConnect
+  use arg host
+  signal on syntax
+  return .TLSSocket~new(host, 443, , 20)
 syntax:
   return condition("o")
 
