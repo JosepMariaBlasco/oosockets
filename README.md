@@ -94,10 +94,8 @@ s~close
   ```
 
   `trust` takes PEM, DER, or a PKCS#12 keystore with its password, as
-  Java's `keytool` makes them (`keytool -genkeypair -alias mysrv -keyalg
-  RSA -dname "CN=localhost" -ext "SAN=dns:localhost,ip:127.0.0.1,ip:::1"
-  -keystore mySrvKeystore.p12 -storepass 123456`). `minVersion`: `"1.2"`
-  (the default) or `"1.3"`.
+  Java's `keytool` makes them (see below). `minVersion`: `"1.2"` (the
+  default) or `"1.3"`.
 - **STARTTLS**: `s~startTLS([host [, options]])` turns a plain `Socket`
   into a TLS one in place, for the protocols that start in clear (SMTP,
   IMAP, FTP). Bytes that arrived in clear before the handshake are
@@ -113,6 +111,38 @@ s~close
 - Underneath, OpenSSL does the TLS on the three systems: the system's on
   Linux, and on macOS and Windows linked statically into the library
   (neither system ships it), so there is nothing else to install.
+
+### A certificate for a test server, with Java's keytool
+
+Rules for certificates keep tightening, so this says what worked and
+when. **On 26/10/2026** this line, with keytool from OpenJDK 21.0.12,
+
+```sh
+keytool -genkeypair -alias mysrv -keyalg RSA -dname "CN=localhost" \
+        -ext "SAN=dns:localhost,ip:127.0.0.1,ip:::1" -ext EKU=serverAuth \
+        -validity 825 -keystore mySrvKeystore.p12 -storepass 123456
+```
+
+made a keystore (PKCS#12, RSA 3072, SHA-384) that ooSockets accepted as
+the server's certificate and, trusted explicitly (`.TLSOptions~new~trust(
+"mySrvKeystore.p12", "123456")`), on the client, for `localhost` and
+`127.0.0.1` (Ubuntu 24.04, OpenSSL 3.0.13). The tests do the same on
+Linux, macOS 15 and Windows Server 2022 with a keystore made the same way
+(`tests/certs/keytool.p12`, longer-lived). Java's own `SSLSocket`
+samples worked with such a keystore as `keyStore` and as `trustStore`
+(25/10/2026, without `EKU` and `-validity`). What each part is for:
+
+- `SAN=...`: the names the certificate is good for. Clients check the
+  host name only against these (not against `CN`), so without them no
+  verifying client accepts it.
+- `EKU=serverAuth` and at most 825 days: ooSockets does not need them
+  (a certificate trusted explicitly is checked by OpenSSL, which does not
+  ask for them), but macOS's own clients refuse a certificate without
+  them even when told to trust it (measured, `probes/macos-tls/`).
+- `.p12`: keytool has made PKCS#12 by default since Java 9. An old JKS
+  keystore can be converted: `keytool -importkeystore -srckeystore
+  old.jks -destkeystore new.p12 -deststoretype pkcs12`. Its certificate
+  may still be refused (expired, RSA 1024, SHA-1, no SAN).
 
 ## Building
 
