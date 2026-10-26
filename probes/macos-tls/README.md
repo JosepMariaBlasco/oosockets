@@ -59,3 +59,17 @@ So a certificate that works everywhere, with either side deciding:
     keytool -genkeypair -alias mysrv -keyalg RSA -dname "CN=localhost"
             -ext "SAN=dns:localhost,ip:127.0.0.1,ip:::1" -ext EKU=serverAuth
             -validity 825 -keystore mySrvKeystore.p12 -storepass 123456
+
+## Decision (26/10/2026)
+
+OpenSSL, linked statically, does the TLS on macOS. Trust:
+
+- ordinarily, **macOS decides** (`SecTrustEvaluateWithError` with
+  `SecPolicyCreateSSL(true, host)`), so the system's policy applies;
+- when the program **trusts a certificate explicitly**, **OpenSSL
+  decides**, with that certificate as its only anchor and the host name
+  checked (`SSL_set1_host`). Apple's `serverAuth` and 825-day rules are
+  policy for public certificate authorities; they protect nothing when
+  the program names the one certificate it trusts, and without them the
+  same keytool certificate works on every system (rows 1–5 above: all OK
+  with OpenSSL).
