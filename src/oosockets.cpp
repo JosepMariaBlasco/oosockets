@@ -2727,12 +2727,16 @@ static RexxMethodEntry oosockets_methods[] =
     REXX_LAST_METHOD()
 };
 
+#ifndef OOSOCKETS_VERSION
+  #define OOSOCKETS_VERSION "0.0.0"        // CMakeLists.txt's project version
+#endif
+
 static RexxPackageEntry oosockets_package_entry =
 {
     STANDARD_PACKAGE_HEADER
     REXX_INTERPRETER_5_0_0,
     "oosockets",
-    "0.1.0",
+    OOSOCKETS_VERSION,
     oosocketsLoader,
     nullptr,
     nullptr,

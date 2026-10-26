@@ -1,0 +1,233 @@
+name: Release
+
+# A tag vX.Y.Z (X.Y.Z = CMakeLists.txt's project version) builds the three
+# zips, tests each as unpacked and as installed (INSTALL.txt), with ooRexx
+# 5.3.0 beta (the family's revision) and 5.2.0, and makes a DRAFT release
+# with them, to be published by hand. Run by hand (workflow_dispatch), it
+# does all but the release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  OPENSSL_MACOS: 3.5.9          # built by us for the macOS zip (scripts/build-openssl-macos.sh)
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          v="$(sed -n 's/^project(oosockets VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "The tag $GITHUB_REF_NAME is not v$v, CMakeLists.txt's version" >&2
+            exit 1
+          fi
+          echo "ooSockets $v"
+
+  # Linux: built on Ubuntu 22.04 (glibc 2.35, OpenSSL 3.0), so that it runs
+  # there and on anything newer; the system's OpenSSL.
+  build-linux:
+    needs: version
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    steps:
+      - name: Tools
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq g++ cmake libssl-dev curl unzip zip ca-certificates binutils > /dev/null
+      - uses: actions/checkout@v4
+      - name: ooRexx
+        run: echo "OOREXX_HOME=$(scripts/get-oorexx.sh trunk ubuntu2204.x86_64 "$RUNNER_TEMP/oorexx")" >> "$GITHUB_ENV"
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME"
+          cmake --build build
+          ldd build/liboosockets.so
+          objdump -T build/liboosockets.so | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+      - name: Package
+        run: scripts/package.sh build linux-x86_64 dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: dist/*.zip
+
+  # macOS: one universal library (arm64 + x86_64), OpenSSL built by us for
+  # macOS 11 (arm64) and 10.14 (x86_64) and linked statically.
+  build-macos:
+    needs: version
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: ooRexx
+        run: echo "OOREXX_HOME=$(scripts/get-oorexx.sh trunk macos.arm64.x86_64 "$RUNNER_TEMP/oorexx")" >> "$GITHUB_ENV"
+      - name: OpenSSL cache
+        id: openssl
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/openssl
+          key: openssl-${{ env.OPENSSL_MACOS }}-macos-universal-10.14-v1
+      - name: OpenSSL
+        if: steps.openssl.outputs.cache-hit != 'true'
+        run: scripts/build-openssl-macos.sh "$OPENSSL_MACOS" "$RUNNER_TEMP/openssl"
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME" \
+            -DOPENSSL_ROOT_DIR="$RUNNER_TEMP/openssl" \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.14 \
+            -DCMAKE_CXX_FLAGS="-Werror=unguarded-availability-new"
+          cmake --build build
+      - name: Check
+        run: |
+          lipo -info build/liboosockets.dylib
+          vtool -show-build build/liboosockets.dylib
+          otool -L build/liboosockets.dylib
+          if otool -L build/liboosockets.dylib | grep -i -E 'libssl|libcrypto'; then
+            echo "OpenSSL is not inside" >&2; exit 1
+          fi
+      - name: Package
+        run: scripts/package.sh build macos-universal dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: dist/*.zip
+
+  build-windows:
+    needs: version
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: ooRexx
+        run: echo "OOREXX_HOME=$(scripts/get-oorexx.sh trunk windows.x86_64 "$RUNNER_TEMP/oorexx")" >> "$GITHUB_ENV"
+      - name: vcpkg cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: vcpkg-openssl-x64-windows-static-md-v2
+      - name: OpenSSL
+        run: |
+          mkdir -p "$RUNNER_TEMP/vcpkg-cache"
+          export VCPKG_BINARY_SOURCES="clear;files,$(cygpath -w "$RUNNER_TEMP/vcpkg-cache"),readwrite"
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install openssl:x64-windows-static-md > vcpkg.log 2>&1 \
+            || { tail -40 vcpkg.log; exit 1; }
+          grep -i -m3 -E "openssl:x64-windows-static-md" vcpkg.log || true
+          tc="$(cygpath -m "$VCPKG_INSTALLATION_ROOT")/scripts/buildsystems/vcpkg.cmake"
+          echo "CMAKE_EXTRA=-DCMAKE_TOOLCHAIN_FILE=$tc -DVCPKG_TARGET_TRIPLET=x64-windows-static-md" >> "$GITHUB_ENV"
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME" $CMAKE_EXTRA
+          cmake --build build --config Release
+          dumpbin=$(ls "/c/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/"*/bin/Hostx64/x64/dumpbin.exe | head -1)
+          "$dumpbin" //dependents build/Release/oosockets.dll | grep -i "\.dll"
+      - name: Package
+        run: scripts/package.sh build/Release windows-x86_64 dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist/*.zip
+
+  # Each zip, unpacked, with the whole test suite; then installed as
+  # INSTALL.txt says, with nothing on REXX_PATH or the library path.
+  test:
+    needs: [build-linux, build-macos, build-windows]
+    name: test ${{ matrix.zip }} ${{ matrix.oorexx }} ${{ matrix.where }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { zip: linux-x86_64, runner: ubuntu-24.04, container: 'ubuntu:22.04', where: ubuntu-22.04, oorexx: trunk, build: ubuntu2204.x86_64 }
+          - { zip: linux-x86_64, runner: ubuntu-24.04, container: 'debian:12', where: debian-12, oorexx: 5.2.0, build: debian12.x86_64 }
+          - { zip: linux-x86_64, runner: ubuntu-24.04, container: '', where: ubuntu-24.04, oorexx: 5.2.0, build: ubuntu2404.x86_64 }
+          - { zip: macos-universal, runner: macos-15, container: '', where: arm64, oorexx: trunk, build: macos.arm64.x86_64 }
+          - { zip: macos-universal, runner: macos-15, container: '', where: arm64, oorexx: 5.2.0, build: macos.arm64.x86_64 }
+          - { zip: macos-universal, runner: macos-15-intel, container: '', where: x86_64, oorexx: trunk, build: macos.arm64.x86_64 }
+          - { zip: macos-universal, runner: macos-15-intel, container: '', where: x86_64, oorexx: 5.2.0, build: macos.arm64.x86_64 }
+          - { zip: windows-x86_64, runner: windows-2022, container: '', where: '', oorexx: trunk, build: windows.x86_64 }
+          - { zip: windows-x86_64, runner: windows-2022, container: '', where: '', oorexx: 5.2.0, build: windows.x86_64 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Tools (container)
+        if: matrix.container != ''
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libssl3 curl unzip ca-certificates > /dev/null
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.zip }}
+          path: dist
+      - name: Unpack
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg"
+          if command -v unzip > /dev/null; then unzip -q dist/*.zip -d "$RUNNER_TEMP/pkg"; else 7z x -y -o"$RUNNER_TEMP/pkg" dist/*.zip > /dev/null; fi
+          pkg="$(ls -d "$RUNNER_TEMP"/pkg/oosockets-*)"
+          ls -l "$pkg"
+          echo "PKG=$pkg" >> "$GITHUB_ENV"
+      - name: ooRexx
+        run: |
+          home="$(scripts/get-oorexx.sh ${{ matrix.oorexx }} ${{ matrix.build }} "$RUNNER_TEMP/oorexx")"
+          echo "OOREXX_HOME=$home" >> "$GITHUB_ENV"
+          echo "$home/bin" >> "$GITHUB_PATH"
+      - run: rexx -v
+      - name: ooRexxUnit
+        run: scripts/get-oorexxunit.sh
+      - name: Test (unpacked)
+        timeout-minutes: 10
+        env:
+          OOSOCKETS_ONLINE: 1
+        run: scripts/test.sh "$PKG"
+      - name: Test (installed as INSTALL.txt says)
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp "$PKG"/oosockets.dll "$PKG"/sockets.cls "$OOREXX_HOME/bin/"
+          else
+            cp "$PKG"/liboosockets.* "$OOREXX_HOME/lib/"
+            cp "$PKG"/sockets.cls "$OOREXX_HOME/bin/"
+          fi
+          unset REXX_PATH LD_LIBRARY_PATH DYLD_LIBRARY_PATH
+          cd "$RUNNER_TEMP"
+          rexx "$GITHUB_WORKSPACE/scripts/installed.rex" "$GITHUB_WORKSPACE/tests/certs"
+
+  release:
+    needs: [version, test]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.version.outputs.version }}
+        run: |
+          cd dist
+          {
+            echo "ooSockets $V: TCP, TLS and UDP sockets for ooRexx, IPv4 and IPv6."
+            echo
+            echo "Each zip has the native library, \`sockets.cls\`, the README, the licence and \`INSTALL.txt\`."
+            echo "Tested with ooRexx 5.3.0 beta and 5.2.0."
+            echo
+            echo "| File | SHA-256 |"
+            echo "|---|---|"
+            for f in *.zip; do echo "| \`$f\` | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"; done
+          } > notes.md
+          cat notes.md
+          gh release create "$GITHUB_REF_NAME" *.zip --repo "$GITHUB_REPOSITORY" \
+            --draft --title "ooSockets $V" --notes-file notes.md

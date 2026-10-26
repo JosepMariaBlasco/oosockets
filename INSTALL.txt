@@ -1,0 +1,32 @@
+Installing ooSockets
+====================
+
+ooSockets is two files: sockets.cls, and its native library
+(oosockets.dll on Windows, liboosockets.dylib on macOS, liboosockets.so
+on Linux). Put them where ooRexx finds them:
+
+  Windows: both files in ooRexx's bin directory (the one with rexx.exe).
+
+  macOS, Linux: the library in ooRexx's lib directory (the one with
+  librexx), sockets.cls in ooRexx's bin directory (the one with rexx).
+  With the installers, those are /usr/local/lib and /usr/local/bin;
+  with the portable zips, lib/ and bin/ inside the unpacked directory.
+
+Then, in a program:
+
+  ::requires "sockets.cls"
+
+Instead of ooRexx's directories, any directory works if it is on
+REXX_PATH (for sockets.cls) and on the library path (PATH on Windows,
+DYLD_LIBRARY_PATH on macOS, LD_LIBRARY_PATH on Linux) for the library.
+
+What each zip needs:
+
+  Windows: ooRexx 5.x, 64-bit. OpenSSL is inside oosockets.dll.
+  macOS:   ooRexx 5.x; macOS 11 or later on Apple Silicon, 10.14 or
+           later on Intel. OpenSSL is inside liboosockets.dylib.
+  Linux:   ooRexx 5.x, x86_64; glibc 2.35 or later and OpenSSL 3
+           (libssl.so.3), as in Ubuntu 22.04 and later, Debian 12,
+           Fedora, and others.
+
+Tested with ooRexx 5.3.0 beta (trunk r13297) and ooRexx 5.2.0.

@@ -23,6 +23,7 @@ if(NOT OOREXX_INCLUDE_DIR OR NOT OOREXX_REXX_LIB OR NOT OOREXX_REXXAPI_LIB)
 endif()
 
 add_library(oosockets SHARED src/oosockets.cpp)
+target_compile_definitions(oosockets PRIVATE OOSOCKETS_VERSION="${PROJECT_VERSION}")
 target_include_directories(oosockets SYSTEM PRIVATE "${OOREXX_INCLUDE_DIR}")
 target_link_libraries(oosockets PRIVATE "${OOREXX_REXX_LIB}" "${OOREXX_REXXAPI_LIB}")
 
