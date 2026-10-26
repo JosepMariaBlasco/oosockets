@@ -985,8 +985,8 @@
 
 ::method close unguarded
   expose closed
+  closed = .true                -- first: a receive it wakes must see it
   self~nClose
-  closed = .true
 
 /** Seconds receive may wait; .nil, the default: as long as it takes. */
 ::attribute receiveTimeout get unguarded
