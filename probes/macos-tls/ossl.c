@@ -7,6 +7,8 @@
                with the host name)
      pin     : OpenSSL verifies, against one certificate (PEM, 4th argument)
      sectrust-pin: macOS decides, with one certificate as the only anchor
+     sectrust-rev: as sectrust, with revocation asked for
+               (SecPolicyCreateRevocation, any available method)
    Usage: ossl mode host [port [pem]] */
 #include "common.h"
 #include <openssl/ssl.h>
@@ -32,6 +34,7 @@ static int load_anchors(X509_STORE *store)
 }
 
 static const char *pin_file = NULL;
+static int revocation = 0;
 
 static void sectrust(SSL *ssl, const char *host)
 {
@@ -46,7 +49,17 @@ static void sectrust(SSL *ssl, const char *host)
     CFStringRef h = CFStringCreateWithCString(NULL, host, kCFStringEncodingUTF8);
     SecPolicyRef pol = SecPolicyCreateSSL(true, h);
     SecTrustRef trust = NULL;
-    SecTrustCreateWithCertificates(certs, pol, &trust);
+    if (revocation) {
+        SecPolicyRef rev = SecPolicyCreateRevocation(kSecRevocationUseAnyAvailableMethod);
+        const void *pols[2] = { pol, rev };
+        CFArrayRef both = CFArrayCreate(NULL, pols, 2, &kCFTypeArrayCallBacks);
+        SecTrustCreateWithCertificates(certs, both, &trust);
+        CFRelease(both); CFRelease(rev);
+        SecTrustSetNetworkFetchAllowed(trust, true);
+        printf("  revocation asked for\n");
+    } else {
+        SecTrustCreateWithCertificates(certs, pol, &trust);
+    }
     if (pin_file) {                    /* trust this certificate, and only it */
         FILE *f = fopen(pin_file, "r"); X509 *x = PEM_read_X509(f, NULL, NULL, NULL); fclose(f);
         unsigned char *der = NULL; int len = i2d_X509(x, &der);
@@ -95,6 +108,7 @@ int main(int argc, char **argv)
     SSL_set_tlsext_host_name(ssl, host);
     int macos = !strncmp(mode, "sectrust", 8);
     if (!strcmp(mode, "sectrust-pin")) pin_file = argv[4];
+    if (!strcmp(mode, "sectrust-rev")) revocation = 1;
     if (!macos) SSL_set1_host(ssl, host);
     if (SSL_connect(ssl) != 1) {
         long vr = SSL_get_verify_result(ssl);
