@@ -60,6 +60,30 @@ So a certificate that works everywhere, with either side deciding:
             -ext "SAN=dns:localhost,ip:127.0.0.1,ip:::1" -ext EKU=serverAuth
             -validity 825 -keystore mySrvKeystore.p12 -storepass 123456
 
+## Revocation (26/10/2026)
+
+`revoked.badssl.com` (a revoked certificate, otherwise good), and a mode
+`sectrust-rev`: macOS deciding with revocation asked for
+(`SecPolicyCreateRevocation(kSecRevocationUseAnyAvailableMethod)` added to
+the SSL policy, network fetch allowed). Three runs, six jobs:
+
+| Run | macos-15 (arm64) | macos-15-intel |
+|---|---|---|
+| 40304880017 | accepted | **refused**, -67820 "certificate is revoked" |
+| 40305331384 | **refused**, -67820 | accepted |
+| 40305372045 | accepted | **refused**, -67820 |
+
+In each job every macOS path agreed: `sectrust`, `sectrust-rev`, Secure
+Transport and Network.framework all refused, or all accepted. Asking for
+revocation changed nothing. So macOS checks revocation by itself, but
+best effort: whether a revoked certificate is refused depends on the
+machine and the moment (Apple's revocation data, the network), not on the
+program. OpenSSL alone (`anchors`, `certpem`) accepted it every time.
+
+(badssl.com cut off some handshakes in these runs, OpenSSL reporting no
+reason, "(null)": `run.sh` now tries those once more. They are not
+results.)
+
 ## Decision (26/10/2026)
 
 OpenSSL, linked statically, does the TLS on macOS. Trust:
