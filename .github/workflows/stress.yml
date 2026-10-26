@@ -1,0 +1,66 @@
+name: Stress
+
+# Runs the whole test suite many times under gdb, to catch a rare crash
+# with its backtrace (all threads). Run by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: How many times
+        default: '15'
+
+jobs:
+  stress:
+    name: stress ${{ matrix.where }} ${{ matrix.oorexx }}
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { container: 'debian:12', where: debian-12, oorexx: 5.2.0, build: debian12.x86_64 }
+          - { container: 'ubuntu:22.04', where: ubuntu-22.04, oorexx: trunk, build: ubuntu2204.x86_64 }
+          - { container: 'ubuntu:24.04', where: ubuntu-24.04, oorexx: 5.2.0, build: ubuntu2404.x86_64 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Tools
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq g++ cmake libssl-dev curl unzip ca-certificates gdb > /dev/null
+      - uses: actions/checkout@v4
+      - name: ooRexx
+        run: |
+          home="$(scripts/get-oorexx.sh ${{ matrix.oorexx }} ${{ matrix.build }} "$RUNNER_TEMP/oorexx")"
+          echo "OOREXX_HOME=$home" >> "$GITHUB_ENV"
+          echo "$home/bin" >> "$GITHUB_PATH"
+      - name: Build (with debug information)
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DOOREXX_HOME="$OOREXX_HOME"
+          cmake --build build
+      - run: scripts/get-oorexxunit.sh
+      - name: Stress
+        timeout-minutes: 60
+        env:
+          OOSOCKETS_ONLINE: 1
+        run: |
+          export REXX_PATH="$PWD/build:$PWD/tests:$PWD/tests/framework"
+          export LD_LIBRARY_PATH="$PWD/build"
+          cd tests
+          crashes=0
+          for i in $(seq 1 ${{ inputs.runs }}); do
+            gdb -q -batch -ex "set pagination off" -ex "handle SIGPIPE nostop noprint" \
+                -ex "handle SIGUSR1 nostop noprint" -ex run \
+                -ex "info threads" -ex "thread apply all bt 30" \
+                --args "$(command -v rexx)" run.rex > "run$i.log" 2>&1 || true
+            if grep -q "received signal SIG" "run$i.log"; then
+              crashes=$((crashes + 1))
+              echo "=== run $i: CRASH"
+              grep -E "^=====|received signal" "run$i.log" | tail -5
+              sed -n '/received signal/,$p' "run$i.log" | head -400
+            else
+              echo "run $i: $(grep 'Total:' "run$i.log")"
+            fi
+          done
+          echo "crashes: $crashes of ${{ inputs.runs }}"
