@@ -6,6 +6,10 @@ name: Schannel probe
 # Run by hand, or when the probe changes.
 on:
   workflow_dispatch:
+    inputs:
+      only:
+        description: 'Sections to run (probes/schannel/run.sh): all, or some of clients flaky pin server pem starttls dtlsc mtu dtlss'
+        default: all
   push:
     paths:
       - probes/schannel/**
@@ -15,7 +19,7 @@ jobs:
   probe:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -26,3 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: probes/schannel/run.sh
+        env:
+          # a push runs the sections being worked on; by hand, what is asked
+          ONLY: ${{ inputs.only || 'flaky pem mtu dtlss' }}
+          DTLSS_CRED: legacy sch0

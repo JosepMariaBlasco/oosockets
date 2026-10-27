@@ -282,14 +282,10 @@ static PCCERT_CONTEXT load_pem(const char *certfile, const char *keyfile, int pf
         printf("  CertSetCertificateContextProperty: %lu\n", GetLastError()); return NULL;
     }
     free(der); free(kder);
+    (void)keymode;
     if (!pfx) { printf("  PEM loaded, ephemeral CNG key\n"); return c; }
-    CRYPT_DATA_BLOB blob = { 0, NULL };
-    DWORD fl = EXPORT_PRIVATE_KEYS | REPORT_NOT_ABLE_TO_EXPORT_PRIVATE_KEY;
-    if (!PFXExportCertStoreEx(mem, &blob, L"", NULL, fl)) { printf("  PFXExportCertStoreEx (size): %lu\n", GetLastError()); return NULL; }
-    blob.pbData = malloc(blob.cbData);
-    if (!PFXExportCertStoreEx(mem, &blob, L"", NULL, fl)) { printf("  PFXExportCertStoreEx: %lu\n", GetLastError()); return NULL; }
-    printf("  PEM loaded, exported as PKCS#12 in memory (%lu bytes)\n", (unsigned long)blob.cbData);
-    return import_pfx(&blob, "", keymode);
+    printf("  (unreachable)\n");
+    return NULL;
 }
 
 /* ------------------------------------------------------------------ */
@@ -517,6 +513,38 @@ static int do_client(const char *host, const char *port, int min13, const char *
     return 0;
 }
 
+/* PEM, the key imported into CNG as a named, persisted key, which the
+   certificate points to (CERT_KEY_PROV_INFO_PROP_ID); "delete" removes it
+   once the credentials are acquired. */
+static PCCERT_CONTEXT load_pem_named(const char *certfile, const char *keyfile)
+{
+    DWORD der_len, klen;
+    BYTE *der = pem_der(certfile, &der_len);
+    BYTE *kder = pem_der(keyfile, &klen);
+    if (!der || !kder) return NULL;
+    PCCERT_CONTEXT c = CertCreateCertificateContext(X509_ASN_ENCODING, der, der_len);
+    if (!c) { printf("  CertCreateCertificateContext: %lu\n", GetLastError()); return NULL; }
+    wchar_t name[64];
+    swprintf(name, 64, L"oosockets-probe-%lu", (unsigned long)GetCurrentProcessId());
+    NCryptBuffer nb = { (ULONG)((wcslen(name) + 1) * sizeof(wchar_t)), NCRYPTBUFFER_PKCS_KEY_NAME, name };
+    NCryptBufferDesc nbd = { NCRYPTBUFFER_VERSION, 1, &nb };
+    NCRYPT_PROV_HANDLE prov; NCRYPT_KEY_HANDLE key;
+    SECURITY_STATUS st = NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0);
+    if (st) { say_status("NCryptOpenStorageProvider", st); return NULL; }
+    st = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, &nbd, &key, kder, klen,
+                         NCRYPT_SILENT_FLAG | NCRYPT_OVERWRITE_KEY_FLAG);
+    if (st) { say_status("NCryptImportKey (named)", st); return NULL; }
+    NCryptFreeObject(key);
+    CRYPT_KEY_PROV_INFO kpi; memset(&kpi, 0, sizeof kpi);
+    kpi.pwszContainerName = name;
+    kpi.pwszProvName = (LPWSTR)MS_KEY_STORAGE_PROVIDER;
+    if (!CertSetCertificateContextProperty(c, CERT_KEY_PROV_INFO_PROP_ID, 0, &kpi)) {
+        printf("  CertSetCertificateContextProperty: %lu\n", GetLastError()); return NULL;
+    }
+    printf("  PEM loaded, named CNG key %ls\n", name);
+    return c;
+}
+
 /* keystore: a PKCS#12 file, or "cert.pem;key.pem". keymode: see
    import_pfx; for PEM also "ephemeral" (the CNG key as it is). */
 static PCCERT_CONTEXT server_cert(const char *keystore, const char *pw, const char *keymode)
@@ -524,7 +552,8 @@ static PCCERT_CONTEXT server_cert(const char *keystore, const char *pw, const ch
     if (strchr(keystore, ';')) {
         char c[512]; strncpy(c, keystore, sizeof c - 1); c[sizeof c - 1] = 0;
         char *k = strchr(c, ';'); *k++ = 0;
-        return load_pem(c, k, strcmp(keymode, "ephemeral") != 0, keymode);
+        if (!strcmp(keymode, "ephemeral")) return load_pem(c, k, 0, keymode);
+        return load_pem_named(c, k);
     }
     return load_p12(keystore, pw, keymode);
 }
@@ -735,14 +764,21 @@ static int do_dtls_client(const char *host, const char *port, const char *pin)
     }
     if (st != SEC_E_OK) { say_status("DTLS handshake REFUSED", st); return 1; }
     show_connection(&ctx);
+    if (getenv("DTLS_MTU")) {
+        DWORD mtu = (DWORD)atoi(getenv("DTLS_MTU"));
+        SECURITY_STATUS m = SetContextAttributesW(&ctx, SECPKG_ATTR_DTLS_MTU, &mtu, sizeof mtu);
+        printf("  SECPKG_ATTR_DTLS_MTU = %lu: 0x%08lX\n", (unsigned long)mtu, (unsigned long)m);
+    }
     if (pin && !check_pin(&ctx, host, pin)) return 1;
     dtls_send(&ctx, fd, "hello\n", 6);
     char buf[2048]; int n = dtls_recv(&ctx, fd, buf, sizeof buf - 1);
     if (n > 0) { buf[n] = 0; printf("  DTLS received: %s", buf); }
     /* how large a datagram can EncryptMessage take? */
     char *big = malloc(20000); memset(big, 'x', 20000);
+    dtls_send(&ctx, fd, big, 1000);
+    dtls_send(&ctx, fd, big, 1200);
     dtls_send(&ctx, fd, big, 16000);
-    dtls_send(&ctx, fd, big, 20000);
+    dtls_send(&ctx, fd, big, 16384);
     return 0;
 }
 

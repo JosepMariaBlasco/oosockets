@@ -14,7 +14,10 @@ grep -i -E "warning|error" build.log | head -10
 P=pb/Release/probe.exe
 
 lim() { timeout "${T:-30}" "$@" || echo "  (exit $?)"; }
+# ONLY: the sections to run, by name ("all", the default, runs every one)
+on() { [[ " ${ONLY:-all} " == *" all "* || " ${ONLY:-all} " == *" $1 "* ]]; }
 
+if on clients; then
 echo; echo "######## clients, Schannel verifying (the system's roots, the host name)"
 for h in example.com github.com letsencrypt.org www.google.com expired.badssl.com \
          wrong.host.badssl.com self-signed.badssl.com untrusted-root.badssl.com revoked.badssl.com; do
@@ -25,6 +28,11 @@ lim $P client example.com 443 13
 lim $P client tls-v1-2.badssl.com 1012 13
 echo "---- the same TLS 1.2-only server, 1.2 allowed"
 lim $P client tls-v1-2.badssl.com 1012
+fi
+if on flaky; then
+echo; echo "######## expired and self-signed, five times each (one run closed instead of refusing)"
+for i in 1 2 3 4 5; do for h in expired.badssl.com self-signed.badssl.com; do echo "---- $h ($i)"; lim $P client $h 443; done; done
+fi
 
 echo; echo "######## certificates"
 O=openssl
@@ -49,6 +57,7 @@ $O pkcs12 -export -in c2.pem -inkey k2.pem -out ks2.p12 -passout pass:secret 2>/
 # PKCS#8 key ("PRIVATE KEY"): what NCryptImportKey takes
 $O pkcs8 -topk8 -nocrypt -in k2.pem -out k2p8.pem 2>/dev/null; head -1 k2p8.pem
 
+if on pin; then
 echo; echo "######## explicit trust (pin): against s_server, TLS 1.3 and TLS 1.2"
 $O s_server -accept 9441 -tls1_3 -cert c4.pem -key k4.pem -quiet -naccept 1 > /dev/null 2>&1 &
 sleep 2; echo "---- TLS 1.3, pinned c4 (the keytool certificate)"; lim $P pin localhost 9441 c4.pem
@@ -58,6 +67,7 @@ $O s_server -accept 9443 -tls1_3 -cert c4.pem -key k4.pem -quiet -naccept 1 > /d
 sleep 2; echo "---- TLS 1.3, pinned c1 (not the server's: must be refused)"; lim $P pin localhost 9443 c1.pem
 $O s_server -accept 9444 -tls1_3 -cert c1.pem -key k1.pem -quiet -naccept 1 > /dev/null 2>&1 &
 sleep 2; echo "---- TLS 1.3, certificate 1 (openssl req defaults: CA:TRUE, no EKU), pinned"; lim $P pin localhost 9444 c1.pem
+fi
 
 keys() { find "$APPDATA/Microsoft/Crypto" -type f 2>/dev/null | wc -l; }
 
@@ -76,6 +86,7 @@ srv() {   # port keystore pw keymode
   wait
   echo "  key files in the profile after: $(keys)"
 }
+if on server; then
 n=9500
 for km in nopersist nopersist-cng persist delete; do
   n=$((n+1)); echo "---- keytool PKCS#12, $km"; srv $n ks4.p12 123456 $km
@@ -84,11 +95,21 @@ for km in ephemeral nopersist-cng delete; do
   n=$((n+1)); echo "---- PEM certificate and PKCS#8 key, $km"; CA=c2.pem srv $n "c2.pem;k2p8.pem" "" $km
 done
 n=$((n+1)); echo "---- OpenSSL 3 PKCS#12 (AES), delete"; CA=c2.pem srv $n ks2.p12 secret delete
+fi
+if on pem; then
+n=9550
+for km in persist delete; do
+  n=$((n+1)); echo "---- PEM certificate and PKCS#8 key, a named CNG key, $km"; CA=c2.pem srv $n "c2.pem;k2p8.pem" "" $km
+done
+fi
 
+if on starttls; then
 echo; echo "######## STARTTLS: both ends Schannel, on sockets already in use"
 lim $P starttls-server 9601 ks4.p12 123456 persist &
 sleep 2; lim $P starttls-client localhost 9601 c4.pem; wait
+fi
 
+if on dtlsc; then
 echo; echo "######## DTLS 1.2 client: Schannel against s_server -dtls1_2"
 n=9700
 for cs in sch sch0 legacy; do
@@ -99,10 +120,22 @@ for cs in sch sch0 legacy; do
     sleep 1; kill %% 2>/dev/null; echo "  s_server said:"; grep -v -E "^ACCEPT|^-----|^Shared|^Supported|^Signature|^Peer" ss.log | sed 's/^/    /' | head -6
   done
 done
+fi
+if on mtu; then
+echo; echo "######## DTLS client (legacy credentials): the largest datagram, with SECPKG_ATTR_DTLS_MTU"
+n=9750
+for mtu in "" 1400 17000 65000; do
+  n=$((n+1)); echo "---- DTLS_MTU=${mtu:-(not set)}"
+  (sleep 5; echo "REPLY FROM S_SERVER") | $O s_server -dtls1_2 -accept 127.0.0.1:$n -cert c4.pem -key k4.pem -naccept 1 > ss.log 2>&1 &
+  sleep 2; CRED=legacy DTLS_MTU=$mtu lim $P dtls localhost $n c4.pem 2>&1 | grep -v "step (in"
+  sleep 1; kill %% 2>/dev/null; echo "  s_server said:"; grep -E "x{20}|DONE|error" ss.log | cut -c1-60 | sed 's/^/    /' | head -6
+done
+fi
 
+if on dtlss; then
 echo; echo "######## DTLS 1.2 server: Schannel, s_client -dtls1_2 as the client"
 n=9800
-for cs in sch sch0 legacy; do
+for cs in ${DTLSS_CRED:-sch sch0 legacy}; do
   for mode in 1 0; do
     n=$((n+1)); echo "---- credentials $cs, client address: $([ $mode = 1 ] && echo SECBUFFER_EXTRA || echo none)"
     CRED=$cs lim $P dtls-server $n ks4.p12 123456 $mode persist &
@@ -112,5 +145,6 @@ for cs in sch sch0 legacy; do
     wait
   done
 done
+fi
 echo; echo "key files in the profile at the end: $(keys)"
 kill $(jobs -p) 2>/dev/null; true
