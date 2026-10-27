@@ -996,7 +996,7 @@ halted:
 
 
 /*============================================================================*/
-/* UDPSocket: a UDP socket                                               */
+/* UDPSocket: a UDP socket                                                    */
 /*============================================================================*/
 
 /* Not a stream: each send is one datagram, which arrives whole or not at
@@ -1179,7 +1179,7 @@ halted:
 
 
 /*============================================================================*/
-/* Datagram: what UDPSocket~receive returns                              */
+/* Datagram: what UDPSocket~receive returns                                   */
 /*============================================================================*/
 
 ::class Datagram public

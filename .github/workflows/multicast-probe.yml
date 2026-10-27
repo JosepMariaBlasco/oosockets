@@ -1,0 +1,35 @@
+name: Multicast probe
+
+# Measures what each system accepts for multicast (joining a group on each
+# kind of socket, the sending options, sharing a port) and what it
+# delivers: probes/multicast/probe.c. Run by hand, or when the probe changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - probes/multicast/**
+      - .github/workflows/multicast-probe.yml
+
+jobs:
+  probe:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, macos-15-intel, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          cmake -S probes/multicast -B pb -DCMAKE_BUILD_TYPE=Release > /dev/null
+          cmake --build pb --config Release
+      - name: Probe
+        run: |
+          uname -a || true
+          p=pb/probe; [ -f pb/Release/probe.exe ] && p=pb/Release/probe.exe
+          "$p" 47000
