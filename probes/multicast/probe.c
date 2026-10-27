@@ -535,6 +535,57 @@ static void sharing(void)
         }
 }
 
+/* macOS: a dual socket cannot send to an IPv4 group. A helper: an IPv4
+   socket on the same port, that only sends. Who gets what? */
+static void helper(void)
+{
+    unsigned ifs[2] = {mainIf, loopIf};
+    for (int ii = 0; ii < 2; ii++)
+    {
+        unsigned I = ifs[ii];
+        if (I == 0) continue;
+        printf("\n== helper: dual main [::]:P joined, IPv4 helper 0.0.0.0:P sends; another IPv4 member r on P (interface %u)\n", I);
+        sock_t m = openKind(2, PORT, 3);
+        int jm = m == BAD ? -9 : joinAny(m, 0, I);
+        sock_t h = openKind(0, PORT, 3);
+        int eh = h == BAD ? err() : 0;
+        sock_t r = openKind(0, PORT, 3);
+        int jr = r == BAD ? -9 : joinAny(r, 0, I);
+        printf("  main join %d, helper bind %s, r join %d\n", jm, errname(eh), jr);
+        if (m == BAD || h == BAD || r == BAD) { if (m != BAD) closes(m); if (h != BAD) closes(h); if (r != BAD) closes(r); continue; }
+        int one = 1;
+        setsockopt(h, IPPROTO_IP, IP_MULTICAST_LOOP, (const char *)&one, sizeof one);
+        int ei = setIf4(h, I);
+        struct sockaddr_storage to; socklen_type len;
+        groupAddr(0, 0, &to, &len);
+        int n = (int)sendto(h, "h", 1, 0, (struct sockaddr *)&to, len);
+        int se = n < 0 ? err() : 0;
+        int gm = received(m, 400), gh = received(h, 200), gr = 0, port = -1;
+        {
+            struct pollfd p; p.fd = r; p.events = POLLIN; p.revents = 0;
+            if (pollsock(&p, 1, 400) > 0)
+            {
+                char b[64]; struct sockaddr_storage f; socklen_type fl = sizeof f;
+                if (recvfrom(r, b, sizeof b, 0, (struct sockaddr *)&f, &fl) >= 0)
+                { gr = 1; port = ntohs(((struct sockaddr_in *)&f)->sin_port); }
+            }
+        }
+        printf("  helper IF %s send %s: main got %s, helper got %s, r got %s (source port %d, P %d)\n", errname(ei), errname(se),
+               gm ? "yes" : "no", gh ? "yes" : "no", gr ? "yes" : "no", port, PORT);
+        for (int k = 0; k < 3; k++)
+        {
+            sock_t u = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+            struct sockaddr_in t; memset(&t, 0, sizeof t);
+            t.sin_family = AF_INET; t.sin_port = htons((unsigned short)PORT); t.sin_addr.s_addr = htonl(0x7f000001);
+            sendto(u, "u", 1, 0, (struct sockaddr *)&t, sizeof t);
+            closes(u);
+            gm = received(m, 300); gh = received(h, 100); gr = received(r, 100);
+            printf("  unicast to 127.0.0.1:P #%d: main %s, helper %s, r %s\n", k, gm ? "yes" : "no", gh ? "yes" : "no", gr ? "yes" : "no");
+        }
+        closes(m); closes(h); closes(r);
+    }
+}
+
 int main(int argc, char **argv)
 {
 #ifdef _WIN32
@@ -546,6 +597,7 @@ int main(int argc, char **argv)
     joins();
     sendOptions();
     sharing();
+    helper();
     printf("\ndone\n");
     return 0;
 }
