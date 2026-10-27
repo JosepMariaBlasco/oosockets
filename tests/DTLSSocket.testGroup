@@ -190,21 +190,24 @@ syntax:
   if \opensslHere() then return
   u = .UDPSocket~new(0, "127.0.0.1"); port = u~localPort; u~close
   -- -rev: answers each line reversed; -naccept 1: one client, then it ends
-  cmd = "timeout 20 openssl s_server -dtls1_2 -accept" port "-cert" certFile("server.pem"),
+  cmd = "timeout 20 openssl s_server -dtls1_2 -accept 127.0.0.1:"port "-cert" certFile("server.pem"),
         "-key" certFile("server.pem") "-pass pass:test -naccept 1 -rev -quiet"
   srv = .Shell~new~start("run", cmd)
   s = .nil
-  do 50 while s == .nil                      -- until it listens
-    call sysSleep 0.1
+  do 5 while s == .nil                       -- until it listens
+    call sysSleep 0.5
     s = tryConnect(port)
   end
-  self~assertTrue(s \== .nil, "s_server did not answer")
+  if s == .nil then do
+    self~fail("s_server did not answer:" srv~result)
+    return
+  end
   s~receiveTimeout = 10
   s~send("hello s_server" || "0a"x)
   d = s~receive
   self~assertTrue(d~data~pos("revres_s olleh") > 0, d~data~c2x)
   s~close
-  srv~result
+  self~assertTrue(srv~result~startsWith("0 "))
 
 /* ---- connecting fails ----------------------------------------------------- */
 
@@ -354,7 +357,7 @@ syntax:
   use arg cmd
   out = .array~new; err = .array~new
   address system cmd with output using (out) error using (err)
-  return rc
+  return rc out~makeString("L", " ") "|" err~makeString("L", " ")
 
 ::routine tryConnect
   use arg port
