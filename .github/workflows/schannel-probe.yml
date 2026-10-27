@@ -1,0 +1,28 @@
+name: Schannel probe
+
+# Measures Schannel, Windows' own TLS, for what ooSockets needs: TLS 1.2
+# and 1.3 clients and servers over our own sockets, STARTTLS, PKCS#12 and
+# PEM certificates, explicit trust, DTLS 1.2. probes/schannel/.
+# Run by hand, or when the probe changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - probes/schannel/**
+      - .github/workflows/schannel-probe.yml
+
+jobs:
+  probe:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - run: probes/schannel/run.sh
