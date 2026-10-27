@@ -189,11 +189,12 @@ syntax:
 ::method test_openssl_s_server
   if \opensslHere() then return
   u = .UDPSocket~new(0, "127.0.0.1"); port = u~localPort; u~close
-  -- s_server sends what it reads on its input once a client is there, and
-  -- prints what it receives; -naccept 1: one client, then it ends
-  cmd = "timeout 20 openssl s_server -dtls1_2 -accept 127.0.0.1:"port "-cert" certFile("server.pem"),
-        "-key" certFile("server.pem") "-naccept 1 -quiet"
-  srv = .Shell~new~start("run", cmd, "reply from s_server")
+  -- s_server sends what it reads on its input once a client is there (a
+  -- line, two seconds later: the client is there by then), and prints what
+  -- it receives; -naccept 1: one client, then it ends
+  cmd = "(sleep 2; echo reply from s_server; sleep 3) | timeout 20 openssl s_server -dtls1_2",
+        "-accept 127.0.0.1:"port "-cert" certFile("server.pem") "-key" certFile("server.pem") "-naccept 1 -quiet"
+  srv = .Shell~new~start("run", cmd)
   s = .nil
   do 5 while s == .nil                       -- until it listens
     call sysSleep 0.5
@@ -208,7 +209,8 @@ syntax:
   d = s~receive
   self~assertTrue(d~data~pos("reply from s_server") > 0, d~data)
   s~close
-  srv~result
+  r = srv~result
+  self~assertTrue(r~pos("hello s_server") > 0, r)  -- what s_server printed
 
 /* ---- connecting fails ----------------------------------------------------- */
 
