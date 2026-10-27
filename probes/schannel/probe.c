@@ -671,7 +671,7 @@ static SECURITY_STATUS dtls_step(int server, CredHandle *cred, CtxtHandle *ctx, 
     int fragments = 0;
     do {
         SecBuffer inb[2] = { { (ULONG)inlen, SECBUFFER_TOKEN, in }, { 0, SECBUFFER_EMPTY, NULL } };
-        if (server && addr_mode == 1) { inb[1].BufferType = SECBUFFER_EXTRA; inb[1].cbBuffer = addrlen; inb[1].pvBuffer = addr; }
+        if (server && (addr_mode == 1 || addr_mode == 2 || (addr_mode == 3 && *first))) { inb[1].BufferType = SECBUFFER_EXTRA; inb[1].cbBuffer = addrlen; inb[1].pvBuffer = addr; }
         SecBufferDesc ind = { SECBUFFER_VERSION, 2, inb };
         SecBuffer outb[2] = { { 0, SECBUFFER_TOKEN, NULL }, { 0, SECBUFFER_ALERT, NULL } };
         SecBufferDesc outd = { SECBUFFER_VERSION, 2, outb };
@@ -784,7 +784,8 @@ static int do_dtls_client(const char *host, const char *port, const char *pin)
 
 /* addr_mode 0: no address given to AcceptSecurityContext; 1: the client's
    address as SECBUFFER_EXTRA (what the few public uses of Schannel's DTLS
-   server suggest; undocumented). */
+   server suggest; undocumented); 2: as 1, and a new context after the
+   cookie; 3: the address on the first call only. */
 static int do_dtls_server(int port, const char *p12, const char *pw, int addr_mode, const char *keymode)
 {
     PCCERT_CONTEXT cert = load_p12(p12, pw, keymode);
@@ -807,6 +808,12 @@ static int do_dtls_server(int port, const char *p12, const char *pw, int addr_mo
         int n = recvfrom(fd, in, sizeof in, 0, (struct sockaddr *)&from, &fromlen);
         if (n < 0) { printf("  DTLS server: recvfrom %d\n", WSAGetLastError()); return 1; }
         st = dtls_step(1, &cred, &ctx, &first, NULL, fd, in, n, (struct sockaddr *)&from, fromlen, addr_mode);
+        if (addr_mode == 2 && steps == 1 && st == SEC_I_CONTINUE_NEEDED) {
+            /* the cookie (HelloVerifyRequest) went out: a stateless server
+               keeps nothing, so the next ClientHello starts a new context */
+            DeleteSecurityContext(&ctx); first = 1;
+            printf("    (new context for the ClientHello with the cookie)\n");
+        }
     }
     if (st != SEC_E_OK) { say_status("DTLS server handshake FAILED", st); return 1; }
     show_connection(&ctx);

@@ -136,8 +136,8 @@ if on dtlss; then
 echo; echo "######## DTLS 1.2 server: Schannel, s_client -dtls1_2 as the client"
 n=9800
 for cs in ${DTLSS_CRED:-sch sch0 legacy}; do
-  for mode in 1 0; do
-    n=$((n+1)); echo "---- credentials $cs, client address: $([ $mode = 1 ] && echo SECBUFFER_EXTRA || echo none)"
+  for mode in ${DTLSS_MODES:-1 0}; do
+    n=$((n+1)); echo "---- credentials $cs, client address mode $mode (0 none, 1 SECBUFFER_EXTRA, 2 and a new context after the cookie, 3 first call only)"
     CRED=$cs lim $P dtls-server $n ks4.p12 123456 $mode persist &
     sleep 2
     (echo "hello over dtls"; sleep 4) | T=15 lim $O s_client -dtls1_2 -connect 127.0.0.1:$n -CAfile c4.pem -verify_return_error \
