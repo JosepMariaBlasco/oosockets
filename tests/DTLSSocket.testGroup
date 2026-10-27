@@ -103,10 +103,14 @@ return testResult
   bad = .Client~new~start("connectOnly", srv~localPort, .nil)  -- the system's trust: not the test CA
   good = .Client~new~start("echoOnce", srv~localPort, "good", trustCA(), 3)  -- starts later
   c = srv~accept
-  self~assertSame("TLS error: certificate is not trusted (localhost, port" srv~localPort")", bad~result)
   c~receiveTimeout = 10
   c~send(c~receive~data)
   self~assertSame("good DTLSv1.2", good~result)
+  -- "certificate is not trusted"; macOS may first say "is valid for
+  -- longer than the system allows" (the test CA's hundred years)
+  r = bad~result
+  self~assertTrue(r~startsWith("TLS error: certificate "), r)
+  self~assertTrue(r~endsWith("(localhost, port" srv~localPort")"), r)
   c~close
   srv~close
 
