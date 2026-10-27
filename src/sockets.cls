@@ -1033,7 +1033,7 @@ halted:
     raise syntax 88.900 array("UDPSocket~new: the port must be between 0 and 65535; found" port)
   port = port + 0
   closed = .false; peer = .nil; receiveTimeout = .nil
-  r = self~nOpen(port, address)
+  r = self~nOpen(port, address, self~sharesPort)
   if r[1] \== "OK" then do
     where = "port" port
     if address \== "" then where = address || "," where
@@ -1163,6 +1163,10 @@ halted:
   if closed then
     raise syntax 48.900 array("Socket error: the UDP socket is closed (port" port")", "EBADF", 0)
 
+-- .true when other sockets may take the same port (MulticastSocket).
+::method sharesPort private unguarded
+  return .false
+
 -- 48.900 for a failure; where is host and port, the connected peer's, or
 -- this socket's own port.
 ::method raiseError private unguarded
@@ -1176,6 +1180,380 @@ halted:
     otherwise where = "port" port
   end
   raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4])
+
+
+/*============================================================================*/
+/* MulticastSocket: a UDPSocket that joins multicast groups                   */
+/*============================================================================*/
+
+/* new([port [, address]]): a UDPSocket whose port other sockets (other
+   programs on the same machine) may take too, so that all of them
+   receive the datagrams of the groups they join. A datagram sent to the
+   port alone, not to a group, reaches only one of them.
+
+   m = .MulticastSocket~new(5000)
+   m~joinGroup("239.1.2.3")                 -- IPv4; or "ff15::1234", IPv6
+   d = m~receive                            -- what anyone sends to the group
+   m~send("hello", "239.1.2.3", 5000)       -- to every member
+
+   Every error is a SYNTAX condition, 48.900, as for UDPSocket:
+     "Socket error: not a multicast address (10.0.0.1, port 5000)".   */
+
+::class MulticastSocket public subclass UDPSocket
+
+::method nGroup  private unguarded external "LIBRARY oosockets mcast_group"
+::method nOption private unguarded external "LIBRARY oosockets mcast_option"
+
+::method init
+  expose timeToLive loopback networkInterface
+  forward class (super) continue
+  timeToLive = 1; loopback = .true; networkInterface = ""
+
+/** joinGroup(group [, interface]): receives, from now on, what is sent to
+    group (an IPv4 address from 224.0.0.0 to 239.255.255.255, or an IPv6
+    one starting with ff), arriving on interface (its name, its index, or
+    one of its addresses; without it, the one the system chooses). */
+::method joinGroup unguarded
+  use strict arg group, interface = ""
+  self~group(group, interface, .true, "MulticastSocket~joinGroup")
+
+/** leaveGroup(group [, interface]): no longer receives what is sent to
+    group. */
+::method leaveGroup unguarded
+  use strict arg group, interface = ""
+  self~group(group, interface, .false, "MulticastSocket~leaveGroup")
+
+/** How many routers a datagram sent to a group may cross: 1, the default,
+    keeps it in the local network; 0, in this machine. (IPv6's hop limit.) */
+::attribute timeToLive get unguarded
+::attribute timeToLive set unguarded
+  expose timeToLive
+  use strict arg value
+  if \value~dataType("W") then
+    raise syntax 88.900 array("MulticastSocket~timeToLive=: the value must be a whole number; found" value)
+  if value < 0 | value > 255 then
+    raise syntax 88.900 array("MulticastSocket~timeToLive=: the value must be between 0 and 255; found" value)
+  self~option("TTL", value + 0)
+  timeToLive = value + 0
+
+/** .true, the default: a datagram this socket sends to a group reaches the
+    members on this same machine too. On Windows it is the receiving socket
+    that decides: .false there means this socket does not receive what is
+    sent to its groups from this machine. */
+::attribute loopback get unguarded
+::attribute loopback set unguarded
+  expose loopback
+  use strict arg value
+  if value \== .true & value \== .false then
+    raise syntax 88.900 array("MulticastSocket~loopback=: the value must be .true or .false; found" value)
+  self~option("LOOP", value + 0)            -- 1 or 0
+  loopback = value
+
+/** The interface datagrams to a group leave from (its name, its index or
+    one of its addresses); "", the default: the one the system chooses. */
+::attribute networkInterface get unguarded
+::attribute networkInterface set unguarded
+  expose networkInterface
+  use strict arg value
+  value = value~string
+  self~option("IF", value)
+  networkInterface = value
+
+::method string unguarded
+  return "a MulticastSocket on port" self~localPort
+
+::method sharesPort private unguarded
+  return .true
+
+::method group private unguarded
+  use arg group, interface, join, who
+  group = group~string; interface = interface~string
+  if group == "" then
+    raise syntax 88.900 array(who": the group must not be empty")
+  self~checkOpen
+  r = self~nGroup(group, interface, join)
+  if r[1] \== "OK" then self~raiseError(r, group, self~localPort)
+
+::method option private unguarded
+  use arg name, value
+  self~checkOpen
+  r = self~nOption(name, value)
+  if r[1] \== "OK" then self~raiseError(r, "", "")
+
+
+/*============================================================================*/
+/* DTLSSocket: TLS over UDP                                                   */
+/*============================================================================*/
+
+/* new(host, port [, options [, connectTimeout]]): a UDP socket that
+   sends to host and port only, and makes the DTLS handshake (DTLS 1.2).
+   As for TLSSocket, the server's certificate must be good for host: the
+   system decides, unless options (a TLSOptions) trust certificates
+   explicitly. connectTimeout, in seconds, bounds the handshake (DTLS sends
+   its messages again when they are lost: without a timeout, a server that
+   never answers makes new wait for about a minute and then fail).
+
+   s = .DTLSSocket~new("localhost", 4433)
+   s~send("hello")                          -- one datagram, encrypted
+   d = s~receive                            -- a .Datagram, decrypted
+   s~close                                  -- tells the server (close_notify)
+
+   Like a UDPSocket, not a stream: each send is one datagram (up to 16,384
+   bytes), which arrives whole or not at all, and in any order. Every error
+   is a SYNTAX condition, 48.900: "TLS error: certificate has expired
+   (localhost, port 4433)", "TLS error: the peer closed the connection
+   (localhost, port 4433)" once the server has closed it.          */
+
+::class DTLSSocket public
+
+::method nConnect private external "LIBRARY oosockets dtls_connect"
+::method nMore    private external "LIBRARY oosockets dtls_more"
+::method nAdopt   private external "LIBRARY oosockets dtls_adopt"
+::method nSend    private unguarded external "LIBRARY oosockets dtls_send"
+::method nReceive private unguarded external "LIBRARY oosockets dtls_receive"
+::method nInfo    private unguarded external "LIBRARY oosockets dtls_info"
+::method nAddress private unguarded external "LIBRARY oosockets dtls_address"
+::method nClose   private unguarded external "LIBRARY oosockets dtls_close"
+::method nFree    private external "LIBRARY oosockets dtls_free"
+
+::method init
+  expose host port closed receiveTimeout
+  signal on halt name halted
+  closed = .false; receiveTimeout = .nil
+  if arg() == 1, arg(1)~isA(.Pointer) then do  -- from DTLSServerSocket~accept
+    self~nAdopt(arg(1))
+    host = self~remoteAddress; port = self~remotePort
+    return
+  end
+  use strict arg host, port, options = .nil, connectTimeout = .nil
+  host = host~string
+  if host == "" then
+    raise syntax 88.900 array("DTLSSocket~new: the host must not be empty")
+  port = checkPort(port, "DTLSSocket~new")
+  if options \== .nil, \options~isA(.TLSOptions) then
+    raise syntax 88.900 array("DTLSSocket~new: options must be a TLSOptions; found" options)
+  timeout = checkTimeout(connectTimeout, "DTLSSocket~new", "connectTimeout")
+  if timeout == .nil then timeout = -1
+  trusted = .array~new; minVersion = "1.2"
+  if options \== .nil then do
+    trusted = options~trusted
+    minVersion = options~minVersion
+  end
+  where = "(" || host || ", port" port")"
+  r = self~nConnect(host, port, trusted, minVersion, timeout)
+  loop while r[1] == "AGAIN"                 -- see "HALT" in oosockets.cpp
+    r = self~nMore(r[2])
+  end
+  if r[1] == "OK" then return
+  self~nClose; closed = .true
+  if r[1] == "SOCKET" then
+    raise syntax 48.900 array("Socket error:" r[2] where, r[3], r[4])
+  if r[1] == "TIMEOUT" then
+    raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
+  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
+halted:
+  raise propagate
+
+::method uninit
+  self~nFree
+
+/** send(data): data as one datagram, encrypted, to the peer. */
+::method send unguarded
+  use strict arg data
+  self~checkOpen
+  r = self~nSend(data~string)
+  if r[1] \== "OK" then self~raiseError(r)
+
+/** receive: waits for the next datagram and returns it as a .Datagram.
+    With a receiveTimeout that expires, returns .nil. */
+::method receive unguarded
+  expose receiveTimeout
+  signal on halt name halted
+  self~checkOpen
+  timeout = receiveTimeout
+  if timeout == .nil then timeout = -1
+  r = self~nReceive(timeout)
+  loop while r[1] == "AGAIN"                 -- see "HALT" in oosockets.cpp
+    r = self~nReceive(r[2])
+  end
+  select
+    when r[1] == "OK" then return .Datagram~new(r[2], r[3], r[4])
+    when r[1] == "TIMEOUT" then return .nil
+    otherwise self~raiseError(r)
+  end
+  return
+halted:
+  raise propagate
+
+/** close: tells the peer (close_notify) and closes. */
+::method close unguarded
+  expose closed
+  closed = .true
+  self~nClose
+
+/** Seconds receive may wait; .nil, the default: as long as it takes. */
+::attribute receiveTimeout get unguarded
+::attribute receiveTimeout set unguarded
+  expose receiveTimeout
+  use strict arg value
+  receiveTimeout = checkTimeout(value, "DTLSSocket~receiveTimeout=", "value")
+
+/** .true: a DTLSSocket is always secure. */
+::method secure unguarded
+  return .true
+
+/** The protocol in use ("DTLSv1.2"). */
+::method protocol unguarded
+  return self~nInfo[2]
+
+/** The cipher suite in use ("ECDHE-RSA-AES256-GCM-SHA384"). */
+::method cipher unguarded
+  return self~nInfo[3]
+
+::method localAddress unguarded
+  r = self~nAddress("L")
+  if r[1] == "OK" then return r[2]
+  return ""
+
+::method localPort unguarded
+  r = self~nAddress("L")
+  if r[1] == "OK" then return r[3]
+  return 0
+
+/** The peer's address and port. */
+::method remoteAddress unguarded
+  r = self~nAddress("R")
+  if r[1] == "OK" then return r[2]
+  return ""
+
+::method remotePort unguarded
+  r = self~nAddress("R")
+  if r[1] == "OK" then return r[3]
+  return 0
+
+/** host:port, as given or as accepted ("[::1]:4433" for IPv6). */
+::method string unguarded
+  expose host port
+  return hostAndPort(host, port)
+
+::method checkOpen private unguarded
+  expose closed host port
+  if closed then
+    raise syntax 48.900 array("Socket error: the DTLS socket is closed (" || host || ", port" port")", "EBADF", 0)
+
+-- 48.900 for a failure: "TLS error:" for TLS's own (the name is "TLS", or
+-- "EOF" once the peer closed), "Socket error:" for the socket's.
+::method raiseError private unguarded
+  expose host port
+  use arg r
+  self~checkOpen
+  where = "(" || host || ", port" port")"
+  if r[3] == "TLS" | r[3] == "EOF" | r[3] == "ETIMEDOUT" then
+    raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
+  raise syntax 48.900 array("Socket error:" r[2] where, r[3], r[4])
+
+
+/*============================================================================*/
+/* DTLSServerSocket: a UDP port whose clients speak DTLS                      */
+/*============================================================================*/
+
+/* new(port, options [, address]): a DTLS server on a UDP port. options: a
+   TLSOptions with the server's certificate (certificate(file
+   [, password])). accept waits for a client whose handshake has finished
+   and returns its DTLSSocket; one socket (one port) serves every client,
+   each told apart by its address and port. A client is first sent a
+   cookie it must send back, so that a forged address costs the server
+   nothing; a client that fails the handshake (or never finishes it) is
+   dropped, and the server goes on.
+
+   srv = .DTLSServerSocket~new(4433, .TLSOptions~new~certificate("server.p12", "secret"))
+   c = srv~accept                           -- a .DTLSSocket
+   d = c~receive
+   c~send(d~data~upper)                     -- the answer, to that client */
+
+::class DTLSServerSocket public
+
+::method nListen  private external "LIBRARY oosockets dtls_listen"
+::method nAccept  private external "LIBRARY oosockets dtls_accept"
+::method nAddress private unguarded external "LIBRARY oosockets dtls_address"
+::method nClose   private unguarded external "LIBRARY oosockets dtls_close"
+::method nFree    private external "LIBRARY oosockets dtls_free"
+
+::method init
+  expose port closed acceptTimeout
+  use strict arg port, options, address = ""
+  port = port~string; address = address~string
+  if \port~dataType("W") then
+    raise syntax 88.900 array("DTLSServerSocket~new: the port must be a whole number; found" port)
+  if port < 0 | port > 65535 then
+    raise syntax 88.900 array("DTLSServerSocket~new: the port must be between 0 and 65535; found" port)
+  identity = serverIdentity(options, "DTLSServerSocket~new")
+  port = port + 0
+  closed = .false; acceptTimeout = .nil
+  r = self~nListen(port, address, identity[1], identity[2], options~minVersion)
+  if r[1] \== "OK" then do
+    where = "port" port
+    if address \== "" then where = address || "," where
+    if r[1] == "SOCKET" then
+      raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4])
+    raise syntax 48.900 array("TLS error:" r[2] "(" || where || ")", r[3], r[4])
+  end
+  if port == 0 then port = self~localPort
+
+::method uninit
+  self~nFree
+
+/** accept: waits for a client whose handshake has finished and returns its
+    .DTLSSocket. With an acceptTimeout that expires, returns .nil. */
+::method accept
+  expose port closed acceptTimeout
+  signal on halt name halted
+  if closed then
+    raise syntax 48.900 array("Socket error: the DTLS server socket is closed (port" port")", "EBADF", 0)
+  timeout = acceptTimeout
+  if timeout == .nil then timeout = -1
+  r = self~nAccept(timeout)
+  loop while r[1] == "AGAIN"                 -- see "HALT" in oosockets.cpp
+    r = self~nAccept(r[2])
+  end
+  select
+    when r[1] == "OK" then return .DTLSSocket~new(r[2])
+    when r[1] == "TIMEOUT" then return .nil
+    when closed then
+      raise syntax 48.900 array("Socket error: the DTLS server socket is closed (port" port")", "EBADF", 0)
+    otherwise
+      raise syntax 48.900 array("Socket error:" r[2] "(accepting on port" port")", r[3], r[4])
+  end
+  return
+halted:
+  raise propagate
+
+/** close: stops the server; the connections it accepted end with it. */
+::method close unguarded
+  expose closed
+  closed = .true
+  self~nClose
+
+::method localAddress unguarded
+  r = self~nAddress("L")
+  if r[1] == "OK" then return r[2]
+  return ""
+
+::method localPort unguarded
+  r = self~nAddress("L")
+  if r[1] == "OK" then return r[3]
+  return 0
+
+/** Seconds accept may wait; .nil, the default: as long as it takes. */
+::attribute acceptTimeout get unguarded
+::attribute acceptTimeout set unguarded
+  expose acceptTimeout
+  use strict arg value
+  acceptTimeout = checkTimeout(value, "DTLSServerSocket~acceptTimeout=", "value")
+
+::method string unguarded
+  expose port
+  return "a DTLSServerSocket on port" port
 
 
 /*============================================================================*/

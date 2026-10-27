@@ -3112,6 +3112,1207 @@ RexxMethod3(RexxArrayObject, mcast_option, CSELF, cself, CSTRING, name, CSTRING,
 }
 
 /*----------------------------------------------------------------------------*/
+/* DTLS: TLS over UDP                                                         */
+/*                                                                            */
+/* OpenSSL does DTLS 1.2, as it does TLS, and trust is decided as for TLS.    */
+/* One UDP socket (an "endpoint") carries the client's single connection, or  */
+/* all of a server's: the server tells its clients apart by their address     */
+/* and port, in user space, so that the same code works on the three systems  */
+/* (none of them is relied on to hand each connected socket only its own      */
+/* datagrams). A server first answers a client with a cookie                  */
+/* (DTLSv1_listen, stateless), so that a forged address costs it nothing.     */
+/*                                                                            */
+/* Every SSL of an endpoint is used under the endpoint's lock. Whoever waits  */
+/* (receive, accept, a handshake) reads the socket for everybody: one waiter  */
+/* at a time polls it, outside the lock, and hands each datagram to its       */
+/* connection, which OpenSSL then reads at once (handshake records, the       */
+/* retransmissions of DTLS's timers, close_notify, data); the others wait on  */
+/* a condition variable. No wait is longer than SLICE_MS (HALT: see           */
+/* waitSlice).                                                                */
+/*----------------------------------------------------------------------------*/
+
+struct DtlsEndpoint;
+
+// One DTLS connection: the client's, or one of a server's clients.
+struct DtlsConn : PeerCheck
+{
+    enum State { HANDSHAKING, OPEN, FAILED, PEER_CLOSED, CLOSED };
+    DtlsEndpoint *ep = nullptr;
+    struct sockaddr_storage peer;
+    socklen_type peerLen = 0;
+    std::string key;                     // the peer's address and port, as bytes
+    SSL *ssl = nullptr;
+    std::deque<std::string> wire;        // datagrams arrived, for OpenSSL to read
+    std::deque<std::string> app;         // what they carried, for receive
+    State state = HANDSHAKING;
+    TlsOutcome failure;                  // FAILED: why
+    int ioError = 0;                     // the last socket error the BIO met
+    bool accepted = false;               // a DTLSSocket has it (server)
+    bool restarted = false;              // PEER_CLOSED: the peer began anew
+    DtlsConn() { memset(&peer, 0, sizeof(peer)); }
+};
+
+struct DtlsEndpoint
+{
+    sock_t fd = BAD_SOCKET;
+    bool server = false;
+    std::mutex mu;
+    std::condition_variable cv;
+    bool reading = false;                // a waiter is polling the socket
+    bool closing = false;
+    bool closeAfterRead = false;         // close was asked while one polled
+    SSL_CTX *ctx = nullptr;
+    std::map<std::string, DtlsConn *> conns;   // server: by peer
+    std::deque<DtlsConn *> ready;              // server: handshaken, not accepted
+    DtlsConn *client = nullptr;                // client: its connection
+    unsigned char secret[32];                  // server: for the cookies
+    ~DtlsEndpoint();
+};
+
+// What a DTLSSocket or a DTLSServerSocket holds (CSELF).
+struct DtlsHandle
+{
+    std::shared_ptr<DtlsEndpoint> ep;
+    DtlsConn *conn = nullptr;            // nullptr for a DTLSServerSocket
+};
+
+static void freeConn(DtlsConn *c)
+{
+    if (c != nullptr)
+    {
+        if (c->ssl != nullptr)
+        {
+            SSL_free(c->ssl);
+        }
+        delete c;
+    }
+}
+
+DtlsEndpoint::~DtlsEndpoint()
+{
+    // Accepted connections belong to their DTLSSocket (which keeps the
+    // endpoint alive): what is left here was never accepted.
+    std::vector<DtlsConn *> mine;
+    for (auto &kv : conns)
+    {
+        if (!kv.second->accepted)
+        {
+            mine.push_back(kv.second);
+        }
+    }
+    for (DtlsConn *c : ready)
+    {
+        bool listed = false;
+        for (DtlsConn *m : mine)
+        {
+            listed = listed || m == c;
+        }
+        if (!listed && !c->accepted)
+        {
+            mine.push_back(c);
+        }
+    }
+    for (DtlsConn *c : mine)
+    {
+        freeConn(c);
+    }
+    if (client != nullptr && !client->accepted)
+    {
+        freeConn(client);
+    }
+    if (ctx != nullptr)
+    {
+        SSL_CTX_free(ctx);
+    }
+    if (fd != BAD_SOCKET)
+    {
+        closesock(fd);
+    }
+}
+
+// The datagram MTU OpenSSL fragments the handshake for: small enough for
+// any path (as QUIC's 1200 bytes), IPv4 or IPv6.
+static const long DTLS_MTU = 1200;
+// A DTLS record carries at most this many bytes (SSL3_RT_MAX_PLAIN_LENGTH).
+static const size_t DTLS_MAX_DATA = 16384;
+// A server keeps at most this many handshakes in progress.
+static const size_t DTLS_MAX_PENDING = 64;
+
+/* ---- the BIO: a connection's datagrams --------------------------------------- */
+
+static int dtlsBioWrite(BIO *b, const char *data, int len)
+{
+    DtlsConn *c = (DtlsConn *)BIO_get_data(b);
+    BIO_clear_retry_flags(b);
+    sock_t fd = c->ep->fd;
+    if (fd == BAD_SOCKET)
+    {
+        return -1;
+    }
+    for (;;)
+    {
+        long n = c->ep->server
+                 ? (long)sendto(fd, data, len, 0, (struct sockaddr *)&c->peer, c->peerLen)
+                 : (long)send(fd, data, len, 0);
+        if (n >= 0)
+        {
+            return len;
+        }
+        int e = lastError();
+        if (interrupted(e))
+        {
+            continue;
+        }
+        if (wouldBlock(e))
+        {
+            return len;        // as if lost on the way: DTLS sends it again
+        }
+        c->ioError = e;
+        return -1;
+    }
+}
+
+static int dtlsBioRead(BIO *b, char *data, int len)
+{
+    DtlsConn *c = (DtlsConn *)BIO_get_data(b);
+    BIO_clear_retry_flags(b);
+    if (c->wire.empty())
+    {
+        BIO_set_retry_read(b);
+        return -1;
+    }
+    std::string d = c->wire.front();
+    c->wire.pop_front();
+    int n = (int)d.size() < len ? (int)d.size() : len;
+    memcpy(data, d.data(), (size_t)n);
+    return n;
+}
+
+static long dtlsBioCtrl(BIO *b, int cmd, long num, void *ptr)
+{
+    DtlsConn *c = (DtlsConn *)BIO_get_data(b);
+    switch (cmd)
+    {
+        case BIO_CTRL_FLUSH:
+            return 1;
+        case BIO_CTRL_DGRAM_QUERY_MTU:
+        case BIO_CTRL_DGRAM_GET_FALLBACK_MTU:
+            return DTLS_MTU;
+        case BIO_CTRL_DGRAM_SET_MTU:
+            return num;
+        case BIO_CTRL_DGRAM_GET_MTU_OVERHEAD:
+            return 0;                      // DTLS_MTU is what a datagram may carry
+        case BIO_CTRL_DGRAM_MTU_EXCEEDED:
+            return 0;
+        case BIO_CTRL_DGRAM_GET_PEER:
+            if (ptr != nullptr && c != nullptr)
+            {
+                BIO_ADDR *a = (BIO_ADDR *)ptr;
+                if (c->peer.ss_family == AF_INET)
+                {
+                    struct sockaddr_in *s4 = (struct sockaddr_in *)&c->peer;
+                    BIO_ADDR_rawmake(a, AF_INET, &s4->sin_addr, 4, s4->sin_port);
+                }
+                else
+                {
+                    struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)&c->peer;
+                    BIO_ADDR_rawmake(a, AF_INET6, &s6->sin6_addr, 16, s6->sin6_port);
+                }
+                return 1;
+            }
+            return 0;
+        case BIO_CTRL_DGRAM_SET_PEER:
+        case BIO_CTRL_DGRAM_SET_CONNECTED:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static BIO_METHOD *dtlsBioMethod()
+{
+    static std::once_flag once;
+    static BIO_METHOD *method = nullptr;
+    std::call_once(once, []()
+    {
+        method = BIO_meth_new(BIO_get_new_index() | BIO_TYPE_SOURCE_SINK, "oosockets dtls");
+        BIO_meth_set_write(method, dtlsBioWrite);
+        BIO_meth_set_read(method, dtlsBioRead);
+        BIO_meth_set_ctrl(method, dtlsBioCtrl);
+        BIO_meth_set_create(method, bioCreate);
+    });
+    return method;
+}
+
+static DtlsConn *newConn(DtlsEndpoint *ep, const struct sockaddr_storage &peer, socklen_type peerLen)
+{
+    DtlsConn *c = new DtlsConn();
+    c->ep = ep;
+    memcpy(&c->peer, &peer, sizeof(peer));
+    c->peerLen = peerLen;
+    c->ssl = SSL_new(ep->ctx);
+    BIO *bio = BIO_new(dtlsBioMethod());
+    BIO_set_data(bio, c);
+    SSL_set_bio(c->ssl, bio, bio);
+    SSL_set_app_data(c->ssl, static_cast<PeerCheck *>(c));
+    return c;
+}
+
+/* ---- cookies (server) -------------------------------------------------------- */
+
+static std::string peerKey(const struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET)
+    {
+        const struct sockaddr_in *s4 = (const struct sockaddr_in *)sa;
+        return std::string("4", 1) + std::string((const char *)&s4->sin_addr, 4) +
+               std::string((const char *)&s4->sin_port, 2);
+    }
+    const struct sockaddr_in6 *s6 = (const struct sockaddr_in6 *)sa;
+    return std::string("6", 1) + std::string((const char *)&s6->sin6_addr, 16) +
+           std::string((const char *)&s6->sin6_port, 2);
+}
+
+static int cookieMake(SSL *ssl, unsigned char *cookie, unsigned int *len)
+{
+    DtlsConn *c = static_cast<DtlsConn *>((PeerCheck *)SSL_get_app_data(ssl));
+    unsigned char mac[EVP_MAX_MD_SIZE];
+    unsigned int macLen = 0;
+    if (HMAC(EVP_sha256(), c->ep->secret, sizeof(c->ep->secret), (const unsigned char *)c->key.data(),
+             c->key.size(), mac, &macLen) == nullptr)
+    {
+        return 0;
+    }
+    if (macLen > 16)
+    {
+        macLen = 16;
+    }
+    memcpy(cookie, mac, macLen);
+    *len = macLen;
+    return 1;
+}
+
+static int cookieCheck(SSL *ssl, const unsigned char *cookie, unsigned int len)
+{
+    unsigned char want[EVP_MAX_MD_SIZE];
+    unsigned int wantLen = 0;
+    if (!cookieMake(ssl, want, &wantLen) || len != wantLen)
+    {
+        return 0;
+    }
+    return CRYPTO_memcmp(cookie, want, len) == 0 ? 1 : 0;
+}
+
+/* ---- what arrives ------------------------------------------------------------ */
+
+// The outcome of an SSL call that failed, kept as the connection's failure.
+static TlsOutcome dtlsOutcome(DtlsConn *c, int rc)
+{
+    TlsOutcome o;
+    int e = SSL_get_error(c->ssl, rc);
+    o.handshaking = !SSL_is_init_finished(c->ssl);
+    o.socketError = c->ioError;
+    o.sslError = ERR_peek_last_error();
+    o.verifyResult = SSL_get_verify_result(c->ssl);
+    if (e == SSL_ERROR_ZERO_RETURN)
+    {
+        o.status = TLS_EOF;
+    }
+    else if (e == SSL_ERROR_SYSCALL)
+    {
+        o.status = o.socketError != 0 ? TLS_SOCKET_ERROR : TLS_SSL_ERROR;
+    }
+    else
+    {
+        o.status = TLS_SSL_ERROR;
+    }
+    ERR_clear_error();
+    return o;
+}
+
+// A connection that cannot go on. A server's, never accepted, is dropped
+// (its client hears of it, the server goes on).
+static void failConn(DtlsEndpoint *ep, DtlsConn *c, const TlsOutcome &o)
+{
+    if (ep->server && !c->accepted)
+    {
+        auto it = ep->conns.find(c->key);
+        if (it != ep->conns.end() && it->second == c)
+        {
+            ep->conns.erase(it);
+        }
+        for (auto r = ep->ready.begin(); r != ep->ready.end(); ++r)
+        {
+            if (*r == c)
+            {
+                ep->ready.erase(r);
+                break;
+            }
+        }
+        freeConn(c);
+        return;
+    }
+    c->state = DtlsConn::FAILED;
+    c->failure = o;
+}
+
+// Lets OpenSSL read what has arrived for c: the handshake goes on, or the
+// data is kept for receive.
+static void driveConn(DtlsEndpoint *ep, DtlsConn *c)
+{
+    if (c->state == DtlsConn::HANDSHAKING)
+    {
+        ERR_clear_error();
+        c->ioError = 0;
+        int rc = SSL_do_handshake(c->ssl);
+        if (rc == 1)
+        {
+            c->state = DtlsConn::OPEN;
+            if (ep->server)
+            {
+                ep->ready.push_back(c);
+            }
+        }
+        else
+        {
+            int e = SSL_get_error(c->ssl, rc);
+            if (e != SSL_ERROR_WANT_READ && e != SSL_ERROR_WANT_WRITE)
+            {
+                failConn(ep, c, dtlsOutcome(c, rc));
+                return;
+            }
+            ERR_clear_error();
+        }
+    }
+    if (c->state != DtlsConn::OPEN)
+    {
+        return;
+    }
+    std::vector<char> buf(DTLS_MAX_DATA + 1024);
+    for (;;)
+    {
+        size_t got = 0;
+        ERR_clear_error();
+        c->ioError = 0;
+        int rc = SSL_read_ex(c->ssl, buf.data(), buf.size(), &got);
+        if (rc == 1)
+        {
+            c->app.push_back(std::string(buf.data(), got));
+            continue;
+        }
+        int e = SSL_get_error(c->ssl, rc);
+        if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE)
+        {
+            ERR_clear_error();
+            return;
+        }
+        if (e == SSL_ERROR_ZERO_RETURN)
+        {
+            ERR_clear_error();
+            c->state = DtlsConn::PEER_CLOSED;
+            return;
+        }
+        failConn(ep, c, dtlsOutcome(c, rc));
+        return;
+    }
+}
+
+// A ClientHello of epoch 0: a client beginning a connection.
+static bool isClientHello(const char *d, size_t n)
+{
+    return n > 13 && (unsigned char)d[0] == 22 && d[3] == 0 && d[4] == 0 && d[13] == 1;
+}
+
+// A server's new client: its first datagram goes to DTLSv1_listen, which
+// answers with a cookie, or (when the datagram carries the right cookie)
+// accepts it. The connection, or nullptr.
+static DtlsConn *listenFor(DtlsEndpoint *ep, const char *d, size_t n, const struct sockaddr_storage &from,
+                           socklen_type fromLen, const std::string &key)
+{
+    if (!isClientHello(d, n))
+    {
+        return nullptr;
+    }
+    size_t pending = 0;
+    for (auto &kv : ep->conns)
+    {
+        pending += kv.second->state == DtlsConn::HANDSHAKING ? 1 : 0;
+    }
+    if (pending >= DTLS_MAX_PENDING)
+    {
+        return nullptr;
+    }
+    DtlsConn *c = newConn(ep, from, fromLen);
+    c->key = key;
+    c->wire.push_back(std::string(d, n));
+    BIO_ADDR *client = BIO_ADDR_new();
+    ERR_clear_error();
+    int rc = DTLSv1_listen(c->ssl, client);
+    BIO_ADDR_free(client);
+    ERR_clear_error();
+    if (rc != 1)
+    {
+        freeConn(c);              // a HelloVerifyRequest went out, or it was not one
+        return nullptr;
+    }
+    c->wire.clear();
+    return c;
+}
+
+static void dispatch(DtlsEndpoint *ep, const char *d, size_t n, const struct sockaddr_storage &from,
+                     socklen_type fromLen)
+{
+    if (!ep->server)
+    {
+        if (ep->client != nullptr && ep->client->state <= DtlsConn::OPEN)
+        {
+            ep->client->wire.push_back(std::string(d, n));
+            driveConn(ep, ep->client);
+        }
+        return;
+    }
+    std::string key = peerKey((const struct sockaddr *)&from);
+    auto it = ep->conns.find(key);
+    if (it != ep->conns.end())
+    {
+        DtlsConn *c = it->second;
+        if (c->state != DtlsConn::HANDSHAKING && isClientHello(d, n))
+        {
+            // The peer begins anew (it was restarted, say): once it has the
+            // cookie, the old connection is over.
+            DtlsConn *fresh = listenFor(ep, d, n, from, fromLen, key);
+            if (fresh == nullptr)
+            {
+                return;
+            }
+            ep->conns.erase(it);
+            if (c->accepted)
+            {
+                if (c->state == DtlsConn::OPEN)
+                {
+                    c->state = DtlsConn::PEER_CLOSED;
+                    c->restarted = true;
+                }
+            }
+            else
+            {
+                failConn(ep, c, TlsOutcome());
+            }
+            ep->conns[key] = fresh;
+            driveConn(ep, fresh);
+            return;
+        }
+        if (c->state <= DtlsConn::OPEN)
+        {
+            c->wire.push_back(std::string(d, n));
+            driveConn(ep, c);
+        }
+        return;
+    }
+    DtlsConn *fresh = listenFor(ep, d, n, from, fromLen, key);
+    if (fresh != nullptr)
+    {
+        ep->conns[key] = fresh;
+        driveConn(ep, fresh);
+    }
+}
+
+// Reads every datagram waiting (under the lock).
+static void pump(DtlsEndpoint *ep)
+{
+    std::vector<char> buf(65536);
+    for (int i = 0; i < 256 && ep->fd != BAD_SOCKET; i++)
+    {
+        struct sockaddr_storage from;
+        socklen_type fromLen = sizeof(from);
+        memset(&from, 0, sizeof(from));
+        long n = (long)recvfrom(ep->fd, buf.data(), (int)buf.size(), 0, (struct sockaddr *)&from, &fromLen);
+        if (n < 0)
+        {
+            int e = lastError();
+            if (interrupted(e))
+            {
+                continue;
+            }
+            if (wouldBlock(e) || ep->server)
+            {
+                return;
+            }
+            // The client's socket is connected: "port unreachable" comes
+            // back as this error.
+#ifdef _WIN32
+            if (e == WSAECONNRESET)
+            {
+                e = WSAECONNREFUSED;
+            }
+#endif
+            DtlsConn *c = ep->client;
+            if (c != nullptr && c->state <= DtlsConn::OPEN)
+            {
+                TlsOutcome o;
+                o.status = TLS_SOCKET_ERROR;
+                o.socketError = e;
+                o.handshaking = c->state == DtlsConn::HANDSHAKING;
+                failConn(ep, c, o);
+            }
+            return;
+        }
+        dispatch(ep, buf.data(), (size_t)n, from, fromLen);
+    }
+}
+
+// DTLS's retransmission timers: each that has expired fires (sending its
+// flight again). The milliseconds until the next one, or -1.
+static int dtlsTimers(DtlsEndpoint *ep)
+{
+    std::vector<DtlsConn *> all;
+    if (ep->server)
+    {
+        for (auto &kv : ep->conns)
+        {
+            all.push_back(kv.second);
+        }
+    }
+    else if (ep->client != nullptr)
+    {
+        all.push_back(ep->client);
+    }
+    int next = -1;
+    for (DtlsConn *c : all)
+    {
+        if (c->state > DtlsConn::OPEN)
+        {
+            continue;
+        }
+        struct timeval tv;
+        if (DTLSv1_get_timeout(c->ssl, &tv) != 1)
+        {
+            continue;
+        }
+        if (tv.tv_sec == 0 && tv.tv_usec == 0)
+        {
+            ERR_clear_error();
+            c->ioError = 0;
+            if (DTLSv1_handle_timeout(c->ssl) < 0)
+            {
+                TlsOutcome o;
+                o.status = TLS_TIMEOUT;
+                o.handshaking = c->state == DtlsConn::HANDSHAKING;
+                ERR_clear_error();
+                failConn(ep, c, o);
+                continue;
+            }
+            ERR_clear_error();
+            if (DTLSv1_get_timeout(c->ssl, &tv) != 1)
+            {
+                continue;
+            }
+        }
+        long ms = (long)tv.tv_sec * 1000 + tv.tv_usec / 1000 + 1;
+        if (next < 0 || ms < next)
+        {
+            next = (int)ms;
+        }
+    }
+    return next;
+}
+
+static void closeEndpointFd(DtlsEndpoint *ep)
+{
+    if (ep->fd == BAD_SOCKET)
+    {
+        return;
+    }
+    if (ep->reading)
+    {
+        // The waiter polling it closes it when its poll ends (at most
+        // SLICE_MS); shutdown may end that poll at once.
+        ep->closeAfterRead = true;
+#ifdef _WIN32
+        shutdown(ep->fd, SD_BOTH);
+#else
+        shutdown(ep->fd, SHUT_RDWR);
+#endif
+        return;
+    }
+    closesock(ep->fd);
+    ep->fd = BAD_SOCKET;
+}
+
+// Waits, under lk, until done() (checked under the lock), the deadline or
+// SLICE_MS. 1 done; 0 the deadline came; 2 the slice ended; -1 closed.
+template <class Done>
+static int dtlsWait(DtlsEndpoint *ep, std::unique_lock<std::mutex> &lk, bool hasDeadline,
+                    Clock::time_point deadline, Done done)
+{
+    Clock::time_point sliceEnd = Clock::now() + std::chrono::milliseconds(SLICE_MS);
+    for (;;)
+    {
+        if (ep->closing || ep->fd == BAD_SOCKET)
+        {
+            return -1;
+        }
+        int timer = dtlsTimers(ep);
+        if (done())
+        {
+            return 1;
+        }
+        Clock::time_point now = Clock::now();
+        if (hasDeadline && now >= deadline)
+        {
+            return 0;
+        }
+        if (now >= sliceEnd)
+        {
+            return 2;
+        }
+        long ms = (long)std::chrono::duration_cast<std::chrono::milliseconds>(sliceEnd - now).count();
+        if (hasDeadline)
+        {
+            long d = (long)std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+            ms = d < ms ? d : ms;
+        }
+        if (timer >= 0 && timer < ms)
+        {
+            ms = timer;
+        }
+        if (ms < 1)
+        {
+            ms = 1;
+        }
+        if (!ep->reading)
+        {
+            ep->reading = true;
+            sock_t fd = ep->fd;
+            lk.unlock();
+            struct pollfd p;
+            p.fd = fd;
+            p.events = POLLIN;
+            p.revents = 0;
+            int rc = pollsock(&p, 1, (int)ms);
+            int e = rc < 0 ? lastError() : 0;
+            lk.lock();
+            ep->reading = false;
+            if (ep->closeAfterRead)
+            {
+                ep->closeAfterRead = false;
+                closesock(ep->fd);
+                ep->fd = BAD_SOCKET;
+            }
+            if (rc > 0 && !ep->closing && ep->fd != BAD_SOCKET)
+            {
+                pump(ep);
+            }
+            ep->cv.notify_all();
+            if (rc < 0 && interrupted(e))
+            {
+                return 2;            // a signal: let a HALT be seen
+            }
+        }
+        else
+        {
+            ep->cv.wait_for(lk, std::chrono::milliseconds(ms));
+        }
+    }
+}
+
+/* ---- results ----------------------------------------------------------------- */
+
+static int dtlsMinVersion(const char *v)
+{
+    if (strcmp(v, "1.3") == 0)
+    {
+#ifdef DTLS1_3_VERSION
+        return DTLS1_3_VERSION;
+#else
+        return -1;
+#endif
+    }
+    return DTLS1_2_VERSION;
+}
+
+static RexxArrayObject dtlsUnsupported(RexxMethodContext *context)
+{
+    return errorArray(context, "DTLS 1.3 is not supported (OpenSSL " OPENSSL_VERSION_STR ")", "", 0);
+}
+
+// After a connection has failed (or been closed by its peer, or by us).
+static RexxArrayObject connResult(RexxMethodContext *context, DtlsConn *c)
+{
+    switch (c->state)
+    {
+        case DtlsConn::PEER_CLOSED:
+            return errorArray(context, c->restarted ? "the peer began a new connection"
+                                                    : "the peer closed the connection", "EOF", 0);
+        case DtlsConn::CLOSED:
+            return closedResult(context);
+        default:
+            break;
+    }
+    const TlsOutcome &o = c->failure;
+    if (o.status == TLS_SOCKET_ERROR)
+    {
+        return errorResult(context, o.socketError);
+    }
+    if (o.status == TLS_TIMEOUT)
+    {
+        return errorArray(context, "the peer no longer answers", "ETIMEDOUT", 0);
+    }
+    return tlsIoResult(context, o);
+}
+
+static DtlsHandle *handleOf(void *cself)
+{
+    return (DtlsHandle *)cself;
+}
+
+// The client's handshake, for SLICE_MS at most: "OK", "AGAIN" and the
+// seconds left, "TIMEOUT", or the failure.
+static RexxArrayObject clientStep(RexxMethodContext *context, DtlsHandle *h, double timeout)
+{
+    DtlsEndpoint *ep = h->ep.get();
+    DtlsConn *c = h->conn;
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    std::unique_lock<std::mutex> lk(ep->mu);
+    int w = dtlsWait(ep, lk, hasDeadline, deadline, [&]() { return c->state != DtlsConn::HANDSHAKING; });
+    if (w == 1)
+    {
+        if (c->state == DtlsConn::OPEN)
+        {
+            return statusResult(context, "OK");
+        }
+        if (c->failure.status == TLS_TIMEOUT)
+        {
+            return statusResult(context, "TIMEOUT");
+        }
+        return handshakeFailure(context, c, c->failure);
+    }
+    if (w == 0)
+    {
+        return statusResult(context, "TIMEOUT");
+    }
+    if (w == 2)
+    {
+        return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+    }
+    return closedResult(context);
+}
+
+/* ---- the client -------------------------------------------------------------- */
+
+// nConnect(host, port, trusted, minVersion, timeout): a UDP socket
+// connected to host and port, and the DTLS handshake. "OK"; "AGAIN" and the
+// seconds left (nMore goes on); "TIMEOUT"; "SOCKET", text, name, number (no
+// socket to the host: resolving, creating); or "ERROR", text, name, number
+// (the handshake).
+RexxMethod5(RexxArrayObject, dtls_connect, CSTRING, host, CSTRING, port, RexxArrayObject, trusted,
+            CSTRING, minVersion, double, timeout)
+{
+    int minProto = dtlsMinVersion(minVersion);
+    if (minProto < 0)
+    {
+        return dtlsUnsupported(context);
+    }
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    struct addrinfo *list = nullptr;
+    int rc = getaddrinfo(host, port, &hints, &list);
+    if (rc != 0)
+    {
+        RexxArrayObject r = gaiErrorResult(context, rc);
+        context->ArrayPut(r, context->String("SOCKET"), 1);
+        return r;
+    }
+    // IPv4 first, for a name with both (as UDPSocket~send: UDP cannot try
+    // the next address).
+    struct addrinfo *pick = nullptr;
+    for (struct addrinfo *ai = list; ai != nullptr && pick == nullptr; ai = ai->ai_next)
+    {
+        pick = ai->ai_family == AF_INET ? ai : nullptr;
+    }
+    if (pick == nullptr)
+    {
+        pick = list;
+    }
+    sock_t fd = socket(pick->ai_family, SOCK_DGRAM, IPPROTO_UDP);
+    int err = fd == BAD_SOCKET ? lastError() : 0;
+    if (fd != BAD_SOCKET)
+    {
+        prepareSocket(fd);
+        if (connect(fd, pick->ai_addr, (socklen_type)pick->ai_addrlen) != 0)
+        {
+            err = lastError();
+            closesock(fd);
+            fd = BAD_SOCKET;
+        }
+    }
+    struct sockaddr_storage peer;
+    memset(&peer, 0, sizeof(peer));
+    socklen_type peerLen = (socklen_type)pick->ai_addrlen;
+    memcpy(&peer, pick->ai_addr, pick->ai_addrlen);
+    freeaddrinfo(list);
+    if (fd == BAD_SOCKET)
+    {
+        RexxArrayObject r = errorResult(context, err);
+        context->ArrayPut(r, context->String("SOCKET"), 1);
+        return r;
+    }
+    datagramBuffers(fd);
+    connReset(fd, true);
+    setBlocking(fd, false);
+
+    DtlsHandle *h = new DtlsHandle();
+    h->ep = std::make_shared<DtlsEndpoint>();
+    DtlsEndpoint *ep = h->ep.get();
+    ep->fd = fd;
+    ep->ctx = clientContext(context, DTLS_client_method(), minProto, trusted);
+    SSL_CTX_set_options(ep->ctx, SSL_OP_NO_RENEGOTIATION);
+    DtlsConn *c = newConn(ep, peer, peerLen);
+    c->host = host;
+    c->accepted = true;                  // it belongs to its DTLSSocket
+    setPeerName(c->ssl, c->host);
+    SSL_set_connect_state(c->ssl);
+    ep->client = c;
+    h->conn = c;
+    context->SetObjectVariable("CSELF", context->NewPointer(h));
+    {
+        std::lock_guard<std::mutex> guard(ep->mu);
+        driveConn(ep, c);                // the ClientHello goes out
+    }
+    return clientStep(context, h, timeout);
+}
+
+// nMore(timeout): goes on with the client's handshake.
+RexxMethod2(RexxArrayObject, dtls_more, CSELF, cself, double, timeout)
+{
+    DtlsHandle *h = handleOf(cself);
+    if (h == nullptr || h->conn == nullptr)
+    {
+        return closedResult(context);
+    }
+    return clientStep(context, h, timeout);
+}
+
+/* ---- the server -------------------------------------------------------------- */
+
+// nListen(port, address, file, password, minVersion): a DTLS server on a
+// UDP port. "OK"; "SOCKET", text, name, number; or "ERROR", text (the
+// certificate).
+RexxMethod5(RexxArrayObject, dtls_listen, CSTRING, port, CSTRING, address, CSTRING, file, CSTRING, password,
+            CSTRING, minVersion)
+{
+    int minProto = dtlsMinVersion(minVersion);
+    if (minProto < 0)
+    {
+        return dtlsUnsupported(context);
+    }
+    std::string why;
+    SSL_CTX *ctx = serverContext(file, password, DTLS_server_method(), minProto, why);
+    if (ctx == nullptr)
+    {
+        return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
+    }
+    SSL_CTX_set_options(ctx, SSL_OP_COOKIE_EXCHANGE | SSL_OP_NO_RENEGOTIATION);
+    SSL_CTX_set_cookie_generate_cb(ctx, cookieMake);
+    SSL_CTX_set_cookie_verify_cb(ctx, cookieCheck);
+    sock_t fd;
+    bool gai;
+    int err = openDatagram(port, address, false, fd, gai);
+    if (err != 0)
+    {
+        SSL_CTX_free(ctx);
+        RexxArrayObject r = gai ? gaiErrorResult(context, err) : errorResult(context, err);
+        context->ArrayPut(r, context->String("SOCKET"), 1);
+        return r;
+    }
+    datagramBuffers(fd);
+    connReset(fd, false);
+    setBlocking(fd, false);
+    DtlsHandle *h = new DtlsHandle();
+    h->ep = std::make_shared<DtlsEndpoint>();
+    h->ep->fd = fd;
+    h->ep->server = true;
+    h->ep->ctx = ctx;
+    RAND_bytes(h->ep->secret, sizeof(h->ep->secret));
+    context->SetObjectVariable("CSELF", context->NewPointer(h));
+    return statusResult(context, "OK");
+}
+
+// nAccept(timeout): "OK" and a pointer for DTLSSocket~new (a client whose
+// handshake has finished); "TIMEOUT"; "AGAIN" and the seconds left; or an
+// error. Clients that fail their handshake are dropped: the server goes on.
+RexxMethod2(RexxArrayObject, dtls_accept, CSELF, cself, double, timeout)
+{
+    DtlsHandle *h = handleOf(cself);
+    if (h == nullptr || h->conn != nullptr)
+    {
+        return closedResult(context);
+    }
+    DtlsEndpoint *ep = h->ep.get();
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    std::unique_lock<std::mutex> lk(ep->mu);
+    int w = dtlsWait(ep, lk, hasDeadline, deadline, [&]() { return !ep->ready.empty(); });
+    if (w == 1)
+    {
+        DtlsConn *c = ep->ready.front();
+        ep->ready.pop_front();
+        c->accepted = true;
+        DtlsHandle *mine = new DtlsHandle();
+        mine->ep = h->ep;
+        mine->conn = c;
+        return statusResult(context, "OK", context->NewPointer(mine));
+    }
+    if (w == 0)
+    {
+        return statusResult(context, "TIMEOUT");
+    }
+    if (w == 2)
+    {
+        return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+    }
+    return closedResult(context);
+}
+
+// DTLSSocket~new(pointer): an accepted connection.
+RexxMethod1(RexxObjectPtr, dtls_adopt, POINTER, p)
+{
+    context->SetObjectVariable("CSELF", context->NewPointer(p));
+    return NULLOBJECT;
+}
+
+/* ---- either side's connection ------------------------------------------------ */
+
+// nSend(data): one datagram (one DTLS record). "OK" or an error.
+RexxMethod2(RexxArrayObject, dtls_send, CSELF, cself, RexxStringObject, data)
+{
+    DtlsHandle *h = handleOf(cself);
+    if (h == nullptr || h->conn == nullptr)
+    {
+        return closedResult(context);
+    }
+    DtlsEndpoint *ep = h->ep.get();
+    DtlsConn *c = h->conn;
+    size_t size = context->StringLength(data);
+    if (size > DTLS_MAX_DATA)
+    {
+#ifdef _WIN32
+        return errorResult(context, WSAEMSGSIZE);
+#else
+        return errorResult(context, EMSGSIZE);
+#endif
+    }
+    std::lock_guard<std::mutex> guard(ep->mu);
+    if (ep->closing || ep->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    if (c->state != DtlsConn::OPEN)
+    {
+        return connResult(context, c);
+    }
+    ERR_clear_error();
+    c->ioError = 0;
+    size_t sent = 0;
+    int rc = SSL_write_ex(c->ssl, context->StringData(data), size, &sent);
+    if (rc == 1)
+    {
+        return statusResult(context, "OK");
+    }
+    TlsOutcome o = dtlsOutcome(c, rc);
+    if (o.status == TLS_SOCKET_ERROR)
+    {
+        return errorResult(context, o.socketError);     // the connection goes on
+    }
+    return tlsIoResult(context, o);
+}
+
+// nReceive(timeout): "OK", data, address, port; "TIMEOUT"; "AGAIN" and
+// the seconds left; or an error ("EOF" as its name once the peer closed).
+RexxMethod2(RexxArrayObject, dtls_receive, CSELF, cself, double, timeout)
+{
+    DtlsHandle *h = handleOf(cself);
+    if (h == nullptr || h->conn == nullptr)
+    {
+        return closedResult(context);
+    }
+    DtlsEndpoint *ep = h->ep.get();
+    DtlsConn *c = h->conn;
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    std::unique_lock<std::mutex> lk(ep->mu);
+    if (c->state == DtlsConn::CLOSED)
+    {
+        return closedResult(context);
+    }
+    int w = dtlsWait(ep, lk, hasDeadline, deadline,
+                     [&]() { return !c->app.empty() || c->state != DtlsConn::OPEN; });
+    if (!c->app.empty())
+    {
+        std::string d = c->app.front();
+        c->app.pop_front();
+        std::string host;
+        int port = 0;
+        addressText((struct sockaddr *)&c->peer, host, port);
+        RexxArrayObject r = context->NewArray(4);
+        context->ArrayAppendString(r, "OK", 2);
+        context->ArrayAppend(r, context->NewString(d.data(), d.size()));
+        context->ArrayAppendString(r, host.c_str(), host.size());
+        context->ArrayAppend(r, context->WholeNumber(port));
+        return r;
+    }
+    if (w == 1)
+    {
+        return connResult(context, c);
+    }
+    if (w == 0)
+    {
+        return statusResult(context, "TIMEOUT");
+    }
+    if (w == 2)
+    {
+        return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+    }
+    return closedResult(context);
+}
+
+// nInfo: "OK", protocol ("DTLSv1.2"), cipher.
+RexxMethod1(RexxArrayObject, dtls_info, CSELF, cself)
+{
+    DtlsHandle *h = handleOf(cself);
+    std::string protocol, cipher;
+    if (h != nullptr && h->conn != nullptr)
+    {
+        std::lock_guard<std::mutex> guard(h->ep->mu);
+        if (h->conn->ssl != nullptr && SSL_is_init_finished(h->conn->ssl))
+        {
+            protocol = SSL_get_version(h->conn->ssl);
+            const char *name = SSL_get_cipher_name(h->conn->ssl);
+            cipher = name != nullptr ? name : "";
+        }
+    }
+    RexxArrayObject r = context->NewArray(3);
+    context->ArrayAppendString(r, "OK", 2);
+    context->ArrayAppendString(r, protocol.c_str(), protocol.size());
+    context->ArrayAppendString(r, cipher.c_str(), cipher.size());
+    return r;
+}
+
+// nAddress(which): "L" ours, "R" the peer's: "OK", address, port.
+RexxMethod2(RexxArrayObject, dtls_address, CSELF, cself, CSTRING, which)
+{
+    DtlsHandle *h = handleOf(cself);
+    if (h == nullptr)
+    {
+        return closedResult(context);
+    }
+    std::lock_guard<std::mutex> guard(h->ep->mu);
+    struct sockaddr_storage ss;
+    memset(&ss, 0, sizeof(ss));
+    if (which[0] == 'R')
+    {
+        if (h->conn == nullptr)
+        {
+            return closedResult(context);
+        }
+        memcpy(&ss, &h->conn->peer, sizeof(ss));
+    }
+    else
+    {
+        socklen_type len = sizeof(ss);
+        if (h->ep->fd == BAD_SOCKET || getsockname(h->ep->fd, (struct sockaddr *)&ss, &len) != 0)
+        {
+            return closedResult(context);
+        }
+    }
+    std::string host;
+    int port = 0;
+    addressText((struct sockaddr *)&ss, host, port);
+    RexxArrayObject r = context->NewArray(3);
+    context->ArrayAppendString(r, "OK", 2);
+    context->ArrayAppendString(r, host.c_str(), host.size());
+    context->ArrayAppend(r, context->WholeNumber(port));
+    return r;
+}
+
+static void closeHandle(DtlsHandle *h)
+{
+    DtlsEndpoint *ep = h->ep.get();
+    std::lock_guard<std::mutex> guard(ep->mu);
+    DtlsConn *c = h->conn;
+    if (c == nullptr)
+    {
+        // the server: every connection it has ends with it
+        ep->closing = true;
+        closeEndpointFd(ep);
+    }
+    else
+    {
+        if (c->state == DtlsConn::OPEN && ep->fd != BAD_SOCKET && !ep->closing)
+        {
+            ERR_clear_error();
+            SSL_shutdown(c->ssl);        // close_notify
+            ERR_clear_error();
+        }
+        c->state = DtlsConn::CLOSED;
+        if (ep->server)
+        {
+            auto it = ep->conns.find(c->key);
+            if (it != ep->conns.end() && it->second == c)
+            {
+                ep->conns.erase(it);
+            }
+        }
+        else
+        {
+            ep->closing = true;
+            closeEndpointFd(ep);
+        }
+    }
+    ep->cv.notify_all();
+}
+
+// nClose: a connection sends close_notify; a server stops. Twice is harmless.
+RexxMethod1(RexxObjectPtr, dtls_close, CSELF, cself)
+{
+    (void)context;
+    DtlsHandle *h = handleOf(cself);
+    if (h != nullptr)
+    {
+        closeHandle(h);
+    }
+    return NULLOBJECT;
+}
+
+// uninit
+RexxMethod1(RexxObjectPtr, dtls_free, CSELF, cself)
+{
+    DtlsHandle *h = handleOf(cself);
+    if (h != nullptr)
+    {
+        closeHandle(h);
+        if (h->conn != nullptr)
+        {
+            DtlsEndpoint *ep = h->ep.get();
+            std::lock_guard<std::mutex> guard(ep->mu);
+            if (ep->client == h->conn)
+            {
+                ep->client = nullptr;
+            }
+            freeConn(h->conn);
+            h->conn = nullptr;
+        }
+        delete h;               // the endpoint goes with its last handle
+        context->SetObjectVariable("CSELF", context->NewPointer(nullptr));
+    }
+    return NULLOBJECT;
+}
+
+/*----------------------------------------------------------------------------*/
 /* The package                                                                */
 /*----------------------------------------------------------------------------*/
 
@@ -3152,6 +4353,17 @@ static RexxMethodEntry oosockets_methods[] =
     REXX_METHOD(udp_broadcast,   udp_broadcast),
     REXX_METHOD(mcast_group,     mcast_group),
     REXX_METHOD(mcast_option,    mcast_option),
+    REXX_METHOD(dtls_connect,    dtls_connect),
+    REXX_METHOD(dtls_more,       dtls_more),
+    REXX_METHOD(dtls_listen,     dtls_listen),
+    REXX_METHOD(dtls_accept,     dtls_accept),
+    REXX_METHOD(dtls_adopt,      dtls_adopt),
+    REXX_METHOD(dtls_send,       dtls_send),
+    REXX_METHOD(dtls_receive,    dtls_receive),
+    REXX_METHOD(dtls_info,       dtls_info),
+    REXX_METHOD(dtls_address,    dtls_address),
+    REXX_METHOD(dtls_close,      dtls_close),
+    REXX_METHOD(dtls_free,       dtls_free),
     REXX_LAST_METHOD()
 };
 

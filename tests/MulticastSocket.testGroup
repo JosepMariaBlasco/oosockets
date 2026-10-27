@@ -1,0 +1,212 @@
+#!/usr/bin/env rexx
+/* MulticastSocket: groups, the shared port, the sending options. The
+   members are on this machine: the IPv4 tests join and send on the
+   loopback interface (named by its address, 127.0.0.1), which carries
+   multicast on the three systems; the IPv6 ones on the system's choice,
+   where it can (not on macOS's CI machines, whose network sends no
+   multicast).                                                          */
+
+  parse source . . fileSpec
+  group = .TestGroup~new(fileSpec)
+  group~add(.MulticastSocket.testGroup)
+  if group~isAutomatedTest then return group
+  testResult = group~suite~execute~~print
+return testResult
+
+::requires 'ooTest.frm'
+::requires 'sockets.cls'
+
+::class "MulticastSocket.testGroup" subclass ooTestCase public
+
+::method test_a_multicast_socket_is_a_udp_socket
+  m = .MulticastSocket~new
+  self~assertTrue(m~isA(.UDPSocket))
+  self~assertTrue(m~localPort > 0)
+  self~assertSame("a MulticastSocket on port" m~localPort, m~string)
+  self~assertSame(1, m~timeToLive)
+  self~assertTrue(m~loopback)
+  self~assertSame("", m~networkInterface)
+  m~close
+
+::method test_two_members_share_a_port
+  a = .MulticastSocket~new
+  b = .MulticastSocket~new(a~localPort)
+  self~assertSame(a~localPort, b~localPort)
+  a~close; b~close
+
+::method test_a_udp_socket_does_not_take_a_shared_port
+  a = .MulticastSocket~new
+  signal on syntax
+  u = .UDPSocket~new(a~localPort)
+  u~close
+  a~close
+  self~fail("the UDPSocket took the port")
+syntax:
+  a~close
+  self~assertSame(48.900, condition("o")~code)
+
+::method test_both_members_receive
+  g = group4()
+  a = member(); b = member(a~localPort)
+  a~joinGroup(g, lo()); b~joinGroup(g, lo())
+  s = sender()
+  s~send("to the group", g, a~localPort)
+  da = a~receive; db = b~receive
+  self~assertSame("to the group", da~data)
+  self~assertSame("to the group", db~data)
+  self~assertSame(s~localPort, da~port)
+  a~close; b~close; s~close
+
+::method test_the_sender_may_be_a_member
+  g = group4()
+  a = member()
+  a~joinGroup(g, lo())
+  a~networkInterface = lo()
+  a~send("myself too", g, a~localPort)
+  self~assertSame("myself too", a~receive~data)
+  a~close
+
+::method test_leave_group
+  g = group4()
+  a = member()
+  a~joinGroup(g, lo())
+  s = sender()
+  s~send("one", g, a~localPort)
+  self~assertSame("one", a~receive~data)
+  a~leaveGroup(g, lo())
+  s~send("two", g, a~localPort)
+  a~receiveTimeout = 0.5
+  self~assertSame(.nil, a~receive)
+  a~close; s~close
+
+-- A member of the port that did not join the group gets nothing of it
+-- (Linux would give it everything: ooSockets asks it not to).
+::method test_only_the_groups_joined
+  g = group4()
+  a = member(); b = member(a~localPort)
+  b~joinGroup(g, lo())
+  s = sender()
+  s~send("for b", g, a~localPort)
+  self~assertSame("for b", b~receive~data)
+  a~receiveTimeout = 0.5
+  self~assertSame(.nil, a~receive)
+  a~close; b~close; s~close
+
+::method test_loopback_off
+  g = group4()
+  a = member()
+  a~joinGroup(g, lo())
+  s = sender()
+  -- the sender's side (Linux, macOS) and the receiver's (Windows)
+  s~loopback = .false; a~loopback = .false
+  self~assertFalse(s~loopback)
+  s~send("unseen", g, a~localPort)
+  a~receiveTimeout = 0.5
+  self~assertSame(.nil, a~receive)
+  s~loopback = .true; a~loopback = .true
+  a~receiveTimeout = 5
+  s~send("seen", g, a~localPort)
+  self~assertSame("seen", a~receive~data)
+  a~close; s~close
+
+::method test_time_to_live
+  m = .MulticastSocket~new
+  m~timeToLive = 4
+  self~assertSame(4, m~timeToLive)
+  m~timeToLive = 0
+  self~assertSame(0, m~timeToLive)
+  m~close
+
+::method test_bad_time_to_live
+  m = .MulticastSocket~new
+  self~expectSyntax(88.900)
+  m~timeToLive = 256
+
+::method test_bad_loopback
+  m = .MulticastSocket~new
+  self~expectSyntax(88.900)
+  m~loopback = "no"
+
+::method test_network_interface_by_address
+  m = .MulticastSocket~new
+  m~networkInterface = "127.0.0.1"
+  self~assertSame("127.0.0.1", m~networkInterface)
+  m~networkInterface = ""
+  m~close
+
+::method test_not_a_multicast_address
+  m = .MulticastSocket~new
+  self~expectSyntax(.array~of(48.900, "Socket error: not a multicast address (10.0.0.1, port" m~localPort")"))
+  m~joinGroup("10.0.0.1")
+
+::method test_no_such_interface
+  m = .MulticastSocket~new
+  self~expectSyntax(.array~of(48.900, "Socket error: no such network interface: nosuch0 (239.255.42.98, port" m~localPort")"))
+  m~joinGroup("239.255.42.98", "nosuch0")
+
+::method test_an_ipv4_socket
+  g = group4()
+  a = .MulticastSocket~new(0, "0.0.0.0")
+  a~receiveTimeout = 5
+  a~joinGroup(g, lo())
+  s = .MulticastSocket~new(0, "0.0.0.0")
+  s~networkInterface = lo()
+  s~send("v4 only", g, a~localPort)
+  self~assertSame("v4 only", a~receive~data)
+  a~close; s~close
+
+::method test_an_ipv6_group
+  if \ipv6Multicast() then do
+    say "  (no IPv6 multicast here: test_an_ipv6_group checked nothing)"
+    return
+  end
+  g = "ff12::4298"
+  a = member()
+  a~joinGroup(g)
+  s = .MulticastSocket~new
+  s~send("v6", g, a~localPort)
+  d = a~receive
+  self~assertSame("v6", d~data)
+  self~assertTrue(d~address~pos(":") > 0, d~address)
+  a~leaveGroup(g)
+  a~close; s~close
+
+::method test_closed
+  m = .MulticastSocket~new
+  port = m~localPort
+  m~close
+  self~expectSyntax(.array~of(48.900, "Socket error: the UDP socket is closed (port" port")"))
+  m~joinGroup("239.255.42.98")
+
+
+-- The loopback interface, by one of its addresses.
+::routine lo
+  return "127.0.0.1"
+
+-- A group of its own for each test (239.255/16: the local scope).
+::routine group4
+  n = .local["OOSOCKETS.TEST.GROUP"]
+  if n == .nil then n = 10
+  n += 1
+  .local["OOSOCKETS.TEST.GROUP"] = n
+  return "239.255.42." || n
+
+::routine member
+  use arg port = 0
+  m = .MulticastSocket~new(port)
+  m~receiveTimeout = 5
+  return m
+
+::routine sender
+  s = .MulticastSocket~new
+  s~networkInterface = "127.0.0.1"
+  return s
+
+::routine ipv6Multicast
+  parse source os .
+  if os~upper~pos("DARWIN") > 0 | os~upper~pos("MAC") > 0 then return .false
+  signal on syntax name none
+  .UDPSocket~new(0, "::1")~close
+  return .true
+none:
+  return .false

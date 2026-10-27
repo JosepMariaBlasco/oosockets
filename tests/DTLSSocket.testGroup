@@ -1,0 +1,301 @@
+#!/usr/bin/env rexx
+/* DTLSSocket and DTLSServerSocket: TLS over UDP. The clients run in
+   another activity (the Client class below), trusting the test CA in
+   tests/certs/. One server socket serves every client.                  */
+
+  parse source . . fileSpec
+  group = .TestGroup~new(fileSpec)
+  group~add(.DTLSSocket.testGroup)
+  if group~isAutomatedTest then return group
+  testResult = group~suite~execute~~print
+return testResult
+
+::requires 'ooTest.frm'
+::requires 'sockets.cls'
+::requires 'peer.cls'
+
+::class "DTLSSocket.testGroup" subclass ooTestCase public
+
+/* ---- serving ------------------------------------------------------------ */
+
+::method test_echo
+  srv = newServer()
+  self~assertSame("a DTLSServerSocket on port" srv~localPort, srv~string)
+  msg = .Client~new~start("echoOnce", srv~localPort, "Hello, DTLS")
+  c = srv~accept
+  self~assertTrue(c~isA(.DTLSSocket))
+  self~assertTrue(c~secure)
+  self~assertSame("DTLSv1.2", c~protocol)
+  self~assertTrue(c~cipher \== "")
+  self~assertSame("127.0.0.1", c~remoteAddress)
+  c~receiveTimeout = 10
+  d = c~receive
+  self~assertTrue(d~isA(.Datagram))
+  self~assertSame("Hello, DTLS", d~data)
+  self~assertSame(c~remotePort, d~port)
+  c~send(d~data~upper)
+  self~assertSame("HELLO, DTLS DTLSv1.2", msg~result)
+  c~close
+  srv~close
+
+::method test_the_client_side
+  srv = newServer()
+  msg = .Server~new~start("echoAll", srv)
+  s = .DTLSSocket~new("localhost", srv~localPort, trustCA(), 10)
+  self~assertSame("localhost:"srv~localPort, s~string)
+  self~assertSame("127.0.0.1", s~remoteAddress)
+  self~assertSame(srv~localPort, s~remotePort)
+  self~assertTrue(s~localPort > 0)
+  s~receiveTimeout = 10
+  do i = 1 to 20
+    s~send("datagram" i)
+    self~assertSame("DATAGRAM" i, s~receive~data)
+  end
+  s~send("bye")
+  self~assertSame("BYE", s~receive~data)
+  s~close
+  self~assertSame(21, msg~result)
+  srv~close
+
+::method test_two_clients_on_one_port
+  srv = newServer()
+  m1 = .Client~new~start("echoOnce", srv~localPort, "one")
+  m2 = .Client~new~start("echoOnce", srv~localPort, "two")
+  a = srv~accept; b = srv~accept
+  self~assertTrue(a~remotePort \= b~remotePort)
+  a~receiveTimeout = 10; b~receiveTimeout = 10
+  -- each answers its own client: b first
+  db = b~receive; b~send(db~data~upper)
+  da = a~receive; a~send(da~data~upper)
+  self~assertSame("ONE DTLSv1.2", m1~result)
+  self~assertSame("TWO DTLSv1.2", m2~result)
+  a~close; b~close
+  srv~close
+
+::method test_the_largest_datagram
+  srv = newServer()
+  msg = .Client~new~start("echoOnce", srv~localPort, "x"~copies(16384))
+  c = srv~accept
+  c~receiveTimeout = 10
+  d = c~receive
+  self~assertSame(16384, d~data~length)
+  c~send("ok")
+  self~assertSame("OK DTLSv1.2", msg~result)
+  self~expectSyntax(.array~of(48.900, "Socket error: message too long (127.0.0.1, port" c~remotePort")"))
+  c~send("x"~copies(16385))
+
+::method test_a_keytool_keystore_on_both_ends
+  srv = .DTLSServerSocket~new(0, .TLSOptions~new~certificate(certFile("keytool.p12"), "123456"), "127.0.0.1")
+  opts = .TLSOptions~new~trust(certFile("keytool.p12"), "123456")
+  msg = .Client~new~start("echoOnce", srv~localPort, "keytool", opts)
+  c = srv~accept
+  c~receiveTimeout = 10
+  c~send(c~receive~data)
+  self~assertSame("keytool DTLSv1.2", msg~result)
+  c~close
+  srv~close
+
+-- A client that fails its handshake is dropped; the next one is served.
+::method test_a_failing_client_does_not_stop_the_server
+  srv = newServer()
+  bad = .Client~new~start("connectOnly", srv~localPort, .nil)  -- the system's trust: not the test CA
+  self~assertSame("TLS error: certificate is not trusted (localhost, port" srv~localPort")", bad~result)
+  msg = .Client~new~start("echoOnce", srv~localPort, "good")
+  c = srv~accept
+  c~receiveTimeout = 10
+  c~send(c~receive~data)
+  self~assertSame("good DTLSv1.2", msg~result)
+  c~close
+  srv~close
+
+::method test_accept_timeout
+  srv = newServer()
+  self~assertSame(.nil, srv~acceptTimeout)
+  srv~acceptTimeout = 0.3
+  self~assertSame(.nil, srv~accept)
+  srv~close
+
+::method test_close_ends_an_accept_waiting
+  srv = newServer()
+  port = srv~localPort
+  msg = .Waiter~new~start("accept", srv)
+  call sysSleep 0.3
+  srv~close
+  do 50 while \msg~completed
+    call sysSleep 0.1
+  end
+  self~assertTrue(msg~completed)
+  self~assertSame("48.900 Socket error: the DTLS server socket is closed (port" port").", msg~result)
+
+/* ---- the peer goes away ------------------------------------------------- */
+
+::method test_the_server_closes
+  srv = newServer()
+  msg = .Server~new~start("acceptAndClose", srv)
+  s = .DTLSSocket~new("localhost", srv~localPort, trustCA(), 10)
+  s~receiveTimeout = 10
+  self~assertSame("closed", msg~result)
+  self~expectSyntax(.array~of(48.900, "TLS error: the peer closed the connection (localhost, port" srv~localPort")"))
+  s~receive
+
+::method test_the_client_closes
+  srv = newServer()
+  msg = .Client~new~start("connectOnly", srv~localPort)
+  c = srv~accept
+  self~assertSame("connected", msg~result)    -- and it closed
+  c~receiveTimeout = 10
+  signal on syntax
+  c~receive
+  self~fail("receive should have failed")
+syntax:
+  co = condition("o")
+  self~assertSame(48.900, co~code)
+  self~assertSame("TLS error: the peer closed the connection (127.0.0.1, port" c~remotePort")", co~additional[1])
+  srv~close
+
+::method test_receive_timeout
+  srv = newServer()
+  msg = .Server~new~start("acceptAndWait", srv)
+  s = .DTLSSocket~new("localhost", srv~localPort, trustCA(), 10)
+  self~assertSame(.nil, s~receiveTimeout)
+  s~receiveTimeout = 0.3
+  self~assertSame(.nil, s~receive)
+  s~send("done")
+  self~assertSame("done", msg~result)
+  s~close
+  srv~close
+
+/* ---- connecting fails ----------------------------------------------------- */
+
+::method test_nobody_answers
+  u = .UDPSocket~new(0, "127.0.0.1")         -- reads, never answers
+  started = .DateTime~new
+  c = connectFails("127.0.0.1", u~localPort, trustCA(), 1)
+  self~assertSame(48.900, c~code)
+  self~assertSame("TLS error: timed out (127.0.0.1, port" u~localPort")", c~additional[1])
+  self~assertTrue((.DateTime~new - started)~totalSeconds < 5)
+  u~close
+
+::method test_connection_refused
+  u = .UDPSocket~new(0, "127.0.0.1")
+  port = u~localPort
+  u~close                                    -- nobody there now
+  c = connectFails("127.0.0.1", port, trustCA(), 5)
+  self~assertSame("TLS error: connection refused (127.0.0.1, port" port")", c~additional[1])
+
+::method test_the_wrong_host
+  srv = .DTLSServerSocket~new(0, serverOptions("wronghost.pem"), "127.0.0.1")
+  c = connectFails("localhost", srv~localPort, trustCA(), 10)
+  self~assertSame("TLS error: certificate does not match the host name (localhost, port" srv~localPort")", c~additional[1])
+  srv~close
+
+::method test_an_expired_certificate
+  srv = .DTLSServerSocket~new(0, serverOptions("expired.pem"), "127.0.0.1")
+  c = connectFails("localhost", srv~localPort, trustCA(), 10)
+  self~assertSame("TLS error: certificate has expired (localhost, port" srv~localPort")", c~additional[1])
+  srv~close
+
+::method test_unknown_host
+  c = connectFails("no-such-host.invalid", 4433, trustCA(), 5)
+  self~assertSame("Socket error: unknown host (no-such-host.invalid, port 4433)", c~additional[1])
+
+::method test_dtls_1_3
+  opts = trustCA()
+  opts~minVersion = "1.3"
+  c = connectFails("127.0.0.1", 9, opts, 1)
+  -- OpenSSL 3 has no DTLS 1.3 yet
+  self~assertTrue(c~additional[1]~startsWith("TLS error: DTLS 1.3 is not supported"), c~additional[1])
+
+/* ---- arguments ------------------------------------------------------------- */
+
+::method test_the_server_needs_a_certificate
+  self~expectSyntax(88.900)
+  .DTLSServerSocket~new(0, .TLSOptions~new)
+
+::method test_options_must_be_tls_options
+  self~expectSyntax(88.900)
+  .DTLSSocket~new("localhost", 4433, "options")
+
+::method test_send_after_close
+  srv = newServer()
+  msg = .Server~new~start("acceptAndWait", srv)
+  s = .DTLSSocket~new("localhost", srv~localPort, trustCA(), 10)
+  s~send("done")
+  self~assertSame("done", msg~result)
+  s~close
+  srv~close
+  self~expectSyntax(.array~of(48.900, "Socket error: the DTLS socket is closed (localhost, port" srv~localPort")"))
+  s~send("again")
+
+
+::class Client
+::method echoOnce
+  use arg port, text, options = (trustCA())
+  s = .DTLSSocket~new("localhost", port, options, 10)
+  s~receiveTimeout = 10
+  s~send(text)
+  reply = s~receive~data s~protocol
+  s~close
+  return reply
+::method connectOnly
+  use arg port, options = (trustCA())
+  signal on syntax
+  s = .DTLSSocket~new("localhost", port, options, 10)
+  s~close
+  return "connected"
+syntax:
+  return condition("o")~additional[1]
+
+::class Server
+-- Echoes in upper case until "bye"; returns how many it echoed.
+::method echoAll
+  use arg srv
+  c = srv~accept
+  c~receiveTimeout = 10
+  n = 0
+  loop
+    d = c~receive
+    c~send(d~data~upper)
+    n += 1
+    if d~data == "bye" then leave
+  end
+  c~close
+  return n
+::method acceptAndClose
+  use arg srv
+  c = srv~accept
+  c~close
+  return "closed"
+::method acceptAndWait
+  use arg srv
+  c = srv~accept
+  c~receiveTimeout = 10
+  d = c~receive
+  c~close
+  return d~data
+
+::class Waiter
+::method accept
+  use strict arg srv
+  signal on syntax
+  srv~accept
+  return "accepted"
+syntax:
+  c = condition("o")
+  return c~code c~message
+
+::routine newServer
+  return .DTLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
+
+::routine trustCA
+  return .TLSOptions~new~trust(certFile("ca.pem"))
+
+-- The condition object of the SYNTAX condition DTLSSocket~new raised.
+::routine connectFails
+  use arg host, port, options, timeout = 10
+  signal on syntax
+  s = .DTLSSocket~new(host, port, options, timeout)
+  s~close
+  raise syntax 40.900 array("expected DTLSSocket~new to fail; it connected to" host)
+syntax:
+  return condition("o")
