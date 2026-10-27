@@ -1,9 +1,9 @@
 #!/usr/bin/env rexx
-/* DatagramSocket: UDP datagrams, addresses, connect, errors, timeouts.  */
+/* UDPSocket: UDP datagrams, addresses, connect, errors, timeouts.  */
 
   parse source . . fileSpec
   group = .TestGroup~new(fileSpec)
-  group~add(.DatagramSocket.testGroup)
+  group~add(.UDPSocket.testGroup)
   if group~isAutomatedTest then return group
   testResult = group~suite~execute~~print
 return testResult
@@ -11,23 +11,23 @@ return testResult
 ::requires 'ooTest.frm'
 ::requires 'sockets.cls'
 
-::class "DatagramSocket.testGroup" subclass ooTestCase public
+::class "UDPSocket.testGroup" subclass ooTestCase public
 
 ::method test_port_zero_gives_a_free_port
-  s = .DatagramSocket~new(0, "127.0.0.1")
+  s = .UDPSocket~new(0, "127.0.0.1")
   self~assertTrue(s~localPort > 0)
   self~assertSame("127.0.0.1", s~localAddress)
-  self~assertSame("a DatagramSocket on port" s~localPort, s~string)
+  self~assertSame("a UDPSocket on port" s~localPort, s~string)
   s~close
 
 ::method test_no_arguments_gives_a_free_port
-  s = .DatagramSocket~new
+  s = .UDPSocket~new
   self~assertTrue(s~localPort > 0)
   s~close
 
 ::method test_round_trip
-  srv = .DatagramSocket~new(0, "127.0.0.1")
-  c = .DatagramSocket~new(0, "127.0.0.1")
+  srv = .UDPSocket~new(0, "127.0.0.1")
+  c = .UDPSocket~new(0, "127.0.0.1")
   c~receiveTimeout = 5; srv~receiveTimeout = 5
   c~send("hello", "127.0.0.1", srv~localPort)
   d = srv~receive
@@ -41,9 +41,9 @@ return testResult
   c~close; srv~close
 
 ::method test_every_address_takes_ipv4
-  srv = .DatagramSocket~new                  -- IPv6 and IPv4, or IPv4 alone
+  srv = .UDPSocket~new                       -- IPv6 and IPv4, or IPv4 alone
   srv~receiveTimeout = 5
-  c = .DatagramSocket~new(0, "127.0.0.1")
+  c = .UDPSocket~new(0, "127.0.0.1")
   c~send("v4", "127.0.0.1", srv~localPort)
   d = srv~receive
   self~assertSame("v4", d~data)
@@ -59,9 +59,9 @@ return testResult
     say "  (no IPv6 on this machine: test_every_address_takes_ipv6_where_there_is_ipv6 checked nothing)"
     return
   end
-  srv = .DatagramSocket~new
+  srv = .UDPSocket~new
   srv~receiveTimeout = 5
-  c = .DatagramSocket~new(0, "::1")
+  c = .UDPSocket~new(0, "::1")
   c~send("v6", "::1", srv~localPort)
   d = srv~receive
   self~assertSame("v6", d~data)
@@ -69,17 +69,17 @@ return testResult
   c~close; srv~close
 
 ::method test_a_name_with_ipv4_and_ipv6_goes_to_ipv4
-  srv = .DatagramSocket~new(0, "127.0.0.1")
+  srv = .UDPSocket~new(0, "127.0.0.1")
   srv~receiveTimeout = 5
-  c = .DatagramSocket~new
+  c = .UDPSocket~new
   c~send("by name", "localhost", srv~localPort)
   self~assertSame("by name", srv~receive~data)
   c~close; srv~close
 
 ::method test_empty_datagram
-  srv = .DatagramSocket~new(0, "127.0.0.1")
+  srv = .UDPSocket~new(0, "127.0.0.1")
   srv~receiveTimeout = 5
-  c = .DatagramSocket~new
+  c = .UDPSocket~new
   c~send("", "127.0.0.1", srv~localPort)
   d = srv~receive
   self~assertTrue(d \== .nil)
@@ -87,18 +87,18 @@ return testResult
   c~close; srv~close
 
 ::method test_every_byte_value
-  srv = .DatagramSocket~new(0, "127.0.0.1")
+  srv = .UDPSocket~new(0, "127.0.0.1")
   srv~receiveTimeout = 5
-  c = .DatagramSocket~new
+  c = .UDPSocket~new
   bytes = xrange("00"x, "ff"x)
   c~send(bytes, "127.0.0.1", srv~localPort)
   self~assertSame(bytes, srv~receive~data)
   c~close; srv~close
 
 ::method test_largest_ipv4_datagram_arrives_whole
-  srv = .DatagramSocket~new(0, "127.0.0.1")
+  srv = .UDPSocket~new(0, "127.0.0.1")
   srv~receiveTimeout = 5
-  c = .DatagramSocket~new
+  c = .UDPSocket~new
   big = copies("0123456789abcdef", 4095)~left(65507)
   self~assertSame(65507, big~length)
   c~send(big, "127.0.0.1", srv~localPort)
@@ -110,23 +110,23 @@ return testResult
     say "  (no IPv6 on this machine: test_largest_ipv6_datagram_arrives_whole_where_there_is_ipv6 checked nothing)"
     return
   end
-  srv = .DatagramSocket~new(0, "::1")
+  srv = .UDPSocket~new(0, "::1")
   srv~receiveTimeout = 5
-  c = .DatagramSocket~new
+  c = .UDPSocket~new
   big = copies("0123456789abcdef", 4096)~left(65527)
   c~send(big, "::1", srv~localPort)
   self~assertSame(big, srv~receive~data)
   c~close; srv~close
 
 ::method test_too_big_is_an_error
-  srv = .DatagramSocket~new(0, "127.0.0.1")
-  c = .DatagramSocket~new
+  srv = .UDPSocket~new(0, "127.0.0.1")
+  c = .UDPSocket~new
   port = srv~localPort
   self~expectSyntax(.array~of(48.900, "Socket error: message too long (127.0.0.1, port" port")"))
   c~send(copies("x", 65508), "127.0.0.1", port)
 
 ::method test_receive_timeout_returns_nil
-  s = .DatagramSocket~new(0, "127.0.0.1")
+  s = .UDPSocket~new(0, "127.0.0.1")
   self~assertSame(.nil, s~receiveTimeout)
   s~receiveTimeout = 0.1
   self~assertSame(0.1, s~receiveTimeout)
@@ -134,40 +134,40 @@ return testResult
   s~close
 
 ::method test_bad_receive_timeout
-  s = .DatagramSocket~new(0, "127.0.0.1")
+  s = .UDPSocket~new(0, "127.0.0.1")
   self~expectSyntax(88.900)
   s~receiveTimeout = -1
 
 ::method test_port_in_use
-  s = .DatagramSocket~new(0, "127.0.0.1")
+  s = .UDPSocket~new(0, "127.0.0.1")
   port = s~localPort
   self~expectSyntax(.array~of(48.900, "Socket error: address already in use (127.0.0.1, port" port")"))
-  other = .DatagramSocket~new(port, "127.0.0.1")
+  other = .UDPSocket~new(port, "127.0.0.1")
 
 ::method test_bad_port
   self~expectSyntax(88.900)
-  s = .DatagramSocket~new(65536)
+  s = .UDPSocket~new(65536)
 
 ::method test_bad_address
   self~expectSyntax(48.900)
-  s = .DatagramSocket~new(0, "no-such-host.invalid")
+  s = .UDPSocket~new(0, "no-such-host.invalid")
 
 ::method test_send_to_unknown_host
-  s = .DatagramSocket~new
+  s = .UDPSocket~new
   self~expectSyntax(.array~of(48.900, "Socket error: unknown host (no-such-host.invalid, port 9)"))
   s~send("x", "no-such-host.invalid", 9)
 
 ::method test_send_needs_a_host_when_not_connected
-  s = .DatagramSocket~new
+  s = .UDPSocket~new
   self~expectSyntax(93.901)
   s~send("x")
 
 ::method test_unconnected_send_to_a_closed_port_is_not_an_error
   -- Windows would report it on the next receive, unless switched off.
-  gone = .DatagramSocket~new(0, "127.0.0.1")
+  gone = .UDPSocket~new(0, "127.0.0.1")
   port = gone~localPort
   gone~close
-  s = .DatagramSocket~new(0, "127.0.0.1")
+  s = .UDPSocket~new(0, "127.0.0.1")
   s~receiveTimeout = 0.5
   s~send("anyone?", "127.0.0.1", port)
   self~assertSame(.nil, s~receive)
@@ -176,9 +176,9 @@ return testResult
   s~close
 
 ::method test_connect
-  srv = .DatagramSocket~new(0, "127.0.0.1")
+  srv = .UDPSocket~new(0, "127.0.0.1")
   srv~receiveTimeout = 5
-  c = .DatagramSocket~new(0, "127.0.0.1")
+  c = .UDPSocket~new(0, "127.0.0.1")
   c~receiveTimeout = 5
   self~assertFalse(c~connected)
   self~assertSame("", c~remoteAddress)
@@ -190,24 +190,24 @@ return testResult
   d = srv~receive
   self~assertSame("connected", d~data)
   -- a datagram from anyone else does not reach a connected socket
-  other = .DatagramSocket~new(0, "127.0.0.1")
+  other = .UDPSocket~new(0, "127.0.0.1")
   other~send("intruder", "127.0.0.1", c~localPort)
   srv~send("answer", d~address, d~port)
   self~assertSame("answer", c~receive~data)
   other~close; c~close; srv~close
 
 ::method test_connected_send_takes_only_the_data
-  srv = .DatagramSocket~new(0, "127.0.0.1")
-  c = .DatagramSocket~new
+  srv = .UDPSocket~new(0, "127.0.0.1")
+  c = .UDPSocket~new
   c~connect("127.0.0.1", srv~localPort)
   self~expectSyntax(88.900)
   c~send("x", "127.0.0.1", srv~localPort)
 
 ::method test_connected_to_a_closed_port_is_refused
-  gone = .DatagramSocket~new(0, "127.0.0.1")
+  gone = .UDPSocket~new(0, "127.0.0.1")
   port = gone~localPort
   gone~close
-  c = .DatagramSocket~new(0, "127.0.0.1")
+  c = .UDPSocket~new(0, "127.0.0.1")
   c~receiveTimeout = 5
   c~connect("127.0.0.1", port)
   c~send("anyone?")
@@ -215,14 +215,14 @@ return testResult
   c~receive
 
 ::method test_receive_after_close
-  s = .DatagramSocket~new(0, "127.0.0.1")
+  s = .UDPSocket~new(0, "127.0.0.1")
   port = s~localPort
   s~close
-  self~expectSyntax(.array~of(48.900, "Socket error: the datagram socket is closed (port" port")"))
+  self~expectSyntax(.array~of(48.900, "Socket error: the UDP socket is closed (port" port")"))
   s~receive
 
 ::method test_close_wakes_a_blocked_receive
-  s = .DatagramSocket~new(0, "127.0.0.1")
+  s = .UDPSocket~new(0, "127.0.0.1")
   port = s~localPort
   msg = .Receiver~new~start("receive", s)
   call sysSleep 0.3
@@ -232,10 +232,10 @@ return testResult
     call sysSleep 0.1
   end
   self~assertTrue(msg~completed)
-  self~assertSame("48.900 Socket error: the datagram socket is closed (port" port").", msg~result)
+  self~assertSame("48.900 Socket error: the UDP socket is closed (port" port").", msg~result)
 
 ::method test_broadcast
-  s = .DatagramSocket~new
+  s = .UDPSocket~new
   self~assertFalse(s~broadcast)
   s~broadcast = .true
   self~assertTrue(s~broadcast)
@@ -244,7 +244,7 @@ return testResult
   s~close
 
 ::method test_bad_broadcast_value
-  s = .DatagramSocket~new
+  s = .UDPSocket~new
   self~expectSyntax(88.900)
   s~broadcast = "yes"
 
@@ -261,7 +261,7 @@ syntax:
 
 ::routine hasIpv6
   signal on syntax name none
-  .DatagramSocket~new(0, "::1")~close
+  .UDPSocket~new(0, "::1")~close
   return .true
 none:
   return .false

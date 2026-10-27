@@ -2265,7 +2265,7 @@ RexxMethod2(RexxArrayObject, server_accept, CSELF, cself, double, timeout)
 
 
 /*----------------------------------------------------------------------------*/
-/* DatagramSocket (UDP)                                                       */
+/* UDPSocket (UDP)                                                       */
 /*                                                                            */
 /* One socket, bound at creation. Without an address, IPv6 and IPv4 on one    */
 /* socket (IPv4 only where there is no IPv6), as ServerSocket. A host to      */

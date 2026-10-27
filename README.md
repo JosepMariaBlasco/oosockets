@@ -204,12 +204,12 @@ samples worked with such a keystore as `keyStore` and as `trustStore`
 
 ## UDP
 
-A `DatagramSocket` is not a stream: each `send` is one datagram, which
+A `UDPSocket` is not a stream: each `send` is one datagram, which
 arrives whole or not at all, and `receive` returns the next one with who
 sent it.
 
 ```rexx
-s = .DatagramSocket~new(5000)             -- every address, IPv6 and IPv4
+s = .UDPSocket~new(5000)                  -- every address, IPv6 and IPv4
 loop
   d = s~receive                           -- waits; returns a .Datagram
   say "From" d~address":"d~port":" d~data
@@ -219,7 +219,7 @@ end
 ```
 
 ```rexx
-c = .DatagramSocket~new                   -- a port the system chooses
+c = .UDPSocket~new                        -- a port the system chooses
 c~receiveTimeout = 2
 c~send("hello", "localhost", 5000)
 d = c~receive
@@ -228,7 +228,7 @@ if d == .nil then say "No answer in 2 seconds"
 ::requires "sockets.cls"
 ```
 
-- `.DatagramSocket~new([port [, address]])`: without a port (or with 0),
+- `.UDPSocket~new([port [, address]])`: without a port (or with 0),
   one the system chooses (`localPort`); without an address, every
   address, IPv6 and IPv4 (IPv4 senders read as `127.0.0.1`, not
   `::ffff:127.0.0.1`).
@@ -251,7 +251,7 @@ if d == .nil then say "No answer in 2 seconds"
   host (no-such-host.invalid, port 5000)`. There is no NOTREADY: there
   is no stream, and no connection to lose.
 - `close` from another activity ends a `receive` waiting there (48.900,
-  `the datagram socket is closed`).
+  `the UDP socket is closed`).
 - Not supported yet: multicast; DTLS (TLS over UDP).
 
 ## Building

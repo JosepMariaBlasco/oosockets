@@ -12,7 +12,7 @@
   call check p~lineIn == "tcp", "TCP"
   c~close; p~close; srv~close
   -- UDP
-  u = .DatagramSocket~new(0, "127.0.0.1"); v = .DatagramSocket~new
+  u = .UDPSocket~new(0, "127.0.0.1"); v = .UDPSocket~new
   u~receiveTimeout = 5
   v~send("udp", "127.0.0.1", u~localPort)
   call check u~receive~data == "udp", "UDP"

@@ -37,7 +37,7 @@ return testResult
   return .array~of(msg~result, took)
 
 ::method test_udp_receive
-  s = .DatagramSocket~new(0, "127.0.0.1")
+  s = .UDPSocket~new(0, "127.0.0.1")
   r = self~halted(.Waiter~new, "receive", s)
   self~assertSame("HALT at" .Waiter~line("receive"), r[1])
   s~close
@@ -133,7 +133,7 @@ return testResult
   self~assertSame("HALT at" .Waiter~line("connect"), msg~result)
 
 ::method test_untrapped_halt_ends_the_activity_with_error_4
-  s = .DatagramSocket~new(0, "127.0.0.1")
+  s = .UDPSocket~new(0, "127.0.0.1")
   msg = .Waiter~new~start("receiveUntrapped", s)
   call sysSleep 0.5
   msg~halt

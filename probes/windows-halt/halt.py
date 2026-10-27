@@ -14,9 +14,9 @@ CASES = {
   # the control: no ooSockets, Rexx running clauses
   "sysSleep": 'do 100; call SysSleep 0.05; end',
   "accept": 'srv = .ServerSocket~new(0, "127.0.0.1"); c = srv~accept',
-  "receive": 's = .DatagramSocket~new(0, "127.0.0.1"); d = s~receive',
+  "receive": 's = .UDPSocket~new(0, "127.0.0.1"); d = s~receive',
   "lineIn": 'srv = .ServerSocket~new(0, "127.0.0.1"); c = .Socket~new("127.0.0.1", srv~localPort); p = srv~accept; x = c~lineIn',
-  "receive, another activity waiting too": 's = .DatagramSocket~new(0, "127.0.0.1"); m = .W~new~start("w", .DatagramSocket~new(0, "127.0.0.1")); d = s~receive',
+  "receive, another activity waiting too": 's = .UDPSocket~new(0, "127.0.0.1"); m = .W~new~start("w", .UDPSocket~new(0, "127.0.0.1")); d = s~receive',
 }
 PROG = '''signal on halt
 say "ready"

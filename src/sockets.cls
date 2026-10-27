@@ -58,7 +58,7 @@
    s = .TLSSocket~new("www.example.com", 443)   -- certificate verified
    srv = .TLSServerSocket~new(9999, .TLSOptions~new~certificate("srv.p12", "pw"))
 
-   u = .DatagramSocket~new                 -- UDP: datagrams, not a stream
+   u = .UDPSocket~new                      -- UDP: datagrams, not a stream
    u~send("ping", "localhost", 5000)
    d = u~receive                           -- a .Datagram: data, address, port
 
@@ -996,20 +996,20 @@ halted:
 
 
 /*============================================================================*/
-/* DatagramSocket: a UDP socket                                               */
+/* UDPSocket: a UDP socket                                               */
 /*============================================================================*/
 
 /* Not a stream: each send is one datagram, which arrives whole or not at
    all, and receive returns the next one with who sent it.
 
-   s = .DatagramSocket~new(5000)            -- every address, IPv6 and IPv4
+   s = .UDPSocket~new(5000)                 -- every address, IPv6 and IPv4
    d = s~receive                            -- waits; a .Datagram
    s~send(d~data~upper, d~address, d~port)  -- an answer to its sender
 
    Every error is a SYNTAX condition, 48.900:
      "Socket error: message too long (localhost, port 5000)".          */
 
-::class DatagramSocket public
+::class UDPSocket public
 
 ::method nOpen      private external "LIBRARY oosockets udp_open"
 ::method nConnect   private external "LIBRARY oosockets udp_connect"
@@ -1028,9 +1028,9 @@ halted:
   use strict arg port = 0, address = ""
   port = port~string; address = address~string
   if \port~dataType("W") then
-    raise syntax 88.900 array("DatagramSocket~new: the port must be a whole number; found" port)
+    raise syntax 88.900 array("UDPSocket~new: the port must be a whole number; found" port)
   if port < 0 | port > 65535 then
-    raise syntax 88.900 array("DatagramSocket~new: the port must be between 0 and 65535; found" port)
+    raise syntax 88.900 array("UDPSocket~new: the port must be between 0 and 65535; found" port)
   port = port + 0
   closed = .false; peer = .nil; receiveTimeout = .nil
   r = self~nOpen(port, address)
@@ -1052,12 +1052,12 @@ halted:
     use strict arg data, host, port
     host = host~string
     if host == "" then
-      raise syntax 88.900 array("DatagramSocket~send: the host must not be empty")
-    port = checkPort(port, "DatagramSocket~send")
+      raise syntax 88.900 array("UDPSocket~send: the host must not be empty")
+    port = checkPort(port, "UDPSocket~send")
   end
   else do
     if arg() > 1 then
-      raise syntax 88.900 array("DatagramSocket~send: the socket is connected to" hostAndPort(peer[1], peer[2]) || "; send takes only the data")
+      raise syntax 88.900 array("UDPSocket~send: the socket is connected to" hostAndPort(peer[1], peer[2]) || "; send takes only the data")
     use strict arg data
     host = ""; port = ""
   end
@@ -1095,8 +1095,8 @@ halted:
   use strict arg host, port
   host = host~string
   if host == "" then
-    raise syntax 88.900 array("DatagramSocket~connect: the host must not be empty")
-  port = checkPort(port, "DatagramSocket~connect")
+    raise syntax 88.900 array("UDPSocket~connect: the host must not be empty")
+  port = checkPort(port, "UDPSocket~connect")
   self~checkOpen
   r = self~nConnect(host, port)
   if r[1] \== "OK" then self~raiseError(r, host, port)
@@ -1117,7 +1117,7 @@ halted:
 ::attribute receiveTimeout set unguarded
   expose receiveTimeout
   use strict arg value
-  receiveTimeout = checkTimeout(value, "DatagramSocket~receiveTimeout=", "value")
+  receiveTimeout = checkTimeout(value, "UDPSocket~receiveTimeout=", "value")
 
 /** .true when datagrams may be sent to broadcast addresses
     (255.255.255.255, or a network's own); .false, the default. */
@@ -1128,7 +1128,7 @@ halted:
 ::attribute broadcast set unguarded
   use strict arg value
   if value \== .true & value \== .false then
-    raise syntax 88.900 array("DatagramSocket~broadcast=: the value must be .true or .false; found" value)
+    raise syntax 88.900 array("UDPSocket~broadcast=: the value must be .true or .false; found" value)
   self~checkOpen
   r = self~nBroadcast(value)
   if r[1] \== "OK" then self~raiseError(r, "", "")
@@ -1156,12 +1156,12 @@ halted:
 
 ::method string unguarded
   expose port
-  return "a DatagramSocket on port" port
+  return "a UDPSocket on port" port
 
 ::method checkOpen private unguarded
   expose closed port
   if closed then
-    raise syntax 48.900 array("Socket error: the datagram socket is closed (port" port")", "EBADF", 0)
+    raise syntax 48.900 array("Socket error: the UDP socket is closed (port" port")", "EBADF", 0)
 
 -- 48.900 for a failure; where is host and port, the connected peer's, or
 -- this socket's own port.
@@ -1169,7 +1169,7 @@ halted:
   expose closed port peer
   use arg r, host, port2
   if closed then
-    raise syntax 48.900 array("Socket error: the datagram socket is closed (port" port")", "EBADF", 0)
+    raise syntax 48.900 array("Socket error: the UDP socket is closed (port" port")", "EBADF", 0)
   select
     when host \== "" then where = host || ", port" port2
     when peer \== .nil then where = peer[1] || ", port" peer[2]
@@ -1179,7 +1179,7 @@ halted:
 
 
 /*============================================================================*/
-/* Datagram: what DatagramSocket~receive returns                              */
+/* Datagram: what UDPSocket~receive returns                              */
 /*============================================================================*/
 
 ::class Datagram public
