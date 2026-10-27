@@ -2,9 +2,9 @@
 /* MulticastSocket: groups, the shared port, the sending options. The
    members are on this machine: the IPv4 tests join and send on the
    loopback interface (named by its address, 127.0.0.1), which carries
-   multicast on the three systems; the IPv6 ones on the system's choice,
-   where it can (not on macOS's CI machines, whose network sends no
-   multicast).                                                          */
+   multicast on the three systems; the IPv6 one on the system's choice,
+   where there is one (not on macOS's CI machines, whose network sends no
+   multicast, nor in a container whose only IPv6 is ::1).                                                          */
 
   parse source . . fileSpec
   group = .TestGroup~new(fileSpec)
@@ -207,11 +207,15 @@ syntax:
   s~networkInterface = "127.0.0.1"
   return s
 
+-- IPv6 multicast on the system's choice of interface: not on macOS's CI
+-- machines, nor in a container whose only IPv6 is ::1 ("no such device").
 ::routine ipv6Multicast
   parse source os .
   if os~upper~pos("DARWIN") > 0 | os~upper~pos("MAC") > 0 then return .false
   signal on syntax name none
-  .UDPSocket~new(0, "::1")~close
+  m = .MulticastSocket~new
+  m~joinGroup("ff12::4297")
+  m~close
   return .true
 none:
   return .false
