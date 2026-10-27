@@ -121,11 +121,39 @@ static int send_all(SOCKET fd, const char *p, int len)
 #define ALL_TLS  (SP_PROT_TLS1_0 | SP_PROT_TLS1_1 | SP_PROT_TLS1_2 | SP_PROT_TLS1_3 | \
                   SP_PROT_DTLS1_0 | SP_PROT_DTLS1_2 | SP_PROT_SSL3 | SP_PROT_SSL2)
 
+/* How the credentials are described (the CRED environment variable):
+     sch    SCH_CREDENTIALS, the protocols not wanted disabled (default)
+     sch0   SCH_CREDENTIALS, nothing disabled: the system's defaults
+     legacy SCHANNEL_CRED (deprecated), grbitEnabledProtocols            */
+static const char *cred_style(void)
+{
+    const char *s = getenv("CRED");
+    return s && *s ? s : "sch";
+}
+
 /* enabled: the SP_PROT_* bits to allow (both sides' bits are fine). */
 static int acquire(CredHandle *cred, ULONG dir, DWORD enabled, PCCERT_CONTEXT cert, int manual)
 {
     SCH_CREDENTIALS sc;
     TLS_PARAMETERS tp;
+    TimeStamp exp;
+    if (!strcmp(cred_style(), "legacy")) {
+        SCHANNEL_CRED lc;
+        memset(&lc, 0, sizeof lc);
+        lc.dwVersion = SCHANNEL_CRED_VERSION;
+        lc.dwFlags = SCH_USE_STRONG_CRYPTO;
+        if (dir == SECPKG_CRED_OUTBOUND)
+            lc.dwFlags |= SCH_CRED_NO_DEFAULT_CREDS |
+                          (manual ? SCH_CRED_MANUAL_CRED_VALIDATION : SCH_CRED_AUTO_CRED_VALIDATION);
+        if (cert) { lc.cCreds = 1; lc.paCred = &cert; }
+        lc.grbitEnabledProtocols = enabled & (dir == SECPKG_CRED_OUTBOUND
+            ? (SP_PROT_TLS1_2_CLIENT | SP_PROT_TLS1_3_CLIENT | SP_PROT_DTLS1_2_CLIENT)
+            : (SP_PROT_TLS1_2_SERVER | SP_PROT_TLS1_3_SERVER | SP_PROT_DTLS1_2_SERVER));
+        SECURITY_STATUS st = AcquireCredentialsHandleW(NULL, (LPWSTR)UNISP_NAME_W, dir, NULL, &lc,
+                                                       NULL, NULL, cred, &exp);
+        if (st != SEC_E_OK) { say_status("AcquireCredentialsHandle (legacy)", st); return 0; }
+        return 1;
+    }
     memset(&sc, 0, sizeof sc); memset(&tp, 0, sizeof tp);
     sc.dwVersion = SCH_CREDENTIALS_VERSION;
     sc.dwFlags = SCH_USE_STRONG_CRYPTO;
@@ -134,24 +162,24 @@ static int acquire(CredHandle *cred, ULONG dir, DWORD enabled, PCCERT_CONTEXT ce
         sc.dwFlags |= manual ? SCH_CRED_MANUAL_CRED_VALIDATION : SCH_CRED_AUTO_CRED_VALIDATION;
     }
     if (cert) { sc.cCreds = 1; sc.paCred = &cert; }
-    tp.grbitDisabledProtocols = ALL_TLS & ~enabled;
+    tp.grbitDisabledProtocols = strcmp(cred_style(), "sch0") ? (ALL_TLS & ~enabled) : 0;
     sc.cTlsParameters = 1; sc.pTlsParameters = &tp;
-    TimeStamp exp;
     SECURITY_STATUS st = AcquireCredentialsHandleW(NULL, (LPWSTR)UNISP_NAME_W, dir, NULL, &sc,
                                                    NULL, NULL, cred, &exp);
     if (st != SEC_E_OK) { say_status("AcquireCredentialsHandle", st); return 0; }
     return 1;
 }
 
-static int has_key(PCCERT_CONTEXT c)
+/* Which property holds the private key, if any (does not open the key). */
+static const char *key_where(PCCERT_CONTEXT c)
 {
-    HCRYPTPROV_OR_NCRYPT_KEY_HANDLE k = 0; DWORD spec = 0; BOOL free_it = FALSE;
-    if (!CryptAcquireCertificatePrivateKey(c, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG,
-                                           NULL, &k, &spec, &free_it)) return 0;
-    if (free_it) {
-        if (spec == CERT_NCRYPT_KEY_SPEC) NCryptFreeObject(k); else CryptReleaseContext(k, 0);
-    }
-    return 1;
+    DWORD n = 0;
+    if (CertGetCertificateContextProperty(c, CERT_NCRYPT_KEY_HANDLE_PROP_ID, NULL, &n)) return "NCRYPT_KEY_HANDLE";
+    n = 0;
+    if (CertGetCertificateContextProperty(c, CERT_KEY_CONTEXT_PROP_ID, NULL, &n)) return "KEY_CONTEXT";
+    n = 0;
+    if (CertGetCertificateContextProperty(c, CERT_KEY_PROV_INFO_PROP_ID, NULL, &n)) return "KEY_PROV_INFO";
+    return NULL;
 }
 
 static char *read_file(const char *name, DWORD *len)
@@ -164,59 +192,104 @@ static char *read_file(const char *name, DWORD *len)
     return p;
 }
 
-static PCCERT_CONTEXT load_p12(const char *file, const char *pw, int persist)
+/* keymode: nopersist   PKCS12_NO_PERSIST_KEY
+            nopersist-cng   the same, with PKCS12_ALWAYS_CNG_KSP
+            persist     the key saved in the user's profile (the default)
+            delete      as persist, the key deleted once the credentials
+                        are acquired (see delete_key)                    */
+static PCCERT_CONTEXT import_pfx(CRYPT_DATA_BLOB *blob, const char *pw, const char *keymode)
+{
+    wchar_t wpw[256]; MultiByteToWideChar(CP_UTF8, 0, pw, -1, wpw, 256);
+    DWORD flags = CRYPT_USER_KEYSET;
+    if (!strcmp(keymode, "nopersist")) flags |= PKCS12_NO_PERSIST_KEY;
+    else if (!strcmp(keymode, "nopersist-cng")) flags |= PKCS12_NO_PERSIST_KEY | PKCS12_ALWAYS_CNG_KSP;
+    else flags |= PKCS12_ALWAYS_CNG_KSP;
+    HCERTSTORE store = PFXImportCertStore(blob, wpw, flags);
+    if (!store) { say_status("PFXImportCertStore", (SECURITY_STATUS)HRESULT_FROM_WIN32(GetLastError())); return NULL; }
+    PCCERT_CONTEXT c = NULL, found = NULL;
+    while ((c = CertEnumCertificatesInStore(store, c)) != NULL) {
+        const char *w = key_where(c);
+        if (w) { printf("  key (%s): %s\n", keymode, w); found = CertDuplicateCertificateContext(c); break; }
+    }
+    if (c) CertFreeCertificateContext(c);
+    if (!found) printf("  no certificate with a private key (%s)\n", keymode);
+    return found;
+}
+
+static PCCERT_CONTEXT load_p12(const char *file, const char *pw, const char *keymode)
 {
     DWORD len; char *data = read_file(file, &len);
     if (!data) return NULL;
     CRYPT_DATA_BLOB blob = { len, (BYTE *)data };
-    wchar_t wpw[256]; MultiByteToWideChar(CP_UTF8, 0, pw, -1, wpw, 256);
-    DWORD flags = CRYPT_USER_KEYSET | (persist ? 0 : PKCS12_NO_PERSIST_KEY);
-    HCERTSTORE store = PFXImportCertStore(&blob, wpw, flags);
+    PCCERT_CONTEXT c = import_pfx(&blob, pw, keymode);
     free(data);
-    if (!store) { say_status("PFXImportCertStore", (SECURITY_STATUS)HRESULT_FROM_WIN32(GetLastError())); return NULL; }
-    PCCERT_CONTEXT c = NULL, found = NULL;
-    while ((c = CertEnumCertificatesInStore(store, c)) != NULL)
-        if (has_key(c)) { found = CertDuplicateCertificateContext(c); break; }
-    if (c) CertFreeCertificateContext(c);
-    if (!found) printf("  no certificate with a private key in %s\n", file);
-    return found;
+    return c;
 }
 
-/* PEM: the certificate, then its private key (PKCS#8, "PRIVATE KEY"),
-   imported into CNG as an ephemeral key and attached to the certificate. */
-static PCCERT_CONTEXT load_pem(const char *certfile, const char *keyfile)
+/* The persisted key of c deleted (keymode "delete"), after
+   AcquireCredentialsHandle: does Schannel still use it? */
+static void delete_key(PCCERT_CONTEXT c)
 {
-    DWORD len, der_len = 0;
-    char *pem = read_file(certfile, &len);
-    if (!pem) return NULL;
-    CryptStringToBinaryA(pem, len, CRYPT_STRING_BASE64HEADER, NULL, &der_len, NULL, NULL);
-    BYTE *der = malloc(der_len);
-    if (!CryptStringToBinaryA(pem, len, CRYPT_STRING_BASE64HEADER, der, &der_len, NULL, NULL)) {
-        printf("  certificate PEM: %lu\n", GetLastError()); return NULL;
+    HCRYPTPROV_OR_NCRYPT_KEY_HANDLE k = 0; DWORD spec = 0; BOOL free_it = FALSE;
+    if (!CryptAcquireCertificatePrivateKey(c, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG,
+                                           NULL, &k, &spec, &free_it)) {
+        printf("  delete_key: CryptAcquireCertificatePrivateKey %lu\n", GetLastError()); return;
     }
-    PCCERT_CONTEXT c = CertCreateCertificateContext(X509_ASN_ENCODING, der, der_len);
-    free(pem); free(der);
-    if (!c) { printf("  CertCreateCertificateContext: %lu\n", GetLastError()); return NULL; }
+    SECURITY_STATUS st = NCryptDeleteKey(k, 0);
+    printf("  persisted key deleted: 0x%08lX\n", (unsigned long)st);
+}
 
-    char *kpem = read_file(keyfile, &len);
-    if (!kpem) return NULL;
-    DWORD klen = 0;
-    CryptStringToBinaryA(kpem, len, CRYPT_STRING_BASE64HEADER, NULL, &klen, NULL, NULL);
-    BYTE *kder = malloc(klen);
-    if (!CryptStringToBinaryA(kpem, len, CRYPT_STRING_BASE64HEADER, kder, &klen, NULL, NULL)) {
-        printf("  key PEM: %lu\n", GetLastError()); return NULL;
+static BYTE *pem_der(const char *file, DWORD *der_len)
+{
+    DWORD len; char *pem = read_file(file, &len);
+    if (!pem) return NULL;
+    *der_len = 0;
+    CryptStringToBinaryA(pem, len, CRYPT_STRING_BASE64HEADER, NULL, der_len, NULL, NULL);
+    BYTE *der = malloc(*der_len ? *der_len : 1);
+    if (!CryptStringToBinaryA(pem, len, CRYPT_STRING_BASE64HEADER, der, der_len, NULL, NULL)) {
+        printf("  PEM %s: %lu\n", file, GetLastError()); return NULL;
+    }
+    free(pem);
+    return der;
+}
+
+/* PEM: the certificate and its PKCS#8 private key. pfx = 0: the key
+   imported into CNG as an ephemeral key and attached to the certificate;
+   pfx = 1: that, exported as a PKCS#12 in memory and imported again as
+   keymode says (Schannel may refuse an ephemeral key). */
+static PCCERT_CONTEXT load_pem(const char *certfile, const char *keyfile, int pfx, const char *keymode)
+{
+    DWORD der_len, klen;
+    BYTE *der = pem_der(certfile, &der_len);
+    BYTE *kder = pem_der(keyfile, &klen);
+    if (!der || !kder) return NULL;
+    HCERTSTORE mem = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, NULL);
+    PCCERT_CONTEXT c = NULL;
+    if (!CertAddEncodedCertificateToStore(mem, X509_ASN_ENCODING, der, der_len, CERT_STORE_ADD_ALWAYS, &c)) {
+        printf("  CertAddEncodedCertificateToStore: %lu\n", GetLastError()); return NULL;
     }
     NCRYPT_PROV_HANDLE prov; NCRYPT_KEY_HANDLE key;
     SECURITY_STATUS st = NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0);
     if (st) { say_status("NCryptOpenStorageProvider", st); return NULL; }
-    st = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NULL, &key, kder, klen, NCRYPT_SILENT_FLAG);
+    st = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NULL, &key, kder, klen,
+                         NCRYPT_SILENT_FLAG | NCRYPT_DO_NOT_FINALIZE_FLAG);
     if (st) { say_status("NCryptImportKey (PKCS#8)", st); return NULL; }
+    DWORD policy = NCRYPT_ALLOW_EXPORT_FLAG | NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG;
+    NCryptSetProperty(key, NCRYPT_EXPORT_POLICY_PROPERTY, (PBYTE)&policy, sizeof policy, NCRYPT_PERSIST_FLAG);
+    st = NCryptFinalizeKey(key, NCRYPT_SILENT_FLAG);
+    if (st) { say_status("NCryptFinalizeKey", st); return NULL; }
     if (!CertSetCertificateContextProperty(c, CERT_NCRYPT_KEY_HANDLE_PROP_ID, 0, &key)) {
         printf("  CertSetCertificateContextProperty: %lu\n", GetLastError()); return NULL;
     }
-    printf("  PEM certificate and key loaded (ephemeral CNG key)\n");
-    free(kpem); free(kder);
-    return c;
+    free(der); free(kder);
+    if (!pfx) { printf("  PEM loaded, ephemeral CNG key\n"); return c; }
+    CRYPT_DATA_BLOB blob = { 0, NULL };
+    DWORD fl = EXPORT_PRIVATE_KEYS | REPORT_NOT_ABLE_TO_EXPORT_PRIVATE_KEY;
+    if (!PFXExportCertStoreEx(mem, &blob, L"", NULL, fl)) { printf("  PFXExportCertStoreEx (size): %lu\n", GetLastError()); return NULL; }
+    blob.pbData = malloc(blob.cbData);
+    if (!PFXExportCertStoreEx(mem, &blob, L"", NULL, fl)) { printf("  PFXExportCertStoreEx: %lu\n", GetLastError()); return NULL; }
+    printf("  PEM loaded, exported as PKCS#12 in memory (%lu bytes)\n", (unsigned long)blob.cbData);
+    return import_pfx(&blob, "", keymode);
 }
 
 /* ------------------------------------------------------------------ */
@@ -288,9 +361,11 @@ typedef struct {
     char in[65536]; int inlen;          /* received, not yet decrypted */
 } tls;
 
-static SECURITY_STATUS handshake(tls *t, CredHandle *cred, const wchar_t *target)
+/* resume: a post-handshake message (TLS 1.3) is in t->in, for the
+   existing context. */
+static SECURITY_STATUS handshake(tls *t, CredHandle *cred, const wchar_t *target, int resume)
 {
-    int first = 1;
+    int first = !resume;
     DWORD flags = t->server
         ? (ASC_REQ_SEQUENCE_DETECT | ASC_REQ_REPLAY_DETECT | ASC_REQ_CONFIDENTIALITY |
            ASC_REQ_EXTENDED_ERROR | ASC_REQ_ALLOCATE_MEMORY | ASC_REQ_STREAM)
@@ -301,6 +376,7 @@ static SECURITY_STATUS handshake(tls *t, CredHandle *cred, const wchar_t *target
     for (;;) {
         if (!(first && !t->server)) {            /* the client's first call has no input */
             if (t->inlen == 0 || st == SEC_E_INCOMPLETE_MESSAGE) {
+                if (resume) printf("    post-handshake: waiting for more (status 0x%08lX)\n", (unsigned long)st);
                 int n = recv_wait(t->fd, t->in + t->inlen, sizeof t->in - t->inlen, 10000);
                 if (n <= 0) { printf("  handshake: recv %d (%d)\n", n, WSAGetLastError()); return SEC_E_INTERNAL_ERROR; }
                 t->inlen += n;
@@ -378,7 +454,8 @@ static int tls_recv(tls *t, char *out, int outlen, CredHandle *cred, const wchar
                     /* TLS 1.3: a post-handshake message (a session ticket, a
                        key update): back to the handshake function with it. */
                     printf("  DecryptMessage: SEC_I_RENEGOTIATE (post-handshake message), %d bytes left\n", t->inlen);
-                    SECURITY_STATUS h = handshake(t, cred, target);
+                    SECURITY_STATUS h = handshake(t, cred, target, 1);
+                    printf("  post-handshake message processed: 0x%08lX, %d bytes left\n", (unsigned long)h, t->inlen);
                     if (h != SEC_E_OK) { say_status("post-handshake", h); return -1; }
                 }
                 if (got) return got;
@@ -426,7 +503,7 @@ static int do_client(const char *host, const char *port, int min13, const char *
     t.fd = connect_to(host, port, SOCK_STREAM);
     if (t.fd == INVALID_SOCKET) return 1;
     wchar_t whost[256]; MultiByteToWideChar(CP_UTF8, 0, host, -1, whost, 256);
-    SECURITY_STATUS st = handshake(&t, &cred, whost);
+    SECURITY_STATUS st = handshake(&t, &cred, whost, 0);
     if (st != SEC_E_OK) { say_status("handshake REFUSED", st); return 1; }
     show_connection(&t.ctx);
     if (pin && !check_pin(&t.ctx, host, pin)) return 1;
@@ -440,21 +517,31 @@ static int do_client(const char *host, const char *port, int min13, const char *
     return 0;
 }
 
-static PCCERT_CONTEXT server_cert(const char *keystore, const char *pw, const char *mode)
+/* keystore: a PKCS#12 file, or "cert.pem;key.pem". keymode: see
+   import_pfx; for PEM also "ephemeral" (the CNG key as it is). */
+static PCCERT_CONTEXT server_cert(const char *keystore, const char *pw, const char *keymode)
 {
-    if (!strcmp(mode, "pem")) {
+    if (strchr(keystore, ';')) {
         char c[512]; strncpy(c, keystore, sizeof c - 1); c[sizeof c - 1] = 0;
-        char *k = strchr(c, ';'); if (!k) { printf("  pem: cert.pem;key.pem\n"); return NULL; }
-        *k++ = 0;
-        return load_pem(c, k);
+        char *k = strchr(c, ';'); *k++ = 0;
+        return load_pem(c, k, strcmp(keymode, "ephemeral") != 0, keymode);
     }
-    return load_p12(keystore, pw, !strcmp(mode, "p12-persist"));
+    return load_p12(keystore, pw, keymode);
+}
+
+/* Server credentials for cert; with keymode "delete", the persisted key
+   is deleted right after. */
+static int server_cred(CredHandle *cred, DWORD protocols, PCCERT_CONTEXT cert, const char *keymode)
+{
+    if (!acquire(cred, SECPKG_CRED_INBOUND, protocols, cert, 0)) return 0;
+    if (!strcmp(keymode, "delete")) delete_key(cert);
+    return 1;
 }
 
 /* one client: a line in, the line upper-cased out */
 static int serve_one(tls *t, CredHandle *cred)
 {
-    SECURITY_STATUS st = handshake(t, cred, NULL);
+    SECURITY_STATUS st = handshake(t, cred, NULL, 0);
     if (st != SEC_E_OK) { say_status("server handshake FAILED", st); closesocket(t->fd); return 1; }
     show_connection(&t->ctx);
     char buf[4096]; int n = tls_recv(t, buf, sizeof buf - 1, cred, NULL);
@@ -472,7 +559,7 @@ static int do_server(int port, const char *keystore, const char *pw, const char 
     PCCERT_CONTEXT cert = server_cert(keystore, pw, mode);
     if (!cert) return 1;
     CredHandle cred;
-    if (!acquire(&cred, SECPKG_CRED_INBOUND, SP_PROT_TLS1_2_SERVER | SP_PROT_TLS1_3_SERVER, cert, 0)) return 1;
+    if (!server_cred(&cred, SP_PROT_TLS1_2_SERVER | SP_PROT_TLS1_3_SERVER, cert, mode)) return 1;
     SOCKET l = listen_on(port, SOCK_STREAM);
     printf("  server (%s) listening on %d\n", mode, port); fflush(stdout);
     for (int i = 0; i < clients; i++) {
@@ -484,12 +571,12 @@ static int do_server(int port, const char *keystore, const char *pw, const char 
     return 0;
 }
 
-static int do_starttls_server(int port, const char *p12, const char *pw)
+static int do_starttls_server(int port, const char *p12, const char *pw, const char *keymode)
 {
-    PCCERT_CONTEXT cert = load_p12(p12, pw, 0);
+    PCCERT_CONTEXT cert = load_p12(p12, pw, keymode);
     if (!cert) return 1;
     CredHandle cred;
-    if (!acquire(&cred, SECPKG_CRED_INBOUND, SP_PROT_TLS1_2_SERVER | SP_PROT_TLS1_3_SERVER, cert, 0)) return 1;
+    if (!server_cred(&cred, SP_PROT_TLS1_2_SERVER | SP_PROT_TLS1_3_SERVER, cert, keymode)) return 1;
     SOCKET l = listen_on(port, SOCK_STREAM);
     tls t; memset(&t, 0, sizeof t); t.server = 1;
     t.fd = accept(l, NULL, NULL);
@@ -511,7 +598,7 @@ static int do_starttls_client(const char *host, const char *port, const char *pi
     char line[16]; int n = recv_wait(t.fd, line, 8, 10000);
     printf("  starttls-client: %d bytes in clear: %.6s\n", n, n > 0 ? line : "");
     wchar_t whost[256]; MultiByteToWideChar(CP_UTF8, 0, host, -1, whost, 256);
-    SECURITY_STATUS st = handshake(&t, &cred, whost);
+    SECURITY_STATUS st = handshake(&t, &cred, whost, 0);
     if (st != SEC_E_OK) { say_status("handshake REFUSED", st); return 1; }
     show_connection(&t.ctx);
     if (!check_pin(&t.ctx, host, pin)) return 1;
@@ -604,7 +691,7 @@ static int dtls_recv(CtxtHandle *ctx, SOCKET fd, char *out, int outlen)
 {
     for (int tries = 0; tries < 5; tries++) {
         char in[65536];
-        int n = recv_wait(fd, in, sizeof in, 3000);
+        int n = recv_wait(fd, in, sizeof in, 8000);
         if (n == -2) { printf("  DTLS receive: timed out\n"); return -1; }
         if (n < 0) { printf("  DTLS receive: %d\n", WSAGetLastError()); return -1; }
         SecBuffer b[4] = { { (ULONG)n, SECBUFFER_DATA, in }, { 0, SECBUFFER_EMPTY, NULL },
@@ -662,12 +749,12 @@ static int do_dtls_client(const char *host, const char *port, const char *pin)
 /* addr_mode 0: no address given to AcceptSecurityContext; 1: the client's
    address as SECBUFFER_EXTRA (what the few public uses of Schannel's DTLS
    server suggest; undocumented). */
-static int do_dtls_server(int port, const char *p12, const char *pw, int addr_mode)
+static int do_dtls_server(int port, const char *p12, const char *pw, int addr_mode, const char *keymode)
 {
-    PCCERT_CONTEXT cert = load_p12(p12, pw, 0);
+    PCCERT_CONTEXT cert = load_p12(p12, pw, keymode);
     if (!cert) return 1;
     CredHandle cred;
-    if (!acquire(&cred, SECPKG_CRED_INBOUND, SP_PROT_DTLS1_2_SERVER, cert, 0)) return 1;
+    if (!server_cred(&cred, SP_PROT_DTLS1_2_SERVER, cert, keymode)) return 1;
     SOCKET fd = listen_on(port, SOCK_DGRAM);
     printf("  DTLS server on %d (client address: %s)\n", port, addr_mode ? "SECBUFFER_EXTRA" : "none");
     fflush(stdout);
@@ -707,10 +794,10 @@ int main(int argc, char **argv)
     if (!strcmp(m, "client")) return do_client(argv[2], argc > 3 ? argv[3] : "443", argc > 4 && !strcmp(argv[4], "13"), NULL);
     if (!strcmp(m, "pin") && argc > 4) return do_client(argv[2], argv[3], 0, argv[4]);
     if (!strcmp(m, "server") && argc > 5) return do_server(atoi(argv[2]), argv[3], argv[4], argv[5], argc > 6 ? atoi(argv[6]) : 1);
-    if (!strcmp(m, "starttls-server") && argc > 4) return do_starttls_server(atoi(argv[2]), argv[3], argv[4]);
+    if (!strcmp(m, "starttls-server") && argc > 5) return do_starttls_server(atoi(argv[2]), argv[3], argv[4], argv[5]);
     if (!strcmp(m, "starttls-client") && argc > 4) return do_starttls_client(argv[2], argv[3], argv[4]);
     if (!strcmp(m, "dtls") && argc > 4) return do_dtls_client(argv[2], argv[3], argv[4]);
-    if (!strcmp(m, "dtls-server") && argc > 4) return do_dtls_server(atoi(argv[2]), argv[3], argv[4], argc > 5 ? atoi(argv[5]) : 1);
+    if (!strcmp(m, "dtls-server") && argc > 6) return do_dtls_server(atoi(argv[2]), argv[3], argv[4], atoi(argv[5]), argv[6]);
     printf("unknown mode or missing arguments\n");
     return 2;
 }
