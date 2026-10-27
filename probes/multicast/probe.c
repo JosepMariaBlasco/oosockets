@@ -66,7 +66,6 @@ static const char *errname(int e)
         case WSAEHOSTUNREACH: return "EHOSTUNREACH";
         case WSAEACCES: return "EACCES";
         case WSAEFAULT: return "EFAULT";
-        case WSAENODEV: return "ENODEV";
     }
 #else
     switch (e)
