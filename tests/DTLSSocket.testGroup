@@ -171,6 +171,41 @@ syntax:
   s~close
   srv~close
 
+/* ---- with OpenSSL's own programs (Linux, where they are at hand) -------- */
+
+::method test_openssl_s_client
+  if \opensslHere() then return
+  srv = newServer()
+  msg = .Server~new~start("echoOnceAndClose", srv)
+  cmd = "timeout 20 openssl s_client -dtls1_2 -connect 127.0.0.1:"srv~localPort,
+        "-CAfile" certFile("ca.pem") "-verify_return_error -quiet"
+  input = .array~of("hello from s_client")
+  out = .array~new; err = .array~new
+  address system cmd with input using (input) output using (out) error using (err)
+  self~assertSame("hello from s_client", msg~result~strip("T", "0a"x))
+  self~assertTrue(out~makeString("L", " ")~pos("HELLO FROM S_CLIENT") > 0, out~makeString("L", " ") "|" err~makeString("L", " "))
+  srv~close
+
+::method test_openssl_s_server
+  if \opensslHere() then return
+  u = .UDPSocket~new(0, "127.0.0.1"); port = u~localPort; u~close
+  -- -rev: answers each line reversed; -naccept 1: one client, then it ends
+  cmd = "timeout 20 openssl s_server -dtls1_2 -accept" port "-cert" certFile("server.pem"),
+        "-key" certFile("server.pem") "-pass pass:test -naccept 1 -rev -quiet"
+  srv = .Shell~new~start("run", cmd)
+  s = .nil
+  do 50 while s == .nil                      -- until it listens
+    call sysSleep 0.1
+    s = tryConnect(port)
+  end
+  self~assertTrue(s \== .nil, "s_server did not answer")
+  s~receiveTimeout = 10
+  s~send("hello s_server" || "0a"x)
+  d = s~receive
+  self~assertTrue(d~data~pos("revres_s olleh") > 0, d~data~c2x)
+  s~close
+  srv~result
+
 /* ---- connecting fails ----------------------------------------------------- */
 
 ::method test_nobody_answers
@@ -271,6 +306,15 @@ syntax:
   end
   c~close
   return n
+::method echoOnceAndClose
+  use arg srv
+  c = srv~accept
+  c~receiveTimeout = 15
+  d = c~receive
+  c~send(d~data~upper)
+  call sysSleep 0.3
+  c~close
+  return d~data
 ::method acceptAndClose
   use arg srv
   c = srv~accept
@@ -304,6 +348,26 @@ syntax:
 syntax:
   c = condition("o")
   return c~code c~message
+
+::class Shell
+::method run
+  use arg cmd
+  out = .array~new; err = .array~new
+  address system cmd with output using (out) error using (err)
+  return rc
+
+::routine tryConnect
+  use arg port
+  signal on syntax
+  return .DTLSSocket~new("localhost", port, trustCA(), 2)
+syntax:
+  return .nil
+
+::routine opensslHere
+  parse source os .
+  if os~upper~pos("LINUX") == 0 then return .false
+  address system "openssl version > /dev/null 2>&1"
+  return rc == 0
 
 ::routine newServer
   return .DTLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")

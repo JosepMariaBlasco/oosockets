@@ -117,6 +117,25 @@ return testResult
   helper~result
   srv~close
 
+::method test_dtls_handshake_with_a_server_that_says_nothing
+  u = .UDPSocket~new(0, "127.0.0.1")         -- takes the ClientHello, never answers
+  r = self~halted(.Waiter~new, "dtls", "127.0.0.1", u~localPort)
+  self~assertSame("HALT at" .Waiter~line("dtls"), r[1])
+  u~close
+
+::method test_dtls_accept_and_receive
+  srv = .DTLSServerSocket~new(0, serverOptions("server.p12"), "127.0.0.1")
+  r = self~halted(.Waiter~new, "accept", srv)
+  self~assertSame("HALT at" .Waiter~line("accept"), r[1])
+  -- the server goes on: a client, and a receive halted on each side
+  helper = .Acceptor~new~start("dtlsAcceptAndWait", srv)
+  c = .DTLSSocket~new("localhost", srv~localPort, .TLSOptions~new~trust(certFile("ca.pem")), 10)
+  r = self~halted(.Waiter~new, "receive", c)
+  self~assertSame("HALT at" .Waiter~line("receive"), r[1])
+  c~send("bye")
+  self~assertSame("bye", helper~result)
+  c~close; srv~close
+
 ::method test_connect_that_hangs
   -- 192.0.2.1 is TEST-NET-1 (RFC 5737): nothing answers there. Where the
   -- system says at once that it cannot be reached, nothing is checked.
@@ -228,6 +247,14 @@ halt: return "HALT at" sigl
   return "connected?!"
 halt: return "HALT at" sigl
 
+::method dtls
+  use arg host, port
+  signal on halt
+  -- waits:
+  s = .DTLSSocket~new(host, port, .TLSOptions~new)
+  return "connected?!"
+halt: return "HALT at" sigl
+
 ::method connect
   use arg host, port
   signal on halt
@@ -240,6 +267,14 @@ syntax: return condition("O")~message
 
 
 ::class Acceptor
+::method dtlsAcceptAndWait
+  use arg srv
+  c = srv~accept
+  c~receiveTimeout = 20
+  d = c~receive
+  c~close
+  return d~data
+
 ::method acceptAndWait
   use arg srv
   c = srv~accept
