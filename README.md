@@ -2,11 +2,12 @@
 
 Object oriented TCP/IP sockets for [ooRexx](https://www.oorexx.org/):
 IPv4 and IPv6, sockets that are Rexx streams, TLS with the operating
-system deciding which certificates to trust, and UDP.
+system deciding which certificates to trust, and UDP, with multicast and
+DTLS (TLS over UDP).
 
 > **Status: beta**, as ooRexx 5.3.0 is; 1.0 comes with ooRexx 5.3.0.
-> The TCP classes, the TLS client, the TLS server and UDP work and are
-> tested on Linux, macOS and Windows. Needs ooRexx 5.3.0 beta (trunk
+> The TCP classes, the TLS client, the TLS server, UDP, multicast and DTLS
+> work and are tested on Linux, macOS and Windows. Needs ooRexx 5.3.0 beta (trunk
 > r13297 or later), not 5.2.0: see `INSTALL.txt`. Names and behaviour may
 > still change until 1.0.
 
@@ -252,7 +253,95 @@ if d == .nil then say "No answer in 2 seconds"
   is no stream, and no connection to lose.
 - `close` from another activity ends a `receive` waiting there (48.900,
   `the UDP socket is closed`).
-- Not supported yet: multicast; DTLS (TLS over UDP).
+
+### Multicast
+
+A `MulticastSocket` is a `UDPSocket` that joins groups: what anyone sends
+to a group reaches every member. Its port may be shared: several programs
+on one machine can be members on the same port.
+
+```rexx
+m = .MulticastSocket~new(5000)
+m~joinGroup("239.1.2.3")                  -- IPv4; "ff15::1234" for IPv6
+loop
+  d = m~receive                           -- what anyone sent to the group
+  say d~address":" d~data
+end
+::requires "sockets.cls"
+```
+
+```rexx
+s = .MulticastSocket~new
+s~send("hello, everybody", "239.1.2.3", 5000)
+::requires "sockets.cls"
+```
+
+- `joinGroup(group [, interface])`, `leaveGroup(group [, interface])`:
+  group is an IPv4 address from 224.0.0.0 to 239.255.255.255 (239.x.x.x
+  for a group of one's own) or an IPv6 one starting with `ff`; interface
+  is the network interface to receive on, by name (`eth0`, `en0`), index
+  or one of its addresses (`192.168.1.10`; `127.0.0.1` is the loopback);
+  without it, the system chooses.
+- `timeToLive` (1, the default, keeps the datagrams in the local network),
+  `loopback` (`.true`, the default: members on the sender's machine get
+  them too; on Windows it is the receiving socket's setting that counts),
+  `networkInterface` (the interface the datagrams to a group leave from;
+  `""`, the system's choice).
+- A member gets the datagrams of the groups it joined, and those sent to
+  its port alone; a datagram sent to a shared port alone (not to a group)
+  reaches only one of the sockets on it.
+- One socket, without an address, takes IPv4 and IPv6 groups, on the three
+  systems (macOS cannot send to an IPv4 group from such a socket: there,
+  ooSockets sends through a second socket, IPv4, on the same port).
+
+### DTLS
+
+A `DTLSSocket` is TLS over UDP: datagrams, encrypted, between two ends that
+have made a handshake, as a `TLSSocket` does over TCP. A `DTLSServerSocket`
+serves any number of clients on one UDP port.
+
+```rexx
+opts = .TLSOptions~new~certificate("server.p12", "secret")
+srv = .DTLSServerSocket~new(4433, opts)
+loop
+  c = srv~accept                          -- a client, its handshake made
+  d = c~receive
+  c~send(d~data~upper)
+  c~close                                 -- tells the client (close_notify)
+end
+::requires "sockets.cls"
+```
+
+```rexx
+s = .DTLSSocket~new("localhost", 4433, .TLSOptions~new~trust("server.p12", "secret"), 10)
+s~send("hello")
+say s~receive                             -- HELLO
+s~close
+::requires "sockets.cls"
+```
+
+- `.DTLSSocket~new(host, port [, options [, connectTimeout]])`: the
+  handshake, with the server's certificate checked as for `TLSSocket` (the
+  system decides, unless `options` trust certificates explicitly).
+  `connectTimeout`, in seconds, bounds it: DTLS sends its messages again
+  when they are lost, so without one a server that never answers makes
+  `new` wait about a minute.
+- `send(data)`: one datagram, up to 16,384 bytes. `receive` returns a
+  `Datagram` (`.nil` when `receiveTimeout` expires). Datagrams may be lost
+  or arrive in another order, as with UDP; DTLS protects them, it does not
+  deliver them.
+- `.DTLSServerSocket~new(port, options [, address])`: `options` with the
+  server's certificate. `accept` returns a client whose handshake has
+  finished (`.nil` after `acceptTimeout`); a client that fails it is
+  dropped, and the server goes on. Each new client is first sent a cookie
+  to send back, so that a forged address costs the server nothing. The
+  server answers handshakes while something waits on it: `accept`, or a
+  `receive` on one of its clients.
+- `protocol` (`DTLSv1.2`), `cipher`; DTLS 1.2 (OpenSSL has no DTLS 1.3 yet).
+- Every error is a SYNTAX condition, 48.900: `TLS error: certificate has
+  expired (localhost, port 4433)`; once the peer has closed, `receive`
+  raises `TLS error: the peer closed the connection (localhost, port
+  4433)`.
 
 ## Building
 
