@@ -44,7 +44,7 @@ endif()
 
 if(WIN32)
   # Windows decides trust (CertGetCertificateChain); OpenSSL's own needs
-  target_link_libraries(oosockets PRIVATE ws2_32 crypt32 user32 advapi32)
+  target_link_libraries(oosockets PRIVATE ws2_32 iphlpapi crypt32 user32 advapi32)
   target_compile_definitions(oosockets PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
 

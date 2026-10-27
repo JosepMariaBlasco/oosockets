@@ -66,6 +66,10 @@
 #include <chrono>
 #include <mutex>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <map>
+#include <memory>
 
 #ifdef _WIN32
   #ifndef WIN32_LEAN_AND_MEAN
@@ -118,6 +122,8 @@
 #include <openssl/x509v3.h>
 #include <openssl/pem.h>
 #include <openssl/pkcs12.h>
+#include <openssl/hmac.h>
+#include <openssl/rand.h>
 
 #ifdef __APPLE__
   #include <Security/Security.h>
@@ -133,7 +139,16 @@ struct TrustError
     long long code = 0;
 };
 
-struct Sock
+// Whom a TLS (or DTLS) connection must be with: the host name verified
+// (client) and why the system refused its certificate. SSL_get_app_data
+// of every SSL is one.
+struct PeerCheck
+{
+    std::string host;            // the name verified (client)
+    TrustError trust;            // why the system refused the certificate
+};
+
+struct Sock : PeerCheck
 {
     sock_t fd;
     // TLS, once started: the connection's own context and SSL. OpenSSL
@@ -144,8 +159,6 @@ struct Sock
     SSL *ssl = nullptr;
     std::mutex mu;
     int ioError = 0;             // the last socket error the BIO met
-    std::string host;            // the name verified (client)
-    TrustError trust;            // why the system refused the certificate
     std::atomic<bool> closing{false};  // close has started (UDP: a recv it
                                        // wakes must not read as a datagram)
     bool connected = false;      // UDP: connect was made
@@ -1108,7 +1121,7 @@ static bool systemTrust(const std::vector<X509 *> &chain, const std::string &hos
 static int systemVerify(X509_STORE_CTX *store, void *)
 {
     SSL *ssl = (SSL *)X509_STORE_CTX_get_ex_data(store, SSL_get_ex_data_X509_STORE_CTX_idx());
-    Sock *s = (Sock *)SSL_get_app_data(ssl);
+    PeerCheck *s = (PeerCheck *)SSL_get_app_data(ssl);
     std::vector<X509 *> chain;
     X509 *leaf = X509_STORE_CTX_get0_cert(store);
     if (leaf != nullptr)
@@ -1292,7 +1305,7 @@ RexxMethod2(RexxArrayObject, tls_load_certificates, CSTRING, file, OPTIONAL_CSTR
 }
 
 // The handshake's failure, as a result: "ERROR", text, name, number.
-static RexxArrayObject handshakeFailure(RexxMethodContext *context, Sock *s, const TlsOutcome &o)
+static RexxArrayObject handshakeFailure(RexxMethodContext *context, PeerCheck *s, const TlsOutcome &o)
 {
     if (o.status == TLS_TIMEOUT)
     {
@@ -1355,27 +1368,17 @@ static void attachSsl(Sock *s, SSL_CTX *ctx)
     BIO *bio = BIO_new(sockBioMethod());
     BIO_set_data(bio, s);
     SSL_set_bio(s->ssl, bio, bio);
-    SSL_set_app_data(s->ssl, s);
+    SSL_set_app_data(s->ssl, static_cast<PeerCheck *>(s));
     setBlocking(s->fd, false);
 }
 
-// nStartTLS(host, trusted, minVersion, timeout): the client's handshake.
-// trusted: an array of DER certificates; empty, the system decides.
-// "OK"; "TIMEOUT"; or "ERROR", text, name, number.
-RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxArrayObject, trusted,
-            CSTRING, minVersion, double, timeout)
+// A client's context: trusted, an array of DER certificates (only these,
+// and the host name: OpenSSL decides); empty, the system decides.
+static SSL_CTX *clientContext(RexxMethodContext *context, const SSL_METHOD *method, int minProto,
+                              RexxArrayObject trusted)
 {
-    Sock *s = (Sock *)cself;
-    if (s == nullptr || s->fd == BAD_SOCKET)
-    {
-        return closedResult(context);
-    }
-    if (s->ssl != nullptr)
-    {
-        return errorArray(context, "TLS has already started on this connection", "", 0);
-    }
-    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
-    SSL_CTX_set_min_proto_version(ctx, minVersionOf(minVersion));
+    SSL_CTX *ctx = SSL_CTX_new(method);
+    SSL_CTX_set_min_proto_version(ctx, minProto);
 #ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
     SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
 #endif
@@ -1414,21 +1417,45 @@ RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxA
     }
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
 
+    return ctx;
+}
+
+// The name the server's certificate must have (and SNI, for a name).
+static void setPeerName(SSL *ssl, const std::string &h)
+{
+    if (isAddress(h))
+    {
+        X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), h.substr(0, h.find('%')).c_str());
+    }
+    else
+    {
+        SSL_set_tlsext_host_name(ssl, h.c_str());   // SNI
+        SSL_set1_host(ssl, h.c_str());
+    }
+}
+
+// nStartTLS(host, trusted, minVersion, timeout): the client's handshake.
+// trusted: an array of DER certificates; empty, the system decides.
+// "OK"; "TIMEOUT"; or "ERROR", text, name, number.
+RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxArrayObject, trusted,
+            CSTRING, minVersion, double, timeout)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    if (s->ssl != nullptr)
+    {
+        return errorArray(context, "TLS has already started on this connection", "", 0);
+    }
+    SSL_CTX *ctx = clientContext(context, TLS_client_method(), minVersionOf(minVersion), trusted);
     s->host = host;
     s->trust = TrustError();
     attachSsl(s, ctx);
     {
         std::lock_guard<std::mutex> guard(s->mu);
-        std::string h = s->host;
-        if (isAddress(h))
-        {
-            X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(s->ssl), h.substr(0, h.find('%')).c_str());
-        }
-        else
-        {
-            SSL_set_tlsext_host_name(s->ssl, h.c_str());   // SNI
-            SSL_set1_host(s->ssl, h.c_str());
-        }
+        setPeerName(s->ssl, s->host);
     }
     SSL_set_connect_state(s->ssl);
     return handshakeStep(context, s, timeout);
@@ -1447,7 +1474,8 @@ RexxMethod2(RexxArrayObject, socket_tls_more, CSELF, cself, double, timeout)
 
 // A server's TLS context, with the certificate and key in file (PKCS#12
 // with its password, or PEM with both); nullptr and why if it cannot be.
-static SSL_CTX *serverContext(const char *file, const char *password, const char *minVersion, std::string &why)
+static SSL_CTX *serverContext(const char *file, const char *password, const SSL_METHOD *method, int minProto,
+                              std::string &why)
 {
     std::string data;
     std::vector<X509 *> certs;
@@ -1469,8 +1497,8 @@ static SSL_CTX *serverContext(const char *file, const char *password, const char
         why = "no private key in the file";
         return nullptr;
     }
-    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
-    SSL_CTX_set_min_proto_version(ctx, minVersionOf(minVersion));
+    SSL_CTX *ctx = SSL_CTX_new(method);
+    SSL_CTX_set_min_proto_version(ctx, minProto);
 #ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
     SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
 #endif
@@ -1509,7 +1537,7 @@ static SSL_CTX *serverContext(const char *file, const char *password, const char
 RexxMethod2(RexxArrayObject, tls_check_identity, CSTRING, file, CSTRING, password)
 {
     std::string why;
-    SSL_CTX *ctx = serverContext(file, password, "1.2", why);
+    SSL_CTX *ctx = serverContext(file, password, TLS_server_method(), TLS1_2_VERSION, why);
     if (ctx == nullptr)
     {
         return errorArray(context, why, "", 0);
@@ -1533,7 +1561,7 @@ RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
         return errorArray(context, "TLS has already started on this connection", "", 0);
     }
     std::string why;
-    SSL_CTX *ctx = serverContext(file, password, minVersion, why);
+    SSL_CTX *ctx = serverContext(file, password, TLS_server_method(), minVersionOf(minVersion), why);
     if (ctx == nullptr)
     {
         return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
@@ -1554,7 +1582,7 @@ RexxMethod4(RexxArrayObject, server_tls, CSELF, cself, CSTRING, file, CSTRING, p
         return closedResult(context);
     }
     std::string why;
-    SSL_CTX *ctx = serverContext(file, password, minVersion, why);
+    SSL_CTX *ctx = serverContext(file, password, TLS_server_method(), minVersionOf(minVersion), why);
     if (ctx == nullptr)
     {
         return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
@@ -2308,13 +2336,27 @@ static void datagramBuffers(sock_t fd)
     }
 }
 
-static int bindDatagram(sock_t fd, const struct sockaddr *sa, socklen_type len)
+// shared (MulticastSocket): other sockets may take the same port, so that
+// several programs on one machine receive a group's datagrams.
+static int bindDatagram(sock_t fd, const struct sockaddr *sa, socklen_type len, bool shared)
 {
-#ifdef _WIN32
     int one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&one, sizeof(one));
+    if (shared)
+    {
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof(one));
+#if defined(SO_REUSEPORT) && !defined(__linux__)
+        // macOS: SO_REUSEADDR alone does not let a second socket bind
+        // the port on every address (measured: probes/multicast).
+        setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, (const char *)&one, sizeof(one));
 #endif
-    // No SO_REUSEADDR: for UDP it would let a second socket take the port.
+    }
+    else
+    {
+#ifdef _WIN32
+        setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&one, sizeof(one));
+#endif
+        // No SO_REUSEADDR: for UDP it would let a second socket take the port.
+    }
     if (bind(fd, sa, len) != 0)
     {
         return lastError();
@@ -2322,18 +2364,13 @@ static int bindDatagram(sock_t fd, const struct sockaddr *sa, socklen_type len)
     return 0;
 }
 
-static RexxArrayObject datagramOpened(RexxMethodContext *context, sock_t fd)
+// A bound UDP socket: on port, address "" meaning every address (IPv6 and
+// IPv4 on one socket, IPv4 alone where there is no IPv6). 0 and the socket
+// in fd; or an error code (a getaddrinfo one if gai is set).
+static int openDatagram(const char *port, const char *address, bool shared, sock_t &out, bool &gai)
 {
-    datagramBuffers(fd);
-    connReset(fd, false);
-    setBlocking(fd, false);
-    setCself(context, new Sock(fd));
-    return statusResult(context, "OK");
-}
-
-// nOpen(port, address): address "" means every address.
-RexxMethod2(RexxArrayObject, udp_open, CSTRING, port, CSTRING, address)
-{
+    gai = false;
+    out = BAD_SOCKET;
     if (address[0] == '\0')
     {
         int portNumber = atoi(port);
@@ -2348,10 +2385,11 @@ RexxMethod2(RexxArrayObject, udp_open, CSTRING, port, CSTRING, address)
             sa.sin6_family = AF_INET6;
             sa.sin6_addr = in6addr_any;
             sa.sin6_port = htons((unsigned short)portNumber);
-            int err = bindDatagram(fd, (struct sockaddr *)&sa, sizeof(sa));
+            int err = bindDatagram(fd, (struct sockaddr *)&sa, sizeof(sa), shared);
             if (err == 0)
             {
-                return datagramOpened(context, fd);
+                out = fd;
+                return 0;
             }
             closesock(fd);
 #ifdef _WIN32
@@ -2360,13 +2398,13 @@ RexxMethod2(RexxArrayObject, udp_open, CSTRING, port, CSTRING, address)
             if (err == EADDRINUSE || err == EACCES)
 #endif
             {
-                return errorResult(context, err);
+                return err;
             }
         }
         fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (fd == BAD_SOCKET)
         {
-            return errorResult(context, lastError());
+            return lastError();
         }
         prepareSocket(fd);
         struct sockaddr_in sa4;
@@ -2374,13 +2412,14 @@ RexxMethod2(RexxArrayObject, udp_open, CSTRING, port, CSTRING, address)
         sa4.sin_family = AF_INET;
         sa4.sin_addr.s_addr = htonl(INADDR_ANY);
         sa4.sin_port = htons((unsigned short)portNumber);
-        int err = bindDatagram(fd, (struct sockaddr *)&sa4, sizeof(sa4));
+        int err = bindDatagram(fd, (struct sockaddr *)&sa4, sizeof(sa4), shared);
         if (err != 0)
         {
             closesock(fd);
-            return errorResult(context, err);
+            return err;
         }
-        return datagramOpened(context, fd);
+        out = fd;
+        return 0;
     }
 
     struct addrinfo hints;
@@ -2393,7 +2432,8 @@ RexxMethod2(RexxArrayObject, udp_open, CSTRING, port, CSTRING, address)
     int rc = getaddrinfo(address, port, &hints, &list);
     if (rc != 0)
     {
-        return gaiErrorResult(context, rc);
+        gai = true;
+        return rc;
     }
     int lastErr = 0;
     for (struct addrinfo *ai = list; ai != nullptr; ai = ai->ai_next)
@@ -2405,17 +2445,57 @@ RexxMethod2(RexxArrayObject, udp_open, CSTRING, port, CSTRING, address)
             continue;
         }
         prepareSocket(fd);
-        int err = bindDatagram(fd, ai->ai_addr, (socklen_type)ai->ai_addrlen);
+        int err = bindDatagram(fd, ai->ai_addr, (socklen_type)ai->ai_addrlen, shared);
         if (err == 0)
         {
             freeaddrinfo(list);
-            return datagramOpened(context, fd);
+            out = fd;
+            return 0;
         }
         lastErr = err;
         closesock(fd);
     }
     freeaddrinfo(list);
-    return errorResult(context, lastErr);
+    return lastErr;
+}
+
+// Linux delivers to a socket bound to every address the datagrams of any
+// group another socket on the machine joined (IP_MULTICAST_ALL, on by
+// default); macOS and Windows only those of the groups it joined itself
+// (measured: probes/multicast). Off, so that the three agree.
+static void onlyJoinedGroups(sock_t fd)
+{
+#ifdef IP_MULTICAST_ALL
+    int zero = 0;
+    setsockopt(fd, IPPROTO_IP, IP_MULTICAST_ALL, (const char *)&zero, sizeof(zero));
+  #ifdef IPV6_MULTICAST_ALL
+    setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_ALL, (const char *)&zero, sizeof(zero));
+  #endif
+#else
+    (void)fd;
+#endif
+}
+
+// nOpen(port, address, shared): address "" means every address; shared
+// (MulticastSocket) lets other sockets take the same port.
+RexxMethod3(RexxArrayObject, udp_open, CSTRING, port, CSTRING, address, logical_t, shared)
+{
+    sock_t fd;
+    bool gai;
+    int err = openDatagram(port, address, shared != 0, fd, gai);
+    if (err != 0)
+    {
+        return gai ? gaiErrorResult(context, err) : errorResult(context, err);
+    }
+    datagramBuffers(fd);
+    connReset(fd, false);
+    setBlocking(fd, false);
+    if (shared)
+    {
+        onlyJoinedGroups(fd);
+    }
+    setCself(context, new Sock(fd));
+    return statusResult(context, "OK");
 }
 
 // The address to send to (or connect to): host and port resolved, in the
@@ -2686,6 +2766,352 @@ RexxMethod2(RexxArrayObject, udp_broadcast, CSELF, cself, int, value)
 
 
 /*----------------------------------------------------------------------------*/
+/* MulticastSocket                                                            */
+/*                                                                            */
+/* A UDPSocket whose port other sockets may share, that joins groups. What    */
+/* each system accepts differs (probes/multicast, measured on the four CI     */
+/* systems): a socket of IPv6 that takes IPv4 joins an IPv4 group at the IP   */
+/* level on Linux and Windows (MCAST_JOIN_GROUP), and only as ::ffff:a.b.c.d  */
+/* at the IPv6 level on macOS (IPV6_JOIN_GROUP); a datagram such a socket     */
+/* sends to an IPv4 group takes its TTL from IP_MULTICAST_TTL but its         */
+/* loopback from IPV6_MULTICAST_LOOP on Linux. So each join tries the ways in */
+/* turn, and each option is set at both levels.                              */
+/*----------------------------------------------------------------------------*/
+
+#ifdef _WIN32
+  #include <iphlpapi.h>
+#else
+  #include <net/if.h>
+  #include <ifaddrs.h>
+#endif
+
+#ifndef IPV6_JOIN_GROUP
+  #define IPV6_JOIN_GROUP IPV6_ADD_MEMBERSHIP
+  #define IPV6_LEAVE_GROUP IPV6_DROP_MEMBERSHIP
+#endif
+
+static int socketFamily(sock_t fd)
+{
+    struct sockaddr_storage me;
+    socklen_type len = sizeof(me);
+    if (getsockname(fd, (struct sockaddr *)&me, &len) != 0)
+    {
+        return AF_UNSPEC;
+    }
+    return me.ss_family;
+}
+
+static void setSaLen(struct sockaddr_storage &ss)
+{
+#if defined(__APPLE__) || defined(__FreeBSD__)
+    ss.ss_len = ss.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
+#else
+    (void)ss;
+#endif
+}
+
+static bool sameAddress(const struct sockaddr *a, const struct sockaddr *b)
+{
+    if (a->sa_family != b->sa_family)
+    {
+        return false;
+    }
+    if (a->sa_family == AF_INET)
+    {
+        return memcmp(&((const struct sockaddr_in *)a)->sin_addr, &((const struct sockaddr_in *)b)->sin_addr, 4) == 0;
+    }
+    if (a->sa_family == AF_INET6)
+    {
+        return memcmp(&((const struct sockaddr_in6 *)a)->sin6_addr, &((const struct sockaddr_in6 *)b)->sin6_addr, 16) == 0;
+    }
+    return false;
+}
+
+// An interface, by index ("3"), name ("eth0", "en0"; on Windows also its
+// friendly name, "Ethernet 3") or one of its addresses ("192.168.1.10").
+// "" is 0, the system's choice. false if there is no such interface.
+static bool interfaceIndex(const char *what, unsigned &index)
+{
+    index = 0;
+    if (what[0] == '\0')
+    {
+        return true;
+    }
+    bool digits = true;
+    for (const char *p = what; *p; p++)
+    {
+        digits = digits && *p >= '0' && *p <= '9';
+    }
+    if (digits)
+    {
+        index = (unsigned)strtoul(what, nullptr, 10);
+        return index != 0;
+    }
+    index = if_nametoindex(what);
+    if (index != 0)
+    {
+        return true;
+    }
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_flags = AI_NUMERICHOST;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    struct addrinfo *list = nullptr;
+    bool isAddr = getaddrinfo(what, nullptr, &hints, &list) == 0;
+#ifdef _WIN32
+    ULONG size = 16384;
+    std::vector<char> buf(size);
+    ULONG rc = GetAdaptersAddresses(AF_UNSPEC, 0, nullptr, (IP_ADAPTER_ADDRESSES *)buf.data(), &size);
+    if (rc == ERROR_BUFFER_OVERFLOW)
+    {
+        buf.resize(size);
+        rc = GetAdaptersAddresses(AF_UNSPEC, 0, nullptr, (IP_ADAPTER_ADDRESSES *)buf.data(), &size);
+    }
+    if (rc == NO_ERROR)
+    {
+        std::wstring wide;
+        for (const char *p = what; *p; p++)
+        {
+            wide += (wchar_t)(unsigned char)*p;
+        }
+        for (IP_ADAPTER_ADDRESSES *a = (IP_ADAPTER_ADDRESSES *)buf.data(); a != nullptr && index == 0; a = a->Next)
+        {
+            if (!isAddr && a->FriendlyName != nullptr && _wcsicmp(a->FriendlyName, wide.c_str()) == 0)
+            {
+                index = a->IfIndex != 0 ? a->IfIndex : a->Ipv6IfIndex;
+            }
+            for (IP_ADAPTER_UNICAST_ADDRESS *u = a->FirstUnicastAddress; isAddr && u != nullptr; u = u->Next)
+            {
+                if (sameAddress(u->Address.lpSockaddr, list->ai_addr))
+                {
+                    index = list->ai_family == AF_INET ? a->IfIndex : a->Ipv6IfIndex;
+                }
+            }
+        }
+    }
+#else
+    struct ifaddrs *ifs = nullptr;
+    if (isAddr && getifaddrs(&ifs) == 0)
+    {
+        for (struct ifaddrs *a = ifs; a != nullptr && index == 0; a = a->ifa_next)
+        {
+            if (a->ifa_addr != nullptr && sameAddress(a->ifa_addr, list->ai_addr))
+            {
+                index = if_nametoindex(a->ifa_name);
+            }
+        }
+        freeifaddrs(ifs);
+    }
+#endif
+    if (list != nullptr)
+    {
+        freeaddrinfo(list);
+    }
+    return index != 0;
+}
+
+// The IPv4 outgoing interface, by index (0: the system's choice).
+static int setIf4(sock_t fd, unsigned index)
+{
+#if defined(_WIN32)
+    DWORD v = htonl(index);              // "0.0.0.index": an index, not an address
+    return setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, (const char *)&v, sizeof(v)) == 0 ? 0 : lastError();
+#elif defined(__APPLE__)
+    unsigned v = index;
+    return setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IFINDEX, (const char *)&v, sizeof(v)) == 0 ? 0 : lastError();
+#else
+    struct ip_mreqn m;
+    memset(&m, 0, sizeof(m));
+    m.imr_ifindex = (int)index;
+    return setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, (const char *)&m, sizeof(m)) == 0 ? 0 : lastError();
+#endif
+}
+
+// nGroup(group, interface, join): joins (join 1) or leaves (0) group, on
+// interface ("" the system's choice). "OK" or an error.
+RexxMethod4(RexxArrayObject, mcast_group, CSELF, cself, CSTRING, group, CSTRING, iface, logical_t, join)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    struct addrinfo *list = nullptr;
+    int rc = getaddrinfo(group, nullptr, &hints, &list);
+    if (rc != 0)
+    {
+        return gaiErrorResult(context, rc);
+    }
+    int family = socketFamily(s->fd);
+    bool takes4 = family == AF_INET;
+    if (family == AF_INET6)
+    {
+        int v6only = 0;
+        socklen_type len = sizeof(v6only);
+        getsockopt(s->fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *)&v6only, &len);
+        takes4 = v6only == 0;
+    }
+    // The group's address of the family the socket takes (IPv4 first, for
+    // a name with both).
+    struct addrinfo *pick = nullptr;
+    for (struct addrinfo *ai = list; ai != nullptr && pick == nullptr; ai = ai->ai_next)
+    {
+        if (ai->ai_family == AF_INET && takes4)
+        {
+            pick = ai;
+        }
+    }
+    for (struct addrinfo *ai = list; ai != nullptr && pick == nullptr; ai = ai->ai_next)
+    {
+        if (ai->ai_family == AF_INET6 && family == AF_INET6)
+        {
+            pick = ai;
+        }
+    }
+    struct sockaddr_storage g;
+    memset(&g, 0, sizeof(g));
+    if (pick != nullptr)
+    {
+        memcpy(&g, pick->ai_addr, pick->ai_addrlen);
+    }
+    bool any = list != nullptr;
+    freeaddrinfo(list);
+    if (pick == nullptr)
+    {
+#ifdef _WIN32
+        return errorResult(context, any ? WSAEAFNOSUPPORT : WSAEINVAL);
+#else
+        return errorResult(context, any ? EAFNOSUPPORT : EINVAL);
+#endif
+    }
+    bool multicast = g.ss_family == AF_INET
+                     ? IN_MULTICAST(ntohl(((struct sockaddr_in *)&g)->sin_addr.s_addr))
+                     : IN6_IS_ADDR_MULTICAST(&((struct sockaddr_in6 *)&g)->sin6_addr);
+    if (!multicast)
+    {
+        return errorArray(context, "not a multicast address", "EINVAL", 0);
+    }
+    unsigned index = 0;
+    if (!interfaceIndex(iface, index))
+    {
+        return errorArray(context, std::string("no such network interface: ") + iface, "ENXIO", 0);
+    }
+    setSaLen(g);
+
+    int first = 0;
+    // 1. RFC 3678's MCAST_JOIN_GROUP, at the group's own level.
+    {
+        struct group_req r;
+        memset(&r, 0, sizeof(r));
+        r.gr_interface = index;
+        memcpy(&r.gr_group, &g, sizeof(g));
+        int level = g.ss_family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6;
+        if (setsockopt(s->fd, level, join ? MCAST_JOIN_GROUP : MCAST_LEAVE_GROUP, (const char *)&r, sizeof(r)) == 0)
+        {
+            return statusResult(context, "OK");
+        }
+        first = lastError();
+    }
+    if (g.ss_family == AF_INET6)
+    {
+        // 2. IPV6_JOIN_GROUP.
+        struct ipv6_mreq m;
+        memset(&m, 0, sizeof(m));
+        m.ipv6mr_multiaddr = ((struct sockaddr_in6 *)&g)->sin6_addr;
+        m.ipv6mr_interface = index;
+        if (setsockopt(s->fd, IPPROTO_IPV6, join ? IPV6_JOIN_GROUP : IPV6_LEAVE_GROUP, (const char *)&m, sizeof(m)) == 0)
+        {
+            return statusResult(context, "OK");
+        }
+        return errorResult(context, lastError());
+    }
+    if (family == AF_INET6)
+    {
+        // 2. An IPv4 group on a socket of IPv6 that takes IPv4 (macOS): as
+        // ::ffff:a.b.c.d, at the IPv6 level.
+        struct ipv6_mreq m;
+        memset(&m, 0, sizeof(m));
+        unsigned char *b = (unsigned char *)&m.ipv6mr_multiaddr;
+        b[10] = 0xff;
+        b[11] = 0xff;
+        memcpy(b + 12, &((struct sockaddr_in *)&g)->sin_addr, 4);
+        m.ipv6mr_interface = index;
+        if (setsockopt(s->fd, IPPROTO_IPV6, join ? IPV6_JOIN_GROUP : IPV6_LEAVE_GROUP, (const char *)&m, sizeof(m)) == 0)
+        {
+            return statusResult(context, "OK");
+        }
+    }
+    // 3. IP_ADD_MEMBERSHIP, on the system's choice of interface.
+    if (index == 0)
+    {
+        struct ip_mreq m;
+        memset(&m, 0, sizeof(m));
+        m.imr_multiaddr = ((struct sockaddr_in *)&g)->sin_addr;
+        m.imr_interface.s_addr = htonl(INADDR_ANY);
+        if (setsockopt(s->fd, IPPROTO_IP, join ? IP_ADD_MEMBERSHIP : IP_DROP_MEMBERSHIP, (const char *)&m, sizeof(m)) == 0)
+        {
+            return statusResult(context, "OK");
+        }
+    }
+    return errorResult(context, first);
+}
+
+// nOption(name, value): "TTL" (0..255), "LOOP" (0 or 1), "IF" (an
+// interface: see interfaceIndex), set at the levels the socket has (both,
+// for IPv6 that takes IPv4). "OK" when the socket's own family's level
+// took it; or an error.
+RexxMethod3(RexxArrayObject, mcast_option, CSELF, cself, CSTRING, name, CSTRING, value)
+{
+    Sock *s = (Sock *)cself;
+    if (s == nullptr || s->fd == BAD_SOCKET)
+    {
+        return closedResult(context);
+    }
+    int family = socketFamily(s->fd);
+    int e4 = 0, e6 = 0;
+    if (strcmp(name, "IF") == 0)
+    {
+        unsigned index = 0;
+        if (!interfaceIndex(value, index))
+        {
+            return errorArray(context, std::string("no such network interface: ") + value, "ENXIO", 0);
+        }
+        e4 = setIf4(s->fd, index);
+        if (family == AF_INET6)
+        {
+            e6 = setsockopt(s->fd, IPPROTO_IPV6, IPV6_MULTICAST_IF, (const char *)&index, sizeof(index)) == 0
+                 ? 0 : lastError();
+        }
+        if (index == 0)
+        {
+            return statusResult(context, "OK");  // back to the system's choice: as it can
+        }
+    }
+    else
+    {
+        int v = atoi(value);
+        bool ttl = strcmp(name, "TTL") == 0;
+        // Windows takes a DWORD for both, Linux and macOS an int (or a
+        // byte): an int works on the three (measured).
+        e4 = setsockopt(s->fd, IPPROTO_IP, ttl ? IP_MULTICAST_TTL : IP_MULTICAST_LOOP, (const char *)&v, sizeof(v)) == 0
+             ? 0 : lastError();
+        if (family == AF_INET6)
+        {
+            e6 = setsockopt(s->fd, IPPROTO_IPV6, ttl ? IPV6_MULTICAST_HOPS : IPV6_MULTICAST_LOOP,
+                            (const char *)&v, sizeof(v)) == 0 ? 0 : lastError();
+        }
+    }
+    int e = family == AF_INET6 ? e6 : e4;
+    return e == 0 ? statusResult(context, "OK") : errorResult(context, e);
+}
+
+/*----------------------------------------------------------------------------*/
 /* The package                                                                */
 /*----------------------------------------------------------------------------*/
 
@@ -2724,6 +3150,8 @@ static RexxMethodEntry oosockets_methods[] =
     REXX_METHOD(udp_send,        udp_send),
     REXX_METHOD(udp_receive,     udp_receive),
     REXX_METHOD(udp_broadcast,   udp_broadcast),
+    REXX_METHOD(mcast_group,     mcast_group),
+    REXX_METHOD(mcast_option,    mcast_option),
     REXX_LAST_METHOD()
 };
 

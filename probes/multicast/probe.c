@@ -255,6 +255,7 @@ static void sendFresh(int fam6, const char *what, unsigned ifindex)
     }
     struct sockaddr_storage to; socklen_type len;
     groupAddr(fam6, 0, &to, &len);
+    if (fam6) ((struct sockaddr_in6 *)&to)->sin6_scope_id = ifindex;   /* ff12:: is link-local */
     int n = (int)sendto(s, what, (int)strlen(what), 0, (struct sockaddr *)&to, len);
     if (n < 0) printf(" [sendto %s]", errname(err()));
     closes(s);
@@ -412,61 +413,67 @@ static void sendOptions(void)
         closes(s);
     }
 
-    printf("\n== a dual socket sending to an IPv4 group (::ffff:a.b.c.d); receiver: an IPv4 socket that joined (interface %u)\n", mainIf);
-    for (int variant = 0; variant < 6; variant++)
+    for (int ii = 0; ii < 2; ii++)
     {
-        sock_t r = openKind(0, PORT, 0);
-        int jm = joinAny(r, 0, mainIf);
-#ifndef _WIN32
-        int on = 1;
-        setsockopt(r, IPPROTO_IP, IP_RECVTTL, (const char *)&on, sizeof on);
-#endif
-        sock_t s = openKind(2, 0, 0);
-        int zero = 0, five = 5, seven = 7;
-        const char *what = "";
-        int e1 = 0, e2 = 0;
-        if (mainIf) { setIf6(s, mainIf); setIf4(s, mainIf); }
-        if (variant == 0) what = "defaults";
-        if (variant == 1) { what = "IP_MULTICAST_LOOP 0"; e1 = setsockopt(s, IPPROTO_IP, IP_MULTICAST_LOOP, (const char *)&zero, sizeof zero); }
-        if (variant == 2) { what = "IPV6_MULTICAST_LOOP 0"; e1 = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char *)&zero, sizeof zero); }
-        if (variant == 3) { what = "IP_MULTICAST_TTL 5"; e1 = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (const char *)&five, sizeof five); }
-        if (variant == 4) { what = "IPV6_MULTICAST_HOPS 7"; e1 = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char *)&seven, sizeof seven); }
-        if (variant == 5) { what = "TTL 5 and HOPS 7"; e1 = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (const char *)&five, sizeof five);
-                                                       e2 = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char *)&seven, sizeof seven); }
-        struct sockaddr_storage to; socklen_type len;
-        groupAddr(0, 1, &to, &len);
-        int n = (int)sendto(s, "m", 1, 0, (struct sockaddr *)&to, len);
-        int se = n < 0 ? err() : 0;
-#ifndef _WIN32
-        int ttl = receivedTtl(r, 400);
-        printf("  %-22s (set %s %s; join %d; send %s) delivered=%s ttl=%d\n", what, e1 ? "FAIL" : "ok", e2 ? "FAIL" : "ok", jm,
-               errname(se), ttl >= -2 && ttl != -1 ? "yes" : "no", ttl);
-#else
-        printf("  %-22s (set %s %s; join %d; send %s) delivered=%s\n", what, e1 ? "FAIL" : "ok", e2 ? "FAIL" : "ok", jm,
-               errname(se), received(r, 400) ? "yes" : "no");
-#endif
-        closes(s); closes(r);
-    }
-
-    printf("\n== loop 0 set on the sender, or on the receiver (same host, interface %u)\n", mainIf);
-    for (int fam6 = 0; fam6 < 2; fam6++)
-        for (int where = 0; where < 2; where++)
+        unsigned I = ii ? loopIf : mainIf;
+        if (I == 0) continue;
+        printf("\n== a dual socket sending to an IPv4 group (::ffff:a.b.c.d); receiver: an IPv4 socket that joined (interface %u)\n", I);
+        for (int variant = 0; variant < 7; variant++)
         {
-            sock_t r = openKind(fam6 ? 1 : 0, PORT, 0);
-            joinAny(r, fam6, mainIf);
-            sock_t s = socket(fam6 ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-            if (mainIf) { if (fam6) setIf6(s, mainIf); else setIf4(s, mainIf); }
-            int zero = 0;
-            sock_t target = where ? r : s;
-            int rc = fam6 ? setsockopt(target, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char *)&zero, sizeof zero)
-                          : setsockopt(target, IPPROTO_IP, IP_MULTICAST_LOOP, (const char *)&zero, sizeof zero);
+            sock_t r = openKind(0, PORT, 0);
+            int jm = joinAny(r, 0, I);
+    #ifndef _WIN32
+            int on = 1;
+            setsockopt(r, IPPROTO_IP, IP_RECVTTL, (const char *)&on, sizeof on);
+    #endif
+            sock_t s = openKind(2, 0, 0);
+            int zero = 0, five = 5, seven = 7;
+            const char *what = "";
+            int e1 = 0, e2 = 0;
+            if (I) { setIf6(s, I); if (variant != 6) setIf4(s, I); }
+            if (variant == 0) what = "defaults";
+            if (variant == 6) what = "only IPV6_MULTICAST_IF";
+            if (variant == 1) { what = "IP_MULTICAST_LOOP 0"; e1 = setsockopt(s, IPPROTO_IP, IP_MULTICAST_LOOP, (const char *)&zero, sizeof zero); }
+            if (variant == 2) { what = "IPV6_MULTICAST_LOOP 0"; e1 = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char *)&zero, sizeof zero); }
+            if (variant == 3) { what = "IP_MULTICAST_TTL 5"; e1 = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (const char *)&five, sizeof five); }
+            if (variant == 4) { what = "IPV6_MULTICAST_HOPS 7"; e1 = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char *)&seven, sizeof seven); }
+            if (variant == 5) { what = "TTL 5 and HOPS 7"; e1 = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (const char *)&five, sizeof five);
+                                                           e2 = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char *)&seven, sizeof seven); }
             struct sockaddr_storage to; socklen_type len;
-            groupAddr(fam6, 0, &to, &len);
-            sendto(s, "l", 1, 0, (struct sockaddr *)&to, len);
-            printf("  %s loop 0 on the %s (%s): delivered=%s\n", fam6 ? "v6" : "v4", where ? "receiver" : "sender  ",
-                   rc == 0 ? "ok" : errname(err()), received(r, 400) ? "yes" : "no");
+            groupAddr(0, 1, &to, &len);
+            int n = (int)sendto(s, "m", 1, 0, (struct sockaddr *)&to, len);
+            int se = n < 0 ? err() : 0;
+    #ifndef _WIN32
+            int ttl = receivedTtl(r, 400);
+            printf("  %-22s (set %s %s; join %d; send %s) delivered=%s ttl=%d\n", what, e1 ? "FAIL" : "ok", e2 ? "FAIL" : "ok", jm,
+                   errname(se), ttl >= -2 && ttl != -1 ? "yes" : "no", ttl);
+    #else
+            printf("  %-22s (set %s %s; join %d; send %s) delivered=%s\n", what, e1 ? "FAIL" : "ok", e2 ? "FAIL" : "ok", jm,
+                   errname(se), received(r, 400) ? "yes" : "no");
+    #endif
             closes(s); closes(r);
         }
+
+        printf("\n== loop 0 set on the sender, or on the receiver (same host, interface %u)\n", I);
+        for (int fam6 = 0; fam6 < 2; fam6++)
+            for (int where = 0; where < 2; where++)
+            {
+                sock_t r = openKind(fam6 ? 1 : 0, PORT, 0);
+                joinAny(r, fam6, I);
+                sock_t s = socket(fam6 ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+                if (I) { if (fam6) setIf6(s, I); else setIf4(s, I); }
+                int zero = 0;
+                sock_t target = where ? r : s;
+                int rc = fam6 ? setsockopt(target, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char *)&zero, sizeof zero)
+                              : setsockopt(target, IPPROTO_IP, IP_MULTICAST_LOOP, (const char *)&zero, sizeof zero);
+                struct sockaddr_storage to; socklen_type len;
+                groupAddr(fam6, 0, &to, &len);
+                sendto(s, "l", 1, 0, (struct sockaddr *)&to, len);
+                printf("  %s loop 0 on the %s (%s): delivered=%s\n", fam6 ? "v6" : "v4", where ? "receiver" : "sender  ",
+                       rc == 0 ? "ok" : errname(err()), received(r, 400) ? "yes" : "no");
+                closes(s); closes(r);
+            }
+    }
 }
 
 static void sharing(void)
