@@ -12,6 +12,7 @@
  *
  * Usage: probe [port]                                                     */
 
+#define __APPLE_USE_RFC_3542 1     /* macOS: IPV6_HOPLIMIT */
 #ifdef _WIN32
   #define WIN32_LEAN_AND_MEAN
   #include <winsock2.h>
