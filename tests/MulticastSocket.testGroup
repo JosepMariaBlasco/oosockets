@@ -92,11 +92,16 @@ syntax:
   self~assertSame(.nil, a~receive)
   a~close; b~close; s~close
 
+-- (Not on Linux's loopback interface, which brings everything back.)
 ::method test_loopback_off
   g = group4()
   a = member()
-  a~joinGroup(g, lo())
-  s = sender()
+  parse source os .
+  i = lo()
+  if os~upper~pos("LINUX") > 0 then i = ""     -- the system's choice
+  a~joinGroup(g, i)
+  s = .MulticastSocket~new
+  s~networkInterface = i
   -- the sender's side (Linux, macOS) and the receiver's (Windows)
   s~loopback = .false; a~loopback = .false
   self~assertFalse(s~loopback)

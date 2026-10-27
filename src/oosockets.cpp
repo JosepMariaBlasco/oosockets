@@ -162,6 +162,14 @@ struct Sock : PeerCheck
     std::atomic<bool> closing{false};  // close has started (UDP: a recv it
                                        // wakes must not read as a datagram)
     bool connected = false;      // UDP: connect was made
+    // MulticastSocket: other sockets may share the port; on macOS, an
+    // IPv4 socket on the same port that sends to IPv4 groups for an IPv6
+    // one (see "MulticastSocket"), and the options it is to send with.
+    bool shared = false;
+    sock_t helper = BAD_SOCKET;
+    int mcTtl = 1;
+    int mcLoop = 1;
+    unsigned mcIf = 0;
     // TCP connect in progress (socket_connect, socket_connect_more)
     std::vector<struct sockaddr_storage> addrs;
     std::vector<socklen_type> addrLens;
@@ -444,7 +452,9 @@ static const int SLICE_MS = 100;
 
 // As waitFor, but for SLICE_MS at most: 1 ready, 0 the deadline came, 2
 // the slice ended first (or a signal came), -1 error (code in *err).
-static int waitSlice(sock_t fd, short events, bool hasDeadline, Clock::time_point deadline, int *err)
+// fd2, if there is one, is waited for too.
+static int waitSlice(sock_t fd, short events, bool hasDeadline, Clock::time_point deadline, int *err,
+                     sock_t fd2 = BAD_SOCKET)
 {
     int ms = msLeft(hasDeadline, deadline);
     bool sliced = false;
@@ -453,11 +463,14 @@ static int waitSlice(sock_t fd, short events, bool hasDeadline, Clock::time_poin
         ms = SLICE_MS;
         sliced = true;
     }
-    struct pollfd p;
-    p.fd = fd;
-    p.events = events;
-    p.revents = 0;
-    int rc = pollsock(&p, 1, ms);
+    struct pollfd p[2];
+    p[0].fd = fd;
+    p[0].events = events;
+    p[0].revents = 0;
+    p[1].fd = fd2;
+    p[1].events = events;
+    p[1].revents = 0;
+    int rc = pollsock(p, fd2 != BAD_SOCKET ? 2 : 1, ms);
     if (rc > 0)
     {
         return 1;
@@ -537,6 +550,11 @@ static void closeSock(Sock *s)
     {
         closesock(s->trying);
         s->trying = BAD_SOCKET;
+    }
+    if (s->helper != BAD_SOCKET)
+    {
+        closesock(s->helper);
+        s->helper = BAD_SOCKET;
     }
     if (s->fd != BAD_SOCKET)
     {
@@ -2494,7 +2512,9 @@ RexxMethod3(RexxArrayObject, udp_open, CSTRING, port, CSTRING, address, logical_
     {
         onlyJoinedGroups(fd);
     }
-    setCself(context, new Sock(fd));
+    Sock *s = new Sock(fd);
+    s->shared = shared != 0;
+    setCself(context, s);
     return statusResult(context, "OK");
 }
 
@@ -2608,6 +2628,10 @@ RexxMethod3(RexxArrayObject, udp_connect, CSELF, cself, CSTRING, host, CSTRING, 
     return statusResult(context, "OK");
 }
 
+#ifdef __APPLE__
+static int viaHelper(Sock *s, struct sockaddr_storage &to, socklen_type &toLen, sock_t &out);
+#endif
+
 // nSend(data, host, port): one datagram; host "" on a connected socket.
 RexxMethod4(RexxArrayObject, udp_send, CSELF, cself, RexxStringObject, data, CSTRING, host, CSTRING, port)
 {
@@ -2628,6 +2652,7 @@ RexxMethod4(RexxArrayObject, udp_send, CSELF, cself, RexxStringObject, data, CST
     }
     struct sockaddr_storage to;
     socklen_type toLen = 0;
+    sock_t out = s->fd;
     if (host[0] != '\0')
     {
         RexxArrayObject bad = datagramTarget(context, s, host, port, to, toLen);
@@ -2635,11 +2660,18 @@ RexxMethod4(RexxArrayObject, udp_send, CSELF, cself, RexxStringObject, data, CST
         {
             return bad;
         }
+#ifdef __APPLE__
+        int e = viaHelper(s, to, toLen, out);
+        if (e != 0)
+        {
+            return errorResult(context, e);
+        }
+#endif
     }
     for (;;)
     {
         long n = host[0] != '\0'
-                 ? (long)sendto(s->fd, p, (int)size, SEND_FLAGS, (struct sockaddr *)&to, toLen)
+                 ? (long)sendto(out, p, (int)size, SEND_FLAGS, (struct sockaddr *)&to, toLen)
                  : (long)send(s->fd, p, (int)size, SEND_FLAGS);
         if (n >= 0)
         {
@@ -2654,7 +2686,7 @@ RexxMethod4(RexxArrayObject, udp_send, CSELF, cself, RexxStringObject, data, CST
         {
             // The send buffer is full: it empties at the network's pace.
             int err = 0;
-            if (waitFor(s->fd, POLLOUT, false, Clock::now(), &err) < 0)
+            if (waitFor(out, POLLOUT, false, Clock::now(), &err) < 0)
             {
                 return errorResult(context, err);
             }
@@ -2684,6 +2716,14 @@ RexxMethod2(RexxArrayObject, udp_receive, CSELF, cself, double, timeout)
         socklen_type fromLen = sizeof(from);
         memset(&from, 0, sizeof(from));
         long n = (long)recvfrom(fd, buf.data(), (int)buf.size(), 0, (struct sockaddr *)&from, &fromLen);
+        sock_t helper = s->helper;
+        if (n < 0 && helper != BAD_SOCKET && wouldBlock(lastError()))
+        {
+            // macOS's helper (see "MulticastSocket"): what is sent to the
+            // port over IPv4 may reach it rather than this socket.
+            fromLen = sizeof(from);
+            n = (long)recvfrom(helper, buf.data(), (int)buf.size(), 0, (struct sockaddr *)&from, &fromLen);
+        }
         // close in another activity wakes the wait (Linux: as an empty
         // datagram); that is not something received.
         if (s->closing)
@@ -2710,7 +2750,7 @@ RexxMethod2(RexxArrayObject, udp_receive, CSELF, cself, double, timeout)
         if (wouldBlock(e))
         {
             int err = 0;
-            int w = waitSlice(fd, POLLIN, hasDeadline, deadline, &err);
+            int w = waitSlice(fd, POLLIN, hasDeadline, deadline, &err, s->helper);
             if (s->closing)
             {
                 return closedResult(context);
@@ -2928,6 +2968,72 @@ static int setIf4(sock_t fd, unsigned index)
 #endif
 }
 
+#ifdef __APPLE__
+// macOS: a socket of IPv6 that takes IPv4 cannot send to an IPv4 group
+// (EHOSTUNREACH, whatever its options: measured, probes/multicast). A
+// MulticastSocket sends those through a helper, an IPv4 socket on the same
+// port (so the datagrams come from that port), made at its first such send,
+// with the socket's options; receive reads it too, since what is sent to
+// the port over IPv4 may reach it instead. 0, with out the socket to send
+// on (and to as IPv4 when it is the helper), or an error.
+static int viaHelper(Sock *s, struct sockaddr_storage &to, socklen_type &toLen, sock_t &out)
+{
+    out = s->fd;
+    if (!s->shared || to.ss_family != AF_INET6)
+    {
+        return 0;
+    }
+    const unsigned char *b = (const unsigned char *)&((struct sockaddr_in6 *)&to)->sin6_addr;
+    static const unsigned char mapped[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
+    if (memcmp(b, mapped, 12) != 0 || b[12] < 224 || b[12] > 239)
+    {
+        return 0;
+    }
+    if (s->helper == BAD_SOCKET)
+    {
+        struct sockaddr_storage me;
+        socklen_type meLen = sizeof(me);
+        if (getsockname(s->fd, (struct sockaddr *)&me, &meLen) != 0)
+        {
+            return lastError();
+        }
+        sock_t h = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (h == BAD_SOCKET)
+        {
+            return lastError();
+        }
+        prepareSocket(h);
+        struct sockaddr_in a;
+        memset(&a, 0, sizeof(a));
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_ANY);
+        a.sin_port = ((struct sockaddr_in6 *)&me)->sin6_port;
+        int e = bindDatagram(h, (struct sockaddr *)&a, sizeof(a), true);
+        if (e != 0)
+        {
+            closesock(h);
+            return e;
+        }
+        datagramBuffers(h);
+        setBlocking(h, false);
+        setsockopt(h, IPPROTO_IP, IP_MULTICAST_TTL, (const char *)&s->mcTtl, sizeof(s->mcTtl));
+        setsockopt(h, IPPROTO_IP, IP_MULTICAST_LOOP, (const char *)&s->mcLoop, sizeof(s->mcLoop));
+        setIf4(h, s->mcIf);
+        s->helper = h;
+    }
+    struct sockaddr_in v4;
+    memset(&v4, 0, sizeof(v4));
+    v4.sin_family = AF_INET;
+    v4.sin_port = ((struct sockaddr_in6 *)&to)->sin6_port;
+    memcpy(&v4.sin_addr, b + 12, 4);
+    memset(&to, 0, sizeof(to));
+    memcpy(&to, &v4, sizeof(v4));
+    toLen = sizeof(v4);
+    out = s->helper;
+    return 0;
+}
+#endif
+
 // nGroup(group, interface, join): joins (join 1) or leaves (0) group, on
 // interface ("" the system's choice). "OK" or an error.
 RexxMethod4(RexxArrayObject, mcast_group, CSELF, cself, CSTRING, group, CSTRING, iface, logical_t, join)
@@ -3083,6 +3189,11 @@ RexxMethod3(RexxArrayObject, mcast_option, CSELF, cself, CSTRING, name, CSTRING,
             return errorArray(context, std::string("no such network interface: ") + value, "ENXIO", 0);
         }
         e4 = setIf4(s->fd, index);
+        s->mcIf = index;
+        if (s->helper != BAD_SOCKET)
+        {
+            setIf4(s->helper, index);
+        }
         if (family == AF_INET6)
         {
             e6 = setsockopt(s->fd, IPPROTO_IPV6, IPV6_MULTICAST_IF, (const char *)&index, sizeof(index)) == 0
@@ -3101,6 +3212,11 @@ RexxMethod3(RexxArrayObject, mcast_option, CSELF, cself, CSTRING, name, CSTRING,
         // byte): an int works on the three (measured).
         e4 = setsockopt(s->fd, IPPROTO_IP, ttl ? IP_MULTICAST_TTL : IP_MULTICAST_LOOP, (const char *)&v, sizeof(v)) == 0
              ? 0 : lastError();
+        (ttl ? s->mcTtl : s->mcLoop) = v;
+        if (s->helper != BAD_SOCKET)
+        {
+            setsockopt(s->helper, IPPROTO_IP, ttl ? IP_MULTICAST_TTL : IP_MULTICAST_LOOP, (const char *)&v, sizeof(v));
+        }
         if (family == AF_INET6)
         {
             e6 = setsockopt(s->fd, IPPROTO_IPV6, ttl ? IPV6_MULTICAST_HOPS : IPV6_MULTICAST_LOOP,
@@ -3878,7 +3994,8 @@ static RexxArrayObject clientStep(RexxMethodContext *context, DtlsHandle *h, dou
     int w = dtlsWait(ep, lk, hasDeadline, deadline, [&]() { return c->state != DtlsConn::HANDSHAKING; });
     if (w == 1)
     {
-        if (c->state == DtlsConn::OPEN)
+        // (the peer may have closed already, right after the handshake)
+        if (c->state == DtlsConn::OPEN || c->state == DtlsConn::PEER_CLOSED)
         {
             return statusResult(context, "OK");
         }

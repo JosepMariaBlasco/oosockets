@@ -80,7 +80,7 @@ return testResult
   d = c~receive
   self~assertSame(16384, d~data~length)
   c~send("ok")
-  self~assertSame("OK DTLSv1.2", msg~result)
+  self~assertSame("ok DTLSv1.2", msg~result)
   self~expectSyntax(.array~of(48.900, "Socket error: message too long (127.0.0.1, port" c~remotePort")"))
   c~send("x"~copies(16385))
 
@@ -96,15 +96,17 @@ return testResult
   srv~close
 
 -- A client that fails its handshake is dropped; the next one is served.
+-- (The server answers handshakes while something waits on it: accept
+-- here, or a receive on one of its connections.)
 ::method test_a_failing_client_does_not_stop_the_server
   srv = newServer()
   bad = .Client~new~start("connectOnly", srv~localPort, .nil)  -- the system's trust: not the test CA
-  self~assertSame("TLS error: certificate is not trusted (localhost, port" srv~localPort")", bad~result)
-  msg = .Client~new~start("echoOnce", srv~localPort, "good")
+  good = .Client~new~start("echoOnce", srv~localPort, "good", trustCA(), 3)  -- starts later
   c = srv~accept
+  self~assertSame("TLS error: certificate is not trusted (localhost, port" srv~localPort")", bad~result)
   c~receiveTimeout = 10
   c~send(c~receive~data)
-  self~assertSame("good DTLSv1.2", msg~result)
+  self~assertSame("good DTLSv1.2", good~result)
   c~close
   srv~close
 
@@ -185,12 +187,14 @@ syntax:
 
 ::method test_the_wrong_host
   srv = .DTLSServerSocket~new(0, serverOptions("wronghost.pem"), "127.0.0.1")
+  .Waiter~new~start("acceptFor", srv, 15)    -- the server, answering
   c = connectFails("localhost", srv~localPort, trustCA(), 10)
   self~assertSame("TLS error: certificate does not match the host name (localhost, port" srv~localPort")", c~additional[1])
   srv~close
 
 ::method test_an_expired_certificate
   srv = .DTLSServerSocket~new(0, serverOptions("expired.pem"), "127.0.0.1")
+  .Waiter~new~start("acceptFor", srv, 15)
   c = connectFails("localhost", srv~localPort, trustCA(), 10)
   self~assertSame("TLS error: certificate has expired (localhost, port" srv~localPort")", c~additional[1])
   srv~close
@@ -220,17 +224,19 @@ syntax:
   srv = newServer()
   msg = .Server~new~start("acceptAndWait", srv)
   s = .DTLSSocket~new("localhost", srv~localPort, trustCA(), 10)
+  port = srv~localPort
   s~send("done")
   self~assertSame("done", msg~result)
   s~close
   srv~close
-  self~expectSyntax(.array~of(48.900, "Socket error: the DTLS socket is closed (localhost, port" srv~localPort")"))
+  self~expectSyntax(.array~of(48.900, "Socket error: the DTLS socket is closed (localhost, port" port")"))
   s~send("again")
 
 
 ::class Client
 ::method echoOnce
-  use arg port, text, options = (trustCA())
+  use arg port, text, options = (trustCA()), wait = 0
+  call sysSleep wait
   s = .DTLSSocket~new("localhost", port, options, 10)
   s~receiveTimeout = 10
   s~send(text)
@@ -275,6 +281,17 @@ syntax:
   return d~data
 
 ::class Waiter
+-- Accepts (answering handshakes) for some seconds; then closes.
+::method acceptFor
+  use strict arg srv, seconds
+  srv~acceptTimeout = seconds
+  signal on syntax
+  c = srv~accept
+  if c \== .nil then c~close
+  srv~close
+  return
+syntax:
+  return
 ::method accept
   use strict arg srv
   signal on syntax
