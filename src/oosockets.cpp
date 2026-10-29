@@ -1871,6 +1871,21 @@ static DWORD alertFor(const TrustError &t)
 }
 
 // What Schannel makes after ApplyControlToken (an alert, close_notify).
+// TEMPORARY (measuring): OOSOCKETS_TRACE=1 says what Schannel does.
+static void schTrace(const char *what, SECURITY_STATUS st, const std::string *in, const std::string &out)
+{
+    char buf[8] = "";
+    if (GetEnvironmentVariableA("OOSOCKETS_TRACE", buf, sizeof(buf)) == 0)
+    {
+        return;
+    }
+    fprintf(stderr, "  [schannel] %s: 0x%08lX in %d bytes (type %d) out %d bytes (type %d)\n", what,
+            (unsigned long)st, in != nullptr ? (int)in->size() : -1,
+            in != nullptr && !in->empty() ? (unsigned char)(*in)[0] : -1, (int)out.size(),
+            !out.empty() ? (unsigned char)out[0] : -1);
+    fflush(stderr);
+}
+
 static std::string schControl(Sch *c, void *token, unsigned long size)
 {
     SecBuffer b = { size, SECBUFFER_TOKEN, token };
@@ -1879,25 +1894,71 @@ static std::string schControl(Sch *c, void *token, unsigned long size)
     {
         return "";
     }
-    SecBuffer ob = { 0, SECBUFFER_TOKEN, nullptr };
-    SecBufferDesc od = { SECBUFFER_VERSION, 1, &ob };
+    SecBuffer ob[2] = { { 0, SECBUFFER_TOKEN, nullptr }, { 0, SECBUFFER_ALERT, nullptr } };
+    SecBufferDesc od = { SECBUFFER_VERSION, 1, ob };
     ULONG attrs = 0;
     TimeStamp expiry;
+    // TEMPORARY (measuring DTLS): OOSOCKETS_DTLS_SHUTDOWN picks how.
+    char v[8] = "0";
+    if (c->datagram)
+    {
+        GetEnvironmentVariableA("OOSOCKETS_DTLS_SHUTDOWN", v, sizeof(v));
+    }
+    SecBuffer ib[2] = { { 0, SECBUFFER_EMPTY, nullptr }, { 0, SECBUFFER_EMPTY, nullptr } };
+    SecBufferDesc id = { SECBUFFER_VERSION, 1, ib };
+    SecBufferDesc *in = nullptr;
+    PCtxtHandle newCtx = nullptr;
+    if (v[0] == '1') { newCtx = &c->ctx; }
+    if (v[0] == '2') { newCtx = &c->ctx; in = &id; }
+    if (v[0] == '3') { newCtx = &c->ctx; ib[0].BufferType = SECBUFFER_TOKEN; id.cBuffers = 2; in = &id; }
+    if (v[0] == '4') { newCtx = &c->ctx; od.cBuffers = 2; }
+    std::string made;
+    SECURITY_STATUS st;
+    if (v[0] == '5')
+    {
+        SecPkgContext_StreamSizes sz;
+        memset(&sz, 0, sizeof(sz));
+        QueryContextAttributesW(&c->ctx, SECPKG_ATTR_DATAGRAM_SIZES, &sz);
+        std::string rec(sz.cbHeader + sz.cbTrailer + 16, '\0');
+        SecBuffer eb[4] = { { sz.cbHeader, SECBUFFER_STREAM_HEADER, &rec[0] },
+                            { 0, SECBUFFER_DATA, &rec[sz.cbHeader] },
+                            { sz.cbTrailer, SECBUFFER_STREAM_TRAILER, &rec[sz.cbHeader] },
+                            { 0, SECBUFFER_EMPTY, nullptr } };
+        SecBufferDesc ed = { SECBUFFER_VERSION, 4, eb };
+        st = EncryptMessage(&c->ctx, 0, &ed, 0);
+        if (st == SEC_E_OK)
+        {
+            made.assign(rec.data(), eb[0].cbBuffer + eb[1].cbBuffer + eb[2].cbBuffer);
+        }
+        schTrace("control v5 EncryptMessage", st, nullptr, made);
+        return made;
+    }
     if (c->server)
     {
-        AcceptSecurityContext(&c->cred->h, &c->ctx, nullptr, SCH_SERVER_FLAGS, 0, nullptr, &od, &attrs, &expiry);
+        st = AcceptSecurityContext(&c->cred->h, &c->ctx, nullptr, SCH_SERVER_FLAGS, 0, nullptr, &od, &attrs, &expiry);
     }
     else
     {
-        InitializeSecurityContextW(&c->cred->h, &c->ctx, nullptr, c->datagram ? SCH_DTLS_FLAGS : SCH_CLIENT_FLAGS,
-                                   0, 0, nullptr, 0, nullptr, &od, &attrs, &expiry);
+        st = InitializeSecurityContextW(&c->cred->h, &c->ctx, nullptr, c->datagram ? SCH_DTLS_FLAGS : SCH_CLIENT_FLAGS,
+                                        0, 0, in, 0, newCtx, &od, &attrs, &expiry);
     }
-    std::string made;
-    if (ob.pvBuffer != nullptr)
+    for (int i = 0; i < 2; i++)
     {
-        made.assign((const char *)ob.pvBuffer, ob.cbBuffer);
-        FreeContextBuffer(ob.pvBuffer);
+        if (ob[i].pvBuffer != nullptr)
+        {
+            if (i == 0)
+            {
+                made.assign((const char *)ob[i].pvBuffer, ob[i].cbBuffer);
+            }
+            else
+            {
+                schTrace("control: SECBUFFER_ALERT", st, nullptr,
+                         std::string((const char *)ob[i].pvBuffer, ob[i].cbBuffer));
+            }
+            FreeContextBuffer(ob[i].pvBuffer);
+        }
     }
+    schTrace(v, st, nullptr, made);
     return made;
 }
 
@@ -5025,21 +5086,6 @@ static void failConn(DtlsEndpoint *ep, DtlsConn *c, const TlsOutcome &o)
 /* (SEC_I_MESSAGE_FRAGMENT); called again with nothing, Schannel sends its last  */
 /* flight again (the retransmission timer is ours); after the handshake the MTU  */
 /* is raised so that a record takes the 16,384 bytes a datagram may carry.       */
-
-// TEMPORARY (measuring): OOSOCKETS_TRACE=1 says what Schannel does.
-static void schTrace(const char *what, SECURITY_STATUS st, const std::string *in, const std::string &out)
-{
-    char buf[8] = "";
-    if (GetEnvironmentVariableA("OOSOCKETS_TRACE", buf, sizeof(buf)) == 0)
-    {
-        return;
-    }
-    fprintf(stderr, "  [schannel] %s: 0x%08lX in %d bytes (type %d) out %d bytes (type %d)\n", what,
-            (unsigned long)st, in != nullptr ? (int)in->size() : -1,
-            in != nullptr && !in->empty() ? (unsigned char)(*in)[0] : -1, (int)out.size(),
-            !out.empty() ? (unsigned char)out[0] : -1);
-    fflush(stderr);
-}
 
 static const int SCH_DTLS_FIRST_RESEND_MS = 1000;
 static const int SCH_DTLS_MAX_RESEND_MS = 8000;
