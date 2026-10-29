@@ -29,7 +29,7 @@ What each zip needs:
            (libssl.so.3), as in Ubuntu 22.04 and later, Debian 12,
            Fedora, and others.
 
-ooRexx: 5.3.0 beta, trunk r13324 or later (tested with r13324 and the
+ooRexx: 5.3.0 beta, trunk r13329 or later (tested with r13329 and the
 newest beta build). ooSockets is a beta, as ooRexx 5.3.0 is, and leaves
 beta with it. ooRexx 5.2.0 is not supported: its interpreter crashes now
 and then in programs with several activities (a server that serves each

@@ -225,8 +225,8 @@ jobs:
             echo "ooSockets $V: TCP, TLS and UDP sockets for ooRexx, IPv4 and IPv6."
             echo
             echo "Each zip has the native library, \`sockets.cls\`, the README, the licence and \`INSTALL.txt\`."
-            echo "A beta, as ooRexx 5.3.0 is: needs ooRexx 5.3.0 beta (trunk r13324 or later); not ooRexx 5.2.0."
-            echo "Tested with ooRexx 5.3.0 beta r13324 and the newest beta build."
+            echo "A beta, as ooRexx 5.3.0 is: needs ooRexx 5.3.0 beta (trunk r13329 or later); not ooRexx 5.2.0."
+            echo "Tested with ooRexx 5.3.0 beta r13329 and the newest beta build."
             echo
             echo "| File | SHA-256 |"
             echo "|---|---|"
