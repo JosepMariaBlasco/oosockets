@@ -1639,6 +1639,14 @@ struct Sch
     Clock::time_point resendAt;
     int resendMs = 0;
     int resends = 0;
+    // DTLS: the server's Certificate message, read from its flight in clear
+    // (Schannel shows the certificate only once the handshake is over), and
+    // the highest sequence number we have sent in epoch 0 (for our alert)
+    std::string certMsg;
+    std::vector<bool> certHave;
+    int certSeq = -1;
+    std::vector<std::string> peerChain;
+    unsigned long long sentSeq0 = 0;
     Sch() { memset(&sizes, 0, sizeof(sizes)); }
 };
 
@@ -1894,71 +1902,25 @@ static std::string schControl(Sch *c, void *token, unsigned long size)
     {
         return "";
     }
-    SecBuffer ob[2] = { { 0, SECBUFFER_TOKEN, nullptr }, { 0, SECBUFFER_ALERT, nullptr } };
-    SecBufferDesc od = { SECBUFFER_VERSION, 1, ob };
+    SecBuffer ob = { 0, SECBUFFER_TOKEN, nullptr };
+    SecBufferDesc od = { SECBUFFER_VERSION, 1, &ob };
     ULONG attrs = 0;
     TimeStamp expiry;
-    // TEMPORARY (measuring DTLS): OOSOCKETS_DTLS_SHUTDOWN picks how.
-    char v[8] = "0";
-    if (c->datagram)
-    {
-        GetEnvironmentVariableA("OOSOCKETS_DTLS_SHUTDOWN", v, sizeof(v));
-    }
-    SecBuffer ib[2] = { { 0, SECBUFFER_EMPTY, nullptr }, { 0, SECBUFFER_EMPTY, nullptr } };
-    SecBufferDesc id = { SECBUFFER_VERSION, 1, ib };
-    SecBufferDesc *in = nullptr;
-    PCtxtHandle newCtx = nullptr;
-    if (v[0] == '1') { newCtx = &c->ctx; }
-    if (v[0] == '2') { newCtx = &c->ctx; in = &id; }
-    if (v[0] == '3') { newCtx = &c->ctx; ib[0].BufferType = SECBUFFER_TOKEN; id.cBuffers = 2; in = &id; }
-    if (v[0] == '4') { newCtx = &c->ctx; od.cBuffers = 2; }
-    std::string made;
-    SECURITY_STATUS st;
-    if (v[0] == '5')
-    {
-        SecPkgContext_StreamSizes sz;
-        memset(&sz, 0, sizeof(sz));
-        QueryContextAttributesW(&c->ctx, SECPKG_ATTR_DATAGRAM_SIZES, &sz);
-        std::string rec(sz.cbHeader + sz.cbTrailer + 16, '\0');
-        SecBuffer eb[4] = { { sz.cbHeader, SECBUFFER_STREAM_HEADER, &rec[0] },
-                            { 0, SECBUFFER_DATA, &rec[sz.cbHeader] },
-                            { sz.cbTrailer, SECBUFFER_STREAM_TRAILER, &rec[sz.cbHeader] },
-                            { 0, SECBUFFER_EMPTY, nullptr } };
-        SecBufferDesc ed = { SECBUFFER_VERSION, 4, eb };
-        st = EncryptMessage(&c->ctx, 0, &ed, 0);
-        if (st == SEC_E_OK)
-        {
-            made.assign(rec.data(), eb[0].cbBuffer + eb[1].cbBuffer + eb[2].cbBuffer);
-        }
-        schTrace("control v5 EncryptMessage", st, nullptr, made);
-        return made;
-    }
     if (c->server)
     {
-        st = AcceptSecurityContext(&c->cred->h, &c->ctx, nullptr, SCH_SERVER_FLAGS, 0, nullptr, &od, &attrs, &expiry);
+        AcceptSecurityContext(&c->cred->h, &c->ctx, nullptr, SCH_SERVER_FLAGS, 0, nullptr, &od, &attrs, &expiry);
     }
     else
     {
-        st = InitializeSecurityContextW(&c->cred->h, &c->ctx, nullptr, c->datagram ? SCH_DTLS_FLAGS : SCH_CLIENT_FLAGS,
-                                        0, 0, in, 0, newCtx, &od, &attrs, &expiry);
+        InitializeSecurityContextW(&c->cred->h, &c->ctx, nullptr, SCH_CLIENT_FLAGS, 0, 0, nullptr, 0, nullptr,
+                                   &od, &attrs, &expiry);
     }
-    for (int i = 0; i < 2; i++)
+    std::string made;
+    if (ob.pvBuffer != nullptr)
     {
-        if (ob[i].pvBuffer != nullptr)
-        {
-            if (i == 0)
-            {
-                made.assign((const char *)ob[i].pvBuffer, ob[i].cbBuffer);
-            }
-            else
-            {
-                schTrace("control: SECBUFFER_ALERT", st, nullptr,
-                         std::string((const char *)ob[i].pvBuffer, ob[i].cbBuffer));
-            }
-            FreeContextBuffer(ob[i].pvBuffer);
-        }
+        made.assign((const char *)ob.pvBuffer, ob.cbBuffer);
+        FreeContextBuffer(ob.pvBuffer);
     }
-    schTrace(v, st, nullptr, made);
     return made;
 }
 
@@ -5092,6 +5054,168 @@ static const int SCH_DTLS_MAX_RESEND_MS = 8000;
 static const int SCH_DTLS_MAX_RESENDS = 6;
 static const DWORD SCH_DTLS_MTU = 17000;
 
+static unsigned long getN(const unsigned char *p, int n)
+{
+    unsigned long v = 0;
+    for (int i = 0; i < n; i++)
+    {
+        v = (v << 8) | p[i];
+    }
+    return v;
+}
+
+// The server's Certificate message, gathered from the handshake records in
+// clear (epoch 0) of the datagram d, fragment by fragment (DTLS 1.2: RFC
+// 6347, 4.2.2); once whole, its certificates go to peerChain.
+static void schDtlsGather(Sch *x, const std::string &d)
+{
+    const unsigned char *p = (const unsigned char *)d.data();
+    size_t n = d.size();
+    while (n >= 13 && x->peerChain.empty())
+    {
+        unsigned type = p[0];
+        unsigned epoch = (unsigned)getN(p + 3, 2);
+        size_t len = getN(p + 11, 2);
+        if (13 + len > n)
+        {
+            return;
+        }
+        const unsigned char *h = p + 13;
+        size_t left = len;
+        while (type == 22 && epoch == 0 && left >= 12)
+        {
+            unsigned msgType = h[0];
+            size_t total = getN(h + 1, 3);
+            int seq = (int)getN(h + 4, 2);
+            size_t off = getN(h + 6, 3);
+            size_t flen = getN(h + 9, 3);
+            if (12 + flen > left)
+            {
+                break;
+            }
+            if (msgType == 11 && total <= 1 << 20 && off + flen <= total)       // Certificate
+            {
+                if (x->certSeq != seq)
+                {
+                    x->certSeq = seq;
+                    x->certMsg.assign(total, '\0');
+                    x->certHave.assign(total, false);
+                }
+                memcpy(&x->certMsg[off], h + 12, flen);
+                for (size_t i = off; i < off + flen; i++)
+                {
+                    x->certHave[i] = true;
+                }
+                bool whole = true;
+                for (bool b : x->certHave)
+                {
+                    whole = whole && b;
+                }
+                if (whole && total >= 3)
+                {
+                    const unsigned char *c = (const unsigned char *)x->certMsg.data();
+                    size_t listLen = getN(c, 3), at = 3;
+                    std::vector<std::string> chain;
+                    while (at + 3 <= 3 + listLen && at + 3 <= total)
+                    {
+                        size_t clen = getN(c + at, 3);
+                        if (at + 3 + clen > total)
+                        {
+                            break;
+                        }
+                        chain.push_back(std::string((const char *)c + at + 3, clen));
+                        at += 3 + clen;
+                    }
+                    x->peerChain = chain;
+                }
+            }
+            h += 12 + flen;
+            left -= 12 + flen;
+        }
+        p += 13 + len;
+        n -= 13 + len;
+    }
+}
+
+// The highest sequence number of our records in epoch 0, in what goes out.
+static void schDtlsSent(Sch *x, const std::string &d)
+{
+    const unsigned char *p = (const unsigned char *)d.data();
+    size_t n = d.size();
+    while (n >= 13)
+    {
+        size_t len = getN(p + 11, 2);
+        if (getN(p + 3, 2) == 0)
+        {
+            unsigned long long seq = 0;
+            for (int i = 5; i < 11; i++)
+            {
+                seq = (seq << 8) | p[i];
+            }
+            if (seq > x->sentSeq0)
+            {
+                x->sentSeq0 = seq;
+            }
+        }
+        if (13 + len > n)
+        {
+            return;
+        }
+        p += 13 + len;
+        n -= 13 + len;
+    }
+}
+
+// A fatal alert in clear (epoch 0, before our keys change): what OpenSSL's
+// client sends when it refuses the server's certificate.
+static std::string schDtlsAlert(Sch *x, DWORD number)
+{
+    unsigned long long seq = x->sentSeq0 + 1;
+    unsigned char r[15] = { 21, 0xfe, 0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, (unsigned char)number };
+    for (int i = 10; i >= 5; i--)
+    {
+        r[i] = (unsigned char)(seq & 0xff);
+        seq >>= 8;
+    }
+    return std::string((const char *)r, sizeof(r));
+}
+
+// The server's certificate, from its flight in clear, checked as for TLS.
+static bool schDtlsCheck(DtlsConn *c, Sch *x)
+{
+    HCERTSTORE store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr);
+    PCCERT_CONTEXT leaf = nullptr;
+    for (size_t i = 0; i < x->peerChain.size(); i++)
+    {
+        PCCERT_CONTEXT one = nullptr;
+        CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, (const BYTE *)x->peerChain[i].data(),
+                                         (DWORD)x->peerChain[i].size(), CERT_STORE_ADD_ALWAYS, &one);
+        if (i == 0)
+        {
+            leaf = one;
+        }
+        else if (one != nullptr)
+        {
+            CertFreeCertificateContext(one);
+        }
+    }
+    bool ok;
+    if (leaf == nullptr)
+    {
+        c->trust.set = true;
+        c->trust.name = "SEC_E_CERT_UNKNOWN";
+        c->trust.text = "the server sent no certificate";
+        ok = false;
+    }
+    else
+    {
+        ok = schTrust(c, x, leaf);
+        CertFreeCertificateContext(leaf);
+    }
+    CertCloseStore(store, 0);
+    return ok;
+}
+
 static void schDtlsSend(DtlsEndpoint *ep, const std::string &d)
 {
     if (!d.empty() && ep->fd != BAD_SOCKET)
@@ -5118,6 +5242,10 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
     SEC_WCHAR *target = x->target.empty() ? nullptr : &x->target[0];
     SECURITY_STATUS st;
     std::string flight;
+    if (d != nullptr)
+    {
+        schDtlsGather(x, *d);                   // before Schannel works on it in place
+    }
     for (int fragments = 0; ; fragments++)
     {
         bool first = !x->haveCtx;
@@ -5153,9 +5281,20 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
             schDtlsFail(ep, c, st);
             return;
         }
-        if (!x->checked && x->haveCtx)
+        if (!x->checked && !tok.empty() && !x->peerChain.empty())
         {
             // Before our next flight: is the server's certificate good?
+            x->checked = true;
+            if (!schDtlsCheck(c, x))
+            {
+                schDtlsSend(ep, schDtlsAlert(x, alertFor(c->trust)));
+                schDtlsFail(ep, c, SEC_E_CERT_UNKNOWN);
+                return;
+            }
+        }
+        if (!x->checked && st == SEC_E_OK)
+        {
+            // (not read from the flight: Schannel's, now that it is over)
             PCCERT_CONTEXT leaf = nullptr;
             SECURITY_STATUS q = QueryContextAttributesW(&x->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &leaf);
             schTrace("REMOTE_CERT_CONTEXT", q, nullptr, "");
@@ -5166,14 +5305,12 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
                 CertFreeCertificateContext(leaf);
                 if (!ok)
                 {
-                    std::string alert = schAlert(x, alertFor(c->trust));
-                    schTrace("alert", 0, nullptr, alert);
-                    schDtlsSend(ep, alert);
-                    schDtlsFail(ep, c, SEC_E_CERT_UNKNOWN);
+                    schDtlsFail(ep, c, SEC_E_CERT_UNKNOWN);   // (no alert: as close_notify)
                     return;
                 }
             }
         }
+        schDtlsSent(x, tok);
         schDtlsSend(ep, tok);
         if (st != SEC_I_MESSAGE_FRAGMENT || fragments > 64)
         {
@@ -6252,9 +6389,9 @@ static void closeHandle(DtlsHandle *h)
 #ifdef _WIN32
             if (c->sch != nullptr)
             {
-                std::string bye = schCloseNotify(c->sch);
-                schTrace("close_notify", 0, nullptr, bye);
-                schDtlsSend(ep, bye);    // close_notify
+                // Schannel's DTLS client cannot make close_notify: after
+                // ApplyControlToken, every way of asking for it sends the
+                // last flight again (measured, 29/10/2026). Nothing goes.
             }
             else
 #endif

@@ -43,8 +43,4 @@ jobs:
         run: |
           b="$(cygpath -w "$PWD/build/Release")"; t="$(cygpath -w "$PWD/tests")"; f="$(cygpath -w "$PWD/tests/framework")"
           export REXX_PATH="$b;$t;$f" PATH="$PWD/build/Release:$PATH"
-          cd tests
-          for v in 0 1 2 3 4 5; do
-            echo "=========== OOSOCKETS_DTLS_SHUTDOWN=$v"
-            OOSOCKETS_DTLS_SHUTDOWN=$v rexx run.rex DTLSSocket 2>&1 | grep -E "schannel\]|Failures|TEST_" || true
-          done
+          cd tests && rexx run.rex DTLSSocket 2>&1 || true

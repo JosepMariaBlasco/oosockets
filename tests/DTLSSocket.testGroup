@@ -173,6 +173,16 @@ failed:
   msg = .Client~new~start("connectOnly", srv~localPort)
   c = srv~accept
   c~receiveTimeout = 10
+  if schannel() then do
+    -- Schannel's DTLS client cannot send close_notify (measured, 29/10/2026):
+    -- the server is not told; its receive waits.
+    c~receiveTimeout = 3
+    self~assertSame(.nil, c~receive)
+    self~assertSame("connected", msg~result)
+    c~close
+    srv~close
+    return
+  end
   signal on syntax
   c~receive                                  -- the handshake, then the client's close
   self~fail("receive should have failed")
@@ -438,3 +448,8 @@ syntax:
   raise syntax 40.900 array("expected DTLSSocket~new to fail; it connected to" host)
 syntax:
   return condition("o")
+
+-- Whether the client's DTLS is Schannel's: Windows, unless OOSOCKETS_TLS=openssl.
+::routine schannel
+  parse source os .
+  return os~upper~startsWith("WINDOWS") & value("OOSOCKETS_TLS", , "ENVIRONMENT")~lower \== "openssl"
