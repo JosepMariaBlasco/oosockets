@@ -399,8 +399,8 @@ failed:
     c~close
     self~fail(host "was accepted")
   end
-  say "  ("host":" c~additional[2] c~additional[3]")"
-  self~assertSame("TLS error:" text "(" || host || ", port 443)", c~additional[1])
+  say "  ("host":" c~additional[2] c~additional[3]":" c~additional[4]")"
+  self~assertTrustError(c, text, "(" || host || ", port 443)")
 
 
 /* ---- helpers ------------------------------------------------------------ */
