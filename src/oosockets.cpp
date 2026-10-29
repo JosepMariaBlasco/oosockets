@@ -5314,6 +5314,28 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
             schDtlsFail(ep, c, SEC_E_CERT_UNKNOWN);
             return;
         }
+        if (!x->peerChain.empty())
+        {
+            // What was checked must be what Schannel used: fragments sent
+            // twice with different bytes could make the two differ.
+            PCCERT_CONTEXT used = nullptr;
+            bool same = QueryContextAttributesW(&x->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &used) == SEC_E_OK
+                        && used != nullptr && used->cbCertEncoded == x->peerChain[0].size()
+                        && memcmp(used->pbCertEncoded, x->peerChain[0].data(), used->cbCertEncoded) == 0;
+            if (used != nullptr)
+            {
+                CertFreeCertificateContext(used);
+            }
+            if (!same)
+            {
+                c->trust = TrustError();
+                c->trust.set = true;
+                c->trust.name = "SEC_E_CERT_UNKNOWN";
+                c->trust.text = "the server's certificate is not the one that was checked";
+                schDtlsFail(ep, c, SEC_E_CERT_UNKNOWN);
+                return;
+            }
+        }
         DWORD mtu = SCH_DTLS_MTU;
         SetContextAttributesW(&x->ctx, SECPKG_ATTR_DTLS_MTU, &mtu, sizeof(mtu));
         x->done = true;
