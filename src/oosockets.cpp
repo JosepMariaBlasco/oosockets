@@ -773,6 +773,7 @@ struct TlsOutcome
     unsigned long sslError = 0;   // TLS_SSL_ERROR: ERR_get_error()'s
     long verifyResult = X509_V_OK;
     bool handshaking = false;     // the handshake had not finished
+    long schStatus = 0;           // Windows: Schannel's status, when it failed
 };
 
 // Runs call(ssl) until it succeeds, retrying when OpenSSL wants to read or
@@ -907,6 +908,10 @@ static std::string sslText(unsigned long e)
 
 static TrustError opensslTrustError(long v);
 static RexxArrayObject trustResult(RexxMethodContext *context, const TrustError &t);
+#ifdef _WIN32
+static RexxArrayObject secResult(RexxMethodContext *context, SECURITY_STATUS st, const char *prefix,
+                                 const char *name = nullptr);
+#endif
 
 // The result of a TLS read or write that failed on an established connection.
 static RexxArrayObject tlsIoResult(RexxMethodContext *context, const TlsOutcome &o)
@@ -918,6 +923,12 @@ static RexxArrayObject tlsIoResult(RexxMethodContext *context, const TlsOutcome 
         case TLS_CLOSED:  return closedResult(context);
         case TLS_SOCKET_ERROR: return errorResult(context, o.socketError);
         default:
+#ifdef _WIN32
+            if (o.schStatus != 0)
+            {
+                return secResult(context, (SECURITY_STATUS)o.schStatus, o.handshaking ? "handshake failed: " : "", "TLS");
+            }
+#endif
             // "ERROR:TLS handshake failed: tlsv1 alert unknown ca" as the
             // description (the handshake of an accepted socket happens on
             // its first read or write).
@@ -1526,6 +1537,12 @@ static RexxArrayObject handshakeFailure(RexxMethodContext *context, PeerCheck *s
     {
         return trustResult(context, s->trust);
     }
+#ifdef _WIN32
+    if (o.schStatus != 0)
+    {
+        return secResult(context, (SECURITY_STATUS)o.schStatus, "handshake failed: ");
+    }
+#endif
     if (o.verifyResult != X509_V_OK)
     {
         return trustResult(context, opensslTrustError(o.verifyResult));
@@ -1602,6 +1619,7 @@ struct Sch
     std::shared_ptr<SchCred> cred;
     CtxtHandle ctx;
     bool server = false;               // the server's side
+    bool datagram = false;             // DTLS (the client)
     bool haveCtx = false;
     std::wstring target;               // the server's name (SNI); empty for an address
     std::vector<std::string> trusted;  // DER; empty: the system decides
@@ -1616,6 +1634,10 @@ struct Sch
     std::string out;                   // to send
     std::string plain;                 // decrypted, not yet read
     SecPkgContext_StreamSizes sizes;
+    // DTLS: the last flight sent again when nothing comes back in time
+    Clock::time_point resendAt;
+    int resendMs = 0;
+    int resends = 0;
     Sch() { memset(&sizes, 0, sizeof(sizes)); }
 };
 
@@ -1635,6 +1657,7 @@ static void schFree(Sch *c)
 static const DWORD SCH_CLIENT_FLAGS = ISC_REQ_SEQUENCE_DETECT | ISC_REQ_REPLAY_DETECT | ISC_REQ_CONFIDENTIALITY |
     ISC_REQ_EXTENDED_ERROR | ISC_REQ_ALLOCATE_MEMORY | ISC_REQ_STREAM | ISC_REQ_USE_SUPPLIED_CREDS |
     ISC_REQ_MANUAL_CRED_VALIDATION;
+static const DWORD SCH_DTLS_FLAGS = (SCH_CLIENT_FLAGS & ~(DWORD)ISC_REQ_STREAM) | ISC_REQ_DATAGRAM;
 static const DWORD SCH_SERVER_FLAGS = ASC_REQ_SEQUENCE_DETECT | ASC_REQ_REPLAY_DETECT | ASC_REQ_CONFIDENTIALITY |
     ASC_REQ_EXTENDED_ERROR | ASC_REQ_ALLOCATE_MEMORY | ASC_REQ_STREAM;
 
@@ -1644,7 +1667,7 @@ static const DWORD SCH_EVERY_PROTOCOL = SP_PROT_TLS1_0 | SP_PROT_TLS1_1 | SP_PRO
 // Credentials: SCH_CREDENTIALS (Windows 10 1809 and later), with every
 // protocol but those enabled disabled; before that, SCHANNEL_CRED.
 static SECURITY_STATUS schCredentials(ULONG direction, DWORD flags, DWORD enabled, PCCERT_CONTEXT cert,
-                                      std::shared_ptr<SchCred> &out)
+                                      std::shared_ptr<SchCred> &out, bool legacyOnly = false)
 {
     TimeStamp expiry;
     CredHandle h;
@@ -1662,8 +1685,12 @@ static SECURITY_STATUS schCredentials(ULONG direction, DWORD flags, DWORD enable
     tp.grbitDisabledProtocols = SCH_EVERY_PROTOCOL & ~enabled;
     sc.cTlsParameters = 1;
     sc.pTlsParameters = &tp;
-    SECURITY_STATUS st = AcquireCredentialsHandleW(nullptr, (LPWSTR)UNISP_NAME_W, direction, nullptr,
-                                                   &sc, nullptr, nullptr, &h, &expiry);
+    SECURITY_STATUS st = SEC_E_UNSUPPORTED_FUNCTION;
+    if (!legacyOnly)
+    {
+        st = AcquireCredentialsHandleW(nullptr, (LPWSTR)UNISP_NAME_W, direction, nullptr,
+                                       &sc, nullptr, nullptr, &h, &expiry);
+    }
     if (st != SEC_E_OK)
     {
         SCHANNEL_CRED lc;
@@ -1743,7 +1770,7 @@ static std::string secText(SECURITY_STATUS st)
 // "TLS", as OpenSSL's (its description reads "ERROR:TLS handshake failed:
 // ..."; Schannel's own text is in the system's text).
 static RexxArrayObject secResult(RexxMethodContext *context, SECURITY_STATUS st, const char *prefix,
-                                 const char *name = nullptr)
+                                 const char *name)
 {
     std::string sys = secText(st);
     std::string text = sys;
@@ -1778,7 +1805,7 @@ static SECURITY_STATUS schClientCredentials(Sch *c, bool only13)
 // What the server's certificate is to be checked with: the system, or the
 // certificates trusted explicitly (only those, as anchors and as the
 // server's own certificate itself, and the host name).
-static bool schTrust(Sock *s, Sch *c, PCCERT_CONTEXT leaf)
+static bool schTrust(PeerCheck *s, Sch *c, PCCERT_CONTEXT leaf)
 {
     if (c->trusted.empty())
     {
@@ -1861,8 +1888,8 @@ static std::string schControl(Sch *c, void *token, unsigned long size)
     }
     else
     {
-        InitializeSecurityContextW(&c->cred->h, &c->ctx, nullptr, SCH_CLIENT_FLAGS, 0, 0, nullptr, 0, nullptr,
-                                   &od, &attrs, &expiry);
+        InitializeSecurityContextW(&c->cred->h, &c->ctx, nullptr, c->datagram ? SCH_DTLS_FLAGS : SCH_CLIENT_FLAGS,
+                                   0, 0, nullptr, 0, nullptr, &od, &attrs, &expiry);
     }
     std::string made;
     if (ob.pvBuffer != nullptr)
@@ -2488,7 +2515,11 @@ static void schInfo(Sch *c, std::string &protocol, std::string &cipher)
     SecPkgContext_ConnectionInfo ci;
     if (QueryContextAttributesW(&c->ctx, SECPKG_ATTR_CONNECTION_INFO, &ci) == SEC_E_OK)
     {
-        if (ci.dwProtocol & SP_PROT_TLS1_3)
+        if (ci.dwProtocol & SP_PROT_DTLS1_2)
+        {
+            protocol = "DTLSv1.2";
+        }
+        else if (ci.dwProtocol & SP_PROT_TLS1_3)
         {
             protocol = "TLSv1.3";
         }
@@ -4634,6 +4665,9 @@ struct DtlsConn : PeerCheck
     int ioError = 0;                     // the last socket error the BIO met
     bool accepted = false;               // a DTLSSocket has it (server)
     bool restarted = false;              // PEER_CLOSED: the peer began anew
+#ifdef _WIN32
+    Sch *sch = nullptr;                  // the client's DTLS by Schannel, instead of ssl
+#endif
     DtlsConn() { memset(&peer, 0, sizeof(peer)); }
 };
 
@@ -4669,6 +4703,9 @@ static void freeConn(DtlsConn *c)
         {
             SSL_free(c->ssl);
         }
+#ifdef _WIN32
+        schFree(c->sch);
+#endif
         delete c;
     }
 }
@@ -4957,10 +4994,263 @@ static void failConn(DtlsEndpoint *ep, DtlsConn *c, const TlsOutcome &o)
     c->failure = o;
 }
 
+#ifdef _WIN32
+
+/* ---- the client by Schannel (Windows) ---------------------------------------- */
+/* Measured in probes/schannel/: DTLS 1.2 with SCHANNEL_CRED (SCH_CREDENTIALS    */
+/* refuses it); a flight larger than the MTU comes out a fragment at a time      */
+/* (SEC_I_MESSAGE_FRAGMENT); called again with nothing, Schannel sends its last  */
+/* flight again (the retransmission timer is ours); after the handshake the MTU  */
+/* is raised so that a record takes the 16,384 bytes a datagram may carry.       */
+
+static const int SCH_DTLS_FIRST_RESEND_MS = 1000;
+static const int SCH_DTLS_MAX_RESEND_MS = 8000;
+static const int SCH_DTLS_MAX_RESENDS = 6;
+static const DWORD SCH_DTLS_MTU = 17000;
+
+static void schDtlsSend(DtlsEndpoint *ep, const std::string &d)
+{
+    if (!d.empty() && ep->fd != BAD_SOCKET)
+    {
+        send(ep->fd, d.data(), (int)d.size(), 0);   // connected; a lost one is sent again
+    }
+}
+
+static void schDtlsFail(DtlsEndpoint *ep, DtlsConn *c, SECURITY_STATUS st)
+{
+    TlsOutcome o;
+    o.status = TLS_SSL_ERROR;
+    o.handshaking = c->state == DtlsConn::HANDSHAKING;
+    o.schStatus = (long)st;
+    failConn(ep, c, o);
+}
+
+// One step of the handshake: the datagram d (nullptr: the first step, or
+// the last flight again), and whatever Schannel answers, fragment by
+// fragment, each a datagram of its own.
+static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
+{
+    Sch *x = c->sch;
+    SEC_WCHAR *target = x->target.empty() ? nullptr : &x->target[0];
+    SECURITY_STATUS st;
+    std::string flight;
+    for (int fragments = 0; ; fragments++)
+    {
+        bool first = !x->haveCtx;
+        SecBuffer inb[2] = { { d != nullptr ? (unsigned long)d->size() : 0, SECBUFFER_TOKEN,
+                               d != nullptr && !d->empty() ? &(*d)[0] : nullptr },
+                             { 0, SECBUFFER_EMPTY, nullptr } };
+        SecBufferDesc ind = { SECBUFFER_VERSION, 2, inb };
+        SecBuffer outb[2] = { { 0, SECBUFFER_TOKEN, nullptr }, { 0, SECBUFFER_ALERT, nullptr } };
+        SecBufferDesc outd = { SECBUFFER_VERSION, 2, outb };
+        ULONG attrs = 0;
+        TimeStamp expiry;
+        st = InitializeSecurityContextW(&x->cred->h, first ? nullptr : &x->ctx, target, SCH_DTLS_FLAGS, 0, 0,
+                                        first ? nullptr : &ind, 0, &x->ctx, &outd, &attrs, &expiry);
+        if (first && (st == SEC_I_CONTINUE_NEEDED || st == SEC_E_OK || st == SEC_I_MESSAGE_FRAGMENT))
+        {
+            x->haveCtx = true;
+        }
+        std::string tok;
+        if (outb[0].pvBuffer != nullptr)
+        {
+            tok.assign((const char *)outb[0].pvBuffer, outb[0].cbBuffer);
+            FreeContextBuffer(outb[0].pvBuffer);
+        }
+        if (outb[1].pvBuffer != nullptr)
+        {
+            FreeContextBuffer(outb[1].pvBuffer);
+        }
+        if (st != SEC_I_CONTINUE_NEEDED && st != SEC_E_OK && st != SEC_I_MESSAGE_FRAGMENT &&
+            st != SEC_E_INCOMPLETE_MESSAGE)
+        {
+            schDtlsSend(ep, tok);               // an alert, if Schannel made one
+            schDtlsFail(ep, c, st);
+            return;
+        }
+        if (!x->checked && x->haveCtx)
+        {
+            // Before our next flight: is the server's certificate good?
+            PCCERT_CONTEXT leaf = nullptr;
+            if (QueryContextAttributesW(&x->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &leaf) == SEC_E_OK
+                && leaf != nullptr)
+            {
+                x->checked = true;
+                bool ok = schTrust(c, x, leaf);
+                CertFreeCertificateContext(leaf);
+                if (!ok)
+                {
+                    schDtlsSend(ep, schAlert(x, alertFor(c->trust)));
+                    schDtlsFail(ep, c, SEC_E_CERT_UNKNOWN);
+                    return;
+                }
+            }
+        }
+        schDtlsSend(ep, tok);
+        if (st != SEC_I_MESSAGE_FRAGMENT || fragments > 64)
+        {
+            break;
+        }
+        d = nullptr;                            // the next fragment
+    }
+    if (st == SEC_E_OK)
+    {
+        if (!x->checked)
+        {
+            c->trust.set = true;
+            c->trust.name = "SEC_E_CERT_UNKNOWN";
+            c->trust.text = "the server sent no certificate";
+            schDtlsFail(ep, c, SEC_E_CERT_UNKNOWN);
+            return;
+        }
+        DWORD mtu = SCH_DTLS_MTU;
+        SetContextAttributesW(&x->ctx, SECPKG_ATTR_DTLS_MTU, &mtu, sizeof(mtu));
+        x->done = true;
+        c->state = DtlsConn::OPEN;
+        return;
+    }
+    // waiting for the server: its answer, or the timer
+    x->resendAt = Clock::now() + std::chrono::milliseconds(x->resendMs);
+}
+
+// What arrived for the client, by Schannel: the handshake goes on, or the
+// data is kept for receive. A datagram that does not decrypt is dropped,
+// as DTLS does.
+static void schDtlsDrive(DtlsEndpoint *ep, DtlsConn *c)
+{
+    Sch *x = c->sch;
+    if (!x->haveCtx && c->state == DtlsConn::HANDSHAKING)
+    {
+        x->resendMs = SCH_DTLS_FIRST_RESEND_MS;
+        schDtlsStep(ep, c, nullptr);            // the ClientHello
+    }
+    while (!c->wire.empty() && c->state <= DtlsConn::OPEN)
+    {
+        std::string d = c->wire.front();
+        c->wire.pop_front();
+        if (c->state == DtlsConn::HANDSHAKING)
+        {
+            x->resends = 0;
+            x->resendMs = SCH_DTLS_FIRST_RESEND_MS;
+            schDtlsStep(ep, c, &d);
+            continue;
+        }
+        bool handshake = !d.empty() && d[0] == 22;
+        SecBuffer b[4] = { { (unsigned long)d.size(), SECBUFFER_DATA, d.empty() ? nullptr : &d[0] },
+                           { 0, SECBUFFER_EMPTY, nullptr }, { 0, SECBUFFER_EMPTY, nullptr },
+                           { 0, SECBUFFER_EMPTY, nullptr } };
+        SecBufferDesc desc = { SECBUFFER_VERSION, 4, b };
+        std::string copy = d;
+        SECURITY_STATUS st = DecryptMessage(&x->ctx, &desc, 0, nullptr);
+        if (st == SEC_E_OK)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                if (b[i].BufferType == SECBUFFER_DATA)
+                {
+                    c->app.push_back(std::string((const char *)b[i].pvBuffer, b[i].cbBuffer));
+                    break;
+                }
+            }
+        }
+        else if (st == SEC_I_CONTEXT_EXPIRED)
+        {
+            c->state = DtlsConn::PEER_CLOSED;   // close_notify
+        }
+        else if (handshake)
+        {
+            // The server's last flight again: ours was lost. Schannel
+            // answers it with ours again.
+            std::string tok;
+            SecBuffer inb[2] = { { (unsigned long)copy.size(), SECBUFFER_TOKEN, &copy[0] },
+                                 { 0, SECBUFFER_EMPTY, nullptr } };
+            SecBufferDesc ind = { SECBUFFER_VERSION, 2, inb };
+            SecBuffer outb[2] = { { 0, SECBUFFER_TOKEN, nullptr }, { 0, SECBUFFER_ALERT, nullptr } };
+            SecBufferDesc outd = { SECBUFFER_VERSION, 2, outb };
+            ULONG attrs = 0;
+            TimeStamp expiry;
+            InitializeSecurityContextW(&x->cred->h, &x->ctx, x->target.empty() ? nullptr : &x->target[0],
+                                       SCH_DTLS_FLAGS, 0, 0, &ind, 0, &x->ctx, &outd, &attrs, &expiry);
+            if (outb[0].pvBuffer != nullptr)
+            {
+                tok.assign((const char *)outb[0].pvBuffer, outb[0].cbBuffer);
+                FreeContextBuffer(outb[0].pvBuffer);
+            }
+            if (outb[1].pvBuffer != nullptr)
+            {
+                FreeContextBuffer(outb[1].pvBuffer);
+            }
+            schDtlsSend(ep, tok);
+        }
+    }
+}
+
+// The client's retransmission timer: the milliseconds until it fires, or
+// -1; when it has, the last flight goes again (and after too many, the
+// handshake fails: the peer does not answer).
+static int schDtlsTimer(DtlsEndpoint *ep, DtlsConn *c)
+{
+    Sch *x = c->sch;
+    if (c->state != DtlsConn::HANDSHAKING || !x->haveCtx)
+    {
+        return -1;
+    }
+    auto left = std::chrono::duration_cast<std::chrono::milliseconds>(x->resendAt - Clock::now()).count();
+    if (left > 0)
+    {
+        return (int)left + 1;
+    }
+    if (++x->resends > SCH_DTLS_MAX_RESENDS)
+    {
+        TlsOutcome o;
+        o.status = TLS_TIMEOUT;
+        o.handshaking = true;
+        failConn(ep, c, o);
+        return -1;
+    }
+    x->resendMs = x->resendMs * 2 > SCH_DTLS_MAX_RESEND_MS ? SCH_DTLS_MAX_RESEND_MS : x->resendMs * 2;
+    schDtlsStep(ep, c, nullptr);               // the last flight again
+    return c->state == DtlsConn::HANDSHAKING ? x->resendMs : -1;
+}
+
+// The client's DTLS by Schannel: credentials, and the connection.
+static SECURITY_STATUS schDtlsClient(DtlsConn *c, RexxMethodContext *context, RexxArrayObject trusted)
+{
+    Sch *x = new Sch();
+    x->datagram = true;
+    c->sch = x;
+    if (!isAddress(c->host))
+    {
+        x->target = wide(c->host);
+    }
+    size_t count = context->ArrayItems(trusted);
+    for (size_t i = 1; i <= count; i++)
+    {
+        RexxObjectPtr item = context->ArrayAt(trusted, i);
+        if (item != NULLOBJECT)
+        {
+            RexxStringObject der = context->ObjectToString(item);
+            x->trusted.push_back(std::string(context->StringData(der), context->StringLength(der)));
+        }
+    }
+    return schCredentials(SECPKG_CRED_OUTBOUND,
+                          SCH_USE_STRONG_CRYPTO | SCH_CRED_NO_DEFAULT_CREDS | SCH_CRED_MANUAL_CRED_VALIDATION,
+                          SP_PROT_DTLS1_2_CLIENT, nullptr, x->cred, true);
+}
+
+#endif
+
 // Lets OpenSSL read what has arrived for c: the handshake goes on, or the
 // data is kept for receive.
 static void driveConn(DtlsEndpoint *ep, DtlsConn *c)
 {
+#ifdef _WIN32
+    if (c->sch != nullptr)
+    {
+        schDtlsDrive(ep, c);
+        return;
+    }
+#endif
     if (c->state == DtlsConn::HANDSHAKING)
     {
         ERR_clear_error();
@@ -5183,6 +5473,17 @@ static int dtlsTimers(DtlsEndpoint *ep)
         {
             continue;
         }
+#ifdef _WIN32
+        if (c->sch != nullptr)
+        {
+            int ms = schDtlsTimer(ep, c);
+            if (ms >= 0 && (next < 0 || ms < next))
+            {
+                next = ms;
+            }
+            continue;
+        }
+#endif
         struct timeval tv;
         if (DTLSv1_get_timeout(c->ssl, &tv) != 1)
         {
@@ -5410,11 +5711,20 @@ static RexxArrayObject clientStep(RexxMethodContext *context, DtlsHandle *h, dou
 RexxMethod5(RexxArrayObject, dtls_connect, CSTRING, host, CSTRING, port, RexxArrayObject, trusted,
             CSTRING, minVersion, double, timeout)
 {
-    if (!opensslHere())
+#ifdef _WIN32
+    bool bySchannel = useSchannel();
+    if (bySchannel && strcmp(minVersion, "1.3") == 0)
+    {
+        return errorArray(context, "DTLS 1.3 is not supported (Schannel)", "", 0);
+    }
+#else
+    const bool bySchannel = false;
+#endif
+    if (!bySchannel && !opensslHere())
     {
         return opensslMissing(context);
     }
-    int minProto = dtlsMinVersion(minVersion);
+    int minProto = bySchannel ? DTLS1_2_VERSION : dtlsMinVersion(minVersion);
     if (minProto < 0)
     {
         return dtlsUnsupported(context);
@@ -5474,6 +5784,30 @@ RexxMethod5(RexxArrayObject, dtls_connect, CSTRING, host, CSTRING, port, RexxArr
     h->ep = std::make_shared<DtlsEndpoint>();
     DtlsEndpoint *ep = h->ep.get();
     ep->fd = fd;
+#ifdef _WIN32
+    if (bySchannel)
+    {
+        DtlsConn *c = new DtlsConn();
+        c->ep = ep;
+        memcpy(&c->peer, &peer, sizeof(peer));
+        c->peerLen = peerLen;
+        c->host = host;
+        c->accepted = true;              // it belongs to its DTLSSocket
+        ep->client = c;
+        h->conn = c;
+        context->SetObjectVariable("CSELF", context->NewPointer(h));
+        SECURITY_STATUS st = schDtlsClient(c, context, trusted);
+        if (st != SEC_E_OK)
+        {
+            return secResult(context, st, "cannot start DTLS: ");
+        }
+        {
+            std::lock_guard<std::mutex> guard(ep->mu);
+            driveConn(ep, c);            // the ClientHello goes out
+        }
+        return clientStep(context, h, timeout);
+    }
+#endif
     ep->ctx = clientContext(context, DTLS_client_method(), minProto, trusted);
     SSL_CTX_set_options(ep->ctx, SSL_OP_NO_RENEGOTIATION);
     DtlsConn *c = newConn(ep, peer, peerLen);
@@ -5646,6 +5980,41 @@ RexxMethod3(RexxArrayObject, dtls_send, CSELF, cself, RexxStringObject, data, do
     {
         return connResult(context, c);
     }
+#ifdef _WIN32
+    if (c->sch != nullptr)
+    {
+        Sch *x = c->sch;
+        SecPkgContext_StreamSizes sz;           // the same layout as the datagram sizes
+        memset(&sz, 0, sizeof(sz));
+        QueryContextAttributesW(&x->ctx, SECPKG_ATTR_DATAGRAM_SIZES, &sz);
+        if (size > sz.cbMaximumMessage)
+        {
+            return errorResult(context, WSAEMSGSIZE);
+        }
+        std::string rec(sz.cbHeader + size + sz.cbTrailer, '\0');
+        if (size > 0)
+        {
+            memcpy(&rec[sz.cbHeader], context->StringData(data), size);
+        }
+        SecBuffer b[4] = { { sz.cbHeader, SECBUFFER_STREAM_HEADER, &rec[0] },
+                           { (unsigned long)size, SECBUFFER_DATA, &rec[sz.cbHeader] },
+                           { sz.cbTrailer, SECBUFFER_STREAM_TRAILER, &rec[sz.cbHeader + size] },
+                           { 0, SECBUFFER_EMPTY, nullptr } };
+        SecBufferDesc d = { SECBUFFER_VERSION, 4, b };
+        SECURITY_STATUS st = EncryptMessage(&x->ctx, 0, &d, 0);
+        if (st != SEC_E_OK)
+        {
+            return secResult(context, st, "", "TLS");
+        }
+        int n = send(ep->fd, rec.data(), (int)(b[0].cbBuffer + b[1].cbBuffer + b[2].cbBuffer), 0);
+        if (n < 0)
+        {
+            int e = lastError();
+            return errorResult(context, e == WSAECONNRESET ? WSAECONNREFUSED : e);   // the connection goes on
+        }
+        return statusResult(context, "OK");
+    }
+#endif
     ERR_clear_error();
     c->ioError = 0;
     size_t sent = 0;
@@ -5719,6 +6088,12 @@ RexxMethod1(RexxArrayObject, dtls_info, CSELF, cself)
     if (h != nullptr && h->conn != nullptr)
     {
         std::lock_guard<std::mutex> guard(h->ep->mu);
+#ifdef _WIN32
+        if (h->conn->sch != nullptr)
+        {
+            schInfo(h->conn->sch, protocol, cipher);
+        }
+#endif
         if (h->conn->ssl != nullptr && SSL_is_init_finished(h->conn->ssl))
         {
             protocol = SSL_get_version(h->conn->ssl);
@@ -5785,9 +6160,18 @@ static void closeHandle(DtlsHandle *h)
     {
         if (c->state == DtlsConn::OPEN && ep->fd != BAD_SOCKET && !ep->closing)
         {
-            ERR_clear_error();
-            SSL_shutdown(c->ssl);        // close_notify
-            ERR_clear_error();
+#ifdef _WIN32
+            if (c->sch != nullptr)
+            {
+                schDtlsSend(ep, schCloseNotify(c->sch));   // close_notify
+            }
+            else
+#endif
+            {
+                ERR_clear_error();
+                SSL_shutdown(c->ssl);    // close_notify
+                ERR_clear_error();
+            }
         }
         c->state = DtlsConn::CLOSED;
         if (ep->server)
