@@ -30,7 +30,7 @@ install_name_tool -change "$old" @rpath/libcrypto.3.dylib ossl/lib/libssl.3.dyli
 otool -L ossl/lib/libssl.3.dylib | sed 's/^/  /'
 
 echo "== the probe's library: weak, rpaths Homebrew (arm64, x86_64) then MacPorts"
-RP="-Wl,-rpath,/opt/homebrew/opt/openssl@3/lib -Wl,-rpath,/usr/local/opt/openssl@3/lib -Wl,-rpath,/opt/local/lib"
+RP="-Wl,-rpath,/opt/homebrew/opt/openssl@3/lib -Wl,-rpath,/usr/local/opt/openssl@3/lib -Wl,-rpath,/opt/local/lib/openssl-3 -Wl,-rpath,/opt/local/libexec/openssl3/lib"
 cc -arch arm64 -arch x86_64 -mmacosx-version-min=10.14 -dynamiclib -o libprobe.dylib ../lib.c -Iossl/include \
    -Wl,-weak_library,ossl/lib/libssl.3.dylib -Wl,-weak_library,ossl/lib/libcrypto.3.dylib $RP
 cc -arch arm64 -arch x86_64 -mmacosx-version-min=10.14 -o host ../host.c
@@ -38,7 +38,7 @@ otool -L libprobe.dylib | sed 's/^/  /'
 otool -l libprobe.dylib | grep -A2 LC_RPATH | grep path | sed 's/^/  /'
 lipo -info libprobe.dylib host
 
-for d in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib /opt/local/lib; do
+for d in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib /opt/local/lib/openssl-3 /opt/local/libexec/openssl3/lib; do
   printf "  %s: " "$d"; ls "$d"/libssl.3.dylib >/dev/null 2>&1 && lipo -archs "$d/libssl.3.dylib" || echo "(none)"
 done
 
