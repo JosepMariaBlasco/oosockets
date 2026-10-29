@@ -1739,12 +1739,16 @@ static std::string secText(SECURITY_STATUS st)
 }
 
 // A Schannel failure as an error result; prefix: "handshake failed: " or "".
-static RexxArrayObject secResult(RexxMethodContext *context, SECURITY_STATUS st, const char *prefix)
+// name: Schannel's name for it; or, for a connection's read or write,
+// "TLS", as OpenSSL's (its description reads "ERROR:TLS handshake failed:
+// ..."; Schannel's own text is in the system's text).
+static RexxArrayObject secResult(RexxMethodContext *context, SECURITY_STATUS st, const char *prefix,
+                                 const char *name = nullptr)
 {
     std::string sys = secText(st);
     std::string text = sys;
     text[0] = (char)tolower((unsigned char)text[0]);
-    return errorArray(context, prefix + text, secName(st), (long long)(DWORD)st, sys, "TLS");
+    return errorArray(context, prefix + text, name != nullptr ? name : secName(st), (long long)(DWORD)st, sys, "TLS");
 }
 
 static std::wstring wide(const std::string &s)
@@ -2336,7 +2340,7 @@ static RexxArrayObject schIoResult(RexxMethodContext *context, const SchOutcome 
         case TLS_TIMEOUT:      return statusResult(context, "TIMEOUT");
         case TLS_CLOSED:       return closedResult(context);
         case TLS_SOCKET_ERROR: return errorResult(context, o.socketError);
-        default:               return secResult(context, o.sec, o.handshaking ? "handshake failed: " : "");
+        default:               return secResult(context, o.sec, o.handshaking ? "handshake failed: " : "", "TLS");
     }
 }
 
