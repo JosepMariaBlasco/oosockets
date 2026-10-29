@@ -14,7 +14,7 @@ curl -fsSL --retry 3 -o o.tgz "https://github.com/openssl/openssl/releases/downl
 for arch in arm64 x86_64; do
   if [ "$arch" = arm64 ]; then min=11.0; else min=10.14; fi
   mkdir -p "src-$arch"; tar -xzf o.tgz -C "src-$arch" --strip-components 1
-  ( cd "src-$arch" && ./Configure "darwin64-$arch-cc" shared no-tests no-docs "-mmacosx-version-min=$min" \
+  ( cd "src-$arch" && ./Configure "darwin64-$arch-cc" shared no-tests "-mmacosx-version-min=$min" \
       --prefix="$work/out-$arch" --libdir=lib > configure.log && make -j"$(sysctl -n hw.ncpu)" build_libs > make.log \
       && make install_dev > install.log ) || { echo "build $arch failed"; tail -20 "src-$arch/make.log"; exit 1; }
 done
