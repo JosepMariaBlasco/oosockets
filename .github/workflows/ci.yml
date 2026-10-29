@@ -128,6 +128,6 @@ jobs:
           export REXX_PATH="$PWD/build:$PWD/tests:$PWD/tests/framework" DYLD_LIBRARY_PATH="$PWD/build"
           rc=0
           rexx scripts/no-openssl.rex "$PWD/tests/certs/" || rc=1
-          (cd tests && rexx run.rex Socket ServerSocket UDPSocket MulticastSocket Halt) || rc=1
+          (cd tests && rexx run.rex Socket ServerSocket UDPSocket MulticastSocket) || rc=1   # Halt has TLS tests
           sudo mv "$o.hidden" "$o"
           exit $rc
