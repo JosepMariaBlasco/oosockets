@@ -814,6 +814,34 @@ static RexxArrayObject errorArray(RexxMethodContext *context, const std::string 
     return r;
 }
 
+/* ---- is OpenSSL there? -------------------------------------------------- */
+
+// On macOS the library is weakly linked to the OpenSSL 3 of Homebrew or
+// MacPorts (@rpath/libssl.3.dylib; Rony, 29/10/2026: the system's package
+// manager keeps it current, ooSockets ships none). Without it the library
+// still loads, so that the plain sockets work; OpenSSL's functions are then
+// null, and every way into TLS or DTLS asks this first. Elsewhere OpenSSL is
+// always there (a normal dependency).
+static bool opensslHere()
+{
+#ifdef __APPLE__
+    // through volatiles: the headers do not declare the functions weak, and
+    // a compiler may take a function's address for non-null
+    void *volatile a = (void *)&OpenSSL_version_num;
+    void *volatile b = (void *)&SSL_CTX_new;
+    return a != nullptr && b != nullptr && OpenSSL_version_num() >= 0x30000000UL;
+#else
+    return true;
+#endif
+}
+
+// The error for a way into TLS when OpenSSL is not there (macOS).
+static RexxArrayObject opensslMissing(RexxMethodContext *context)
+{
+    return errorArray(context, "OpenSSL 3 not found; install it with \"brew install openssl@3\""
+                               " or \"sudo port install openssl3\"", "OPENSSL", 0);
+}
+
 // OpenSSL's reason for an error, without its library prefix.
 static std::string sslReason(unsigned long e)
 {
@@ -1295,6 +1323,10 @@ static bool isAddress(const std::string &host)
 // each as DER bytes; or an error ("ERROR", text, "", 0).
 RexxMethod2(RexxArrayObject, tls_load_certificates, CSTRING, file, OPTIONAL_CSTRING, password)
 {
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
+    }
     std::string data, why;
     std::vector<X509 *> certs;
     bool ok = readFile(file, data, why) &&
@@ -1458,6 +1490,10 @@ static void setPeerName(SSL *ssl, const std::string &h)
 RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxArrayObject, trusted,
             CSTRING, minVersion, double, timeout)
 {
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
+    }
     Sock *s = (Sock *)cself;
     if (s == nullptr || s->fd == BAD_SOCKET)
     {
@@ -1554,6 +1590,10 @@ static SSL_CTX *serverContext(const char *file, const char *password, const SSL_
 // certificate and its key; else "ERROR", why.
 RexxMethod2(RexxArrayObject, tls_check_identity, CSTRING, file, CSTRING, password)
 {
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
+    }
     std::string why;
     SSL_CTX *ctx = serverContext(file, password, TLS_server_method(), TLS1_2_VERSION, why);
     if (ctx == nullptr)
@@ -1569,6 +1609,10 @@ RexxMethod2(RexxArrayObject, tls_check_identity, CSTRING, file, CSTRING, passwor
 RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file,
             CSTRING, password, CSTRING, minVersion, double, timeout)
 {
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
+    }
     Sock *s = (Sock *)cself;
     if (s == nullptr || s->fd == BAD_SOCKET)
     {
@@ -1594,6 +1638,10 @@ RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
 // accepted connection will share. "OK"; or "ERROR", why.
 RexxMethod4(RexxArrayObject, server_tls, CSELF, cself, CSTRING, file, CSTRING, password, CSTRING, minVersion)
 {
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
+    }
     Sock *s = (Sock *)cself;
     if (s == nullptr || s->fd == BAD_SOCKET)
     {
@@ -4041,6 +4089,10 @@ static RexxArrayObject clientStep(RexxMethodContext *context, DtlsHandle *h, dou
 RexxMethod5(RexxArrayObject, dtls_connect, CSTRING, host, CSTRING, port, RexxArrayObject, trusted,
             CSTRING, minVersion, double, timeout)
 {
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
+    }
     int minProto = dtlsMinVersion(minVersion);
     if (minProto < 0)
     {
@@ -4137,6 +4189,10 @@ RexxMethod2(RexxArrayObject, dtls_more, CSELF, cself, double, timeout)
 RexxMethod5(RexxArrayObject, dtls_listen, CSTRING, port, CSTRING, address, CSTRING, file, CSTRING, password,
             CSTRING, minVersion)
 {
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
+    }
     int minProto = dtlsMinVersion(minVersion);
     if (minProto < 0)
     {

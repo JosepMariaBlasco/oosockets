@@ -48,9 +48,11 @@ jobs:
       - name: ooRexx version
         run: rexx -v
 
-      # OpenSSL: Linux, the system's; macOS, Homebrew's, linked statically;
-      # Windows, vcpkg's x64-windows-static-md (static libraries, the DLL C
-      # runtime), cached: building it takes ~7 minutes.
+      # OpenSSL: Linux, the system's; macOS, Homebrew's, linked weakly by
+      # @rpath (as the release, which links against OpenSSL 3.0; at run
+      # time Homebrew's or MacPorts'); Windows, vcpkg's x64-windows-static-md
+      # (static libraries, the DLL C runtime), cached: building it takes ~7
+      # minutes.
       - name: OpenSSL (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -61,7 +63,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           p="$(brew --prefix openssl@3)"
-          ls "$p/lib/"*.a
+          ls "$p/lib/"*.dylib
           "$p/bin/openssl" version
           echo "CMAKE_EXTRA=-DOPENSSL_ROOT_DIR=$p" >> "$GITHUB_ENV"
 
@@ -88,12 +90,14 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME" ${CMAKE_EXTRA:-}
           cmake --build build --config Release
 
-      # What the library loads: no OpenSSL library on macOS or Windows.
+      # What the library loads: on macOS OpenSSL weakly, by @rpath; on
+      # Windows none (linked statically).
       - name: Dependencies
         run: |
           case "$RUNNER_OS" in
             Linux) ldd build/liboosockets.so ;;
-            macOS) otool -L build/liboosockets.dylib ;;
+            macOS) otool -L build/liboosockets.dylib
+                   otool -l build/liboosockets.dylib | grep -A2 -E 'LC_LOAD_WEAK_DYLIB|LC_RPATH' | grep -E 'name|path' ;;
             Windows)
               dumpbin=$(ls "/c/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/"*/bin/Hostx64/x64/dumpbin.exe | head -1)
               "$dumpbin" //dependents build/Release/oosockets.dll | grep -i "\.dll" ;;
@@ -112,3 +116,18 @@ jobs:
           else
             scripts/test.sh "$PWD/build"
           fi
+
+      # macOS without OpenSSL 3 (Homebrew's hidden): the library still loads,
+      # the plain sockets work, and TLS says what to install.
+      - name: Without OpenSSL (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        run: |
+          o="$(brew --prefix)/opt/openssl@3"
+          sudo mv "$o" "$o.hidden"
+          export REXX_PATH="$PWD/build:$PWD/tests:$PWD/tests/framework" DYLD_LIBRARY_PATH="$PWD/build"
+          rc=0
+          rexx scripts/no-openssl.rex "$PWD/tests/certs/" || rc=1
+          (cd tests && rexx run.rex Socket ServerSocket UDPSocket MulticastSocket Halt) || rc=1
+          sudo mv "$o.hidden" "$o"
+          exit $rc

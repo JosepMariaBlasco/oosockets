@@ -65,12 +65,15 @@ A program uses it with the directive</para>
 ::requires "sockets.cls"
 </programlisting>
 
-<para>TLS and DTLS are provided by OpenSSL.  On Linux the library uses the
-system&apos;s OpenSSL; on Windows and macOS, where the system does not
-provide it, OpenSSL is linked into the library, so that nothing else has to
-be installed.  On every system, the operating system decides which
-certificates are trusted (see <xref linkend="socketsTrust"
-xrefstyle="select:title"/>).</para>
+<para>TLS and DTLS are provided by OpenSSL 3, kept up to date by the
+system.  On Linux the library uses the system&apos;s OpenSSL.  On macOS,
+which has none that fits, it uses the OpenSSL 3 of Homebrew
+(<command>brew install openssl@3</command>) or MacPorts
+(<command>sudo port install openssl3</command>); without it, the plain
+sockets work, and the TLS and DTLS classes raise a
+<literal>SYNTAX</literal> condition saying what to install.  On every
+system, the operating system decides which certificates are trusted (see
+<xref linkend="socketsTrust" xrefstyle="select:title"/>).</para>
 
 <para>Strings are sequences of bytes, and so is what travels over a
 network: <literal>sockets.cls</literal> sends and receives the bytes of the

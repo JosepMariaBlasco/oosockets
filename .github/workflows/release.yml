@@ -17,7 +17,7 @@ permissions:
   contents: write
 
 env:
-  OPENSSL_MACOS: 3.5.9          # built by us for the macOS zip (scripts/build-openssl-macos.sh)
+  OPENSSL_MACOS: 3.0.18         # macOS: only to link against (scripts/build-openssl-macos.sh shared); not shipped
 
 jobs:
   version:
@@ -63,8 +63,9 @@ jobs:
           name: linux-x86_64
           path: dist/*.zip
 
-  # macOS: one universal library (arm64 + x86_64), OpenSSL built by us for
-  # macOS 11 (arm64) and 10.14 (x86_64) and linked statically.
+  # macOS: one universal library (arm64 + x86_64), for macOS 11 (arm64) and
+  # 10.14 (x86_64), weakly linked to @rpath/libssl.3.dylib: at run time,
+  # the OpenSSL 3 of Homebrew or MacPorts (Rony, 29/10/2026); none shipped.
   build-macos:
     needs: version
     runs-on: macos-15
@@ -77,10 +78,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/openssl
-          key: openssl-${{ env.OPENSSL_MACOS }}-macos-universal-10.14-v1
-      - name: OpenSSL
+          key: openssl-${{ env.OPENSSL_MACOS }}-macos-universal-10.14-shared-v1
+      - name: OpenSSL (to link against)
         if: steps.openssl.outputs.cache-hit != 'true'
-        run: scripts/build-openssl-macos.sh "$OPENSSL_MACOS" "$RUNNER_TEMP/openssl"
+        run: scripts/build-openssl-macos.sh "$OPENSSL_MACOS" "$RUNNER_TEMP/openssl" shared
       - name: Build
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME" \
@@ -93,8 +94,14 @@ jobs:
           lipo -info build/liboosockets.dylib
           vtool -show-build build/liboosockets.dylib
           otool -L build/liboosockets.dylib
-          if otool -L build/liboosockets.dylib | grep -i -E 'libssl|libcrypto'; then
-            echo "OpenSSL is not inside" >&2; exit 1
+          # OpenSSL: weak, by @rpath, Homebrew's and MacPorts' directories
+          otool -l build/liboosockets.dylib | grep -A2 -E 'LC_LOAD_WEAK_DYLIB|LC_RPATH' | grep -E 'name|path'
+          for l in libssl libcrypto; do
+            otool -l build/liboosockets.dylib | grep -A2 LC_LOAD_WEAK_DYLIB | grep -q "@rpath/$l.3.dylib" \
+              || { echo "$l is not weak by @rpath" >&2; exit 1; }
+          done
+          if otool -L build/liboosockets.dylib | grep -E 'libssl|libcrypto' | grep -v '@rpath/'; then
+            echo "OpenSSL named by a path of the build machine" >&2; exit 1
           fi
       - name: Package
         run: scripts/package.sh build macos-universal dist
@@ -226,6 +233,7 @@ jobs:
             echo
             echo "Each zip has the native library, \`sockets.cls\`, the README, the licence and \`INSTALL.txt\`."
             echo "A beta, as ooRexx 5.3.0 is: needs ooRexx 5.3.0 beta (trunk r13329 or later); not ooRexx 5.2.0."
+            echo "macOS: TLS and DTLS need the OpenSSL 3 of Homebrew (\`brew install openssl@3\`) or MacPorts (\`sudo port install openssl3\`); ooSockets ships none."
             echo "Tested with ooRexx 5.3.0 beta r13329 and the newest beta build."
             echo
             echo "| File | SHA-256 |"

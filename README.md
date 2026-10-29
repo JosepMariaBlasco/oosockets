@@ -121,9 +121,14 @@ s~close
 - **Revocation is not checked** (as in Java and .NET, by default). macOS
   checks it on its own, as best it can, and may refuse a revoked
   certificate; Linux and Windows do not.
-- Underneath, OpenSSL does the TLS on the three systems: the system's on
-  Linux, and on macOS and Windows linked statically into the library
-  (neither system ships it), so there is nothing else to install.
+- Underneath, OpenSSL does the TLS, kept up to date by the system: on
+  Linux, the system's; on macOS, the OpenSSL 3 of **Homebrew** (`brew
+  install openssl@3`) or **MacPorts** (`sudo port install openssl3`),
+  since macOS has none that fits and ooSockets ships none (without it the
+  plain sockets work, and TLS raises `TLS error: OpenSSL 3 not found;
+  install it with ...`; another OpenSSL 3: its directory on
+  `DYLD_LIBRARY_PATH`). On Windows it is linked statically for now; it
+  will be Windows' own TLS, Schannel (`probes/schannel/`).
 
 ### A TLS server
 

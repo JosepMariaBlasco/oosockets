@@ -27,15 +27,56 @@ target_compile_definitions(oosockets PRIVATE OOSOCKETS_VERSION="${PROJECT_VERSIO
 target_include_directories(oosockets SYSTEM PRIVATE "${OOREXX_INCLUDE_DIR}")
 target_link_libraries(oosockets PRIVATE "${OOREXX_REXX_LIB}" "${OOREXX_REXXAPI_LIB}")
 
-# OpenSSL does the TLS. Linux: the system's (libssl-dev). macOS and
-# Windows: linked statically, since neither system ships it; point
-# OPENSSL_ROOT_DIR at it (Homebrew's openssl@3; vcpkg's
-# x64-windows-static-md, through its toolchain file).
-if(APPLE OR WIN32)
+# OpenSSL does the TLS. Linux: the system's (libssl-dev). Windows: vcpkg's
+# x64-windows-static-md, through its toolchain file (to be replaced by
+# Schannel). macOS: the OpenSSL 3 of Homebrew or MacPorts, which the
+# package manager keeps current (Rony, 29/10/2026): ooSockets ships none.
+# It is linked weakly, as @rpath/libssl.3.dylib and @rpath/libcrypto.3.dylib,
+# with Homebrew's and MacPorts' directories as the rpaths: without it the
+# library still loads (the plain sockets work), and TLS says what to
+# install (opensslHere in oosockets.cpp). DYLD_LIBRARY_PATH can point
+# elsewhere. Point OPENSSL_ROOT_DIR at any OpenSSL 3 to build against
+# (Homebrew's openssl@3; the release uses OpenSSL 3.0, the oldest 3.x, so
+# that every 3.x has what it calls: probes/macos-openssl/).
+if(WIN32)
   set(OPENSSL_USE_STATIC_LIBS TRUE)
 endif()
 find_package(OpenSSL 3.0 REQUIRED)
-target_link_libraries(oosockets PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+if(APPLE)
+  target_include_directories(oosockets SYSTEM PRIVATE "${OPENSSL_INCLUDE_DIR}")
+  set(OOSOCKETS_OPENSSL_RPATHS
+      /opt/homebrew/opt/openssl@3/lib            # Homebrew, Apple Silicon
+      /usr/local/opt/openssl@3/lib               # Homebrew, Intel (and Rosetta)
+      /opt/local/lib/openssl-3                   # MacPorts' openssl3
+      /opt/local/libexec/openssl3/lib)
+  foreach(lib IN ITEMS "${OPENSSL_SSL_LIBRARY}" "${OPENSSL_CRYPTO_LIBRARY}")
+    target_link_options(oosockets PRIVATE "LINKER:-weak_library,${lib}")
+  endforeach()
+  foreach(dir IN LISTS OOSOCKETS_OPENSSL_RPATHS)
+    target_link_options(oosockets PRIVATE "LINKER:-rpath,${dir}")
+  endforeach()
+  # The libraries built against name themselves by where they are
+  # (Homebrew: /opt/homebrew/opt/openssl@3/lib/libssl.3.dylib); the
+  # library must look for them by @rpath.
+  foreach(lib IN ITEMS ssl crypto)
+    if(lib STREQUAL "ssl")
+      set(file "${OPENSSL_SSL_LIBRARY}")
+    else()
+      set(file "${OPENSSL_CRYPTO_LIBRARY}")
+    endif()
+    execute_process(COMMAND otool -D "${file}" OUTPUT_VARIABLE out OUTPUT_STRIP_TRAILING_WHITESPACE)
+    string(REGEX REPLACE ".*\n" "" name "${out}")
+    add_custom_command(TARGET oosockets POST_BUILD
+      COMMAND install_name_tool -change "${name}" "@rpath/lib${lib}.3.dylib" "$<TARGET_FILE:oosockets>"
+      COMMENT "lib${lib}: @rpath/lib${lib}.3.dylib")
+  endforeach()
+  # install_name_tool spoils the linker's ad hoc signature (arm64 needs one)
+  add_custom_command(TARGET oosockets POST_BUILD
+    COMMAND codesign --force --sign - "$<TARGET_FILE:oosockets>"
+    COMMENT "signed again, ad hoc")
+else()
+  target_link_libraries(oosockets PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()
 
 if(APPLE)
   # macOS decides trust (SecTrustEvaluateWithError)
