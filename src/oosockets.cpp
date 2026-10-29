@@ -87,6 +87,7 @@
   #include <schannel.h>                    // Schannel, Windows' own TLS
   #include <security.h>
   #include <sspi.h>
+  #include <ncrypt.h>
   #include <mstcpip.h>
   #ifndef SIO_UDP_CONNRESET
     #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
@@ -160,6 +161,7 @@ struct PeerCheck
 
 #ifdef _WIN32
 struct Sch;                      // a Schannel connection (see "Schannel")
+struct SchCred;                  // Schannel's credentials
 #endif
 
 struct Sock : PeerCheck
@@ -173,6 +175,7 @@ struct Sock : PeerCheck
     SSL *ssl = nullptr;
 #ifdef _WIN32
     Sch *sch = nullptr;          // Windows: TLS by Schannel instead (also under mu)
+    std::shared_ptr<SchCred> schCred;  // TLSServerSocket with Schannel: for those it accepts
 #endif
     std::mutex mu;
     int ioError = 0;             // the last socket error the BIO met
@@ -1585,11 +1588,20 @@ static bool useSchannel()
     return !(n > 0 && n < sizeof(buf) && _stricmp(buf, "openssl") == 0);
 }
 
+// Schannel's credentials, shared by every connection a TLSServerSocket
+// accepts (and freed with the last of them).
+struct SchCred
+{
+    CredHandle h;
+    SchCred(const CredHandle &c) : h(c) { }
+    ~SchCred() { FreeCredentialsHandle(&h); }
+};
+
 struct Sch
 {
-    CredHandle cred;
+    std::shared_ptr<SchCred> cred;
     CtxtHandle ctx;
-    bool haveCred = false;
+    bool server = false;               // the server's side
     bool haveCtx = false;
     std::wstring target;               // the server's name (SNI); empty for an address
     std::vector<std::string> trusted;  // DER; empty: the system decides
@@ -1617,16 +1629,62 @@ static void schFree(Sch *c)
     {
         DeleteSecurityContext(&c->ctx);
     }
-    if (c->haveCred)
-    {
-        FreeCredentialsHandle(&c->cred);
-    }
     delete c;
 }
 
 static const DWORD SCH_CLIENT_FLAGS = ISC_REQ_SEQUENCE_DETECT | ISC_REQ_REPLAY_DETECT | ISC_REQ_CONFIDENTIALITY |
     ISC_REQ_EXTENDED_ERROR | ISC_REQ_ALLOCATE_MEMORY | ISC_REQ_STREAM | ISC_REQ_USE_SUPPLIED_CREDS |
     ISC_REQ_MANUAL_CRED_VALIDATION;
+static const DWORD SCH_SERVER_FLAGS = ASC_REQ_SEQUENCE_DETECT | ASC_REQ_REPLAY_DETECT | ASC_REQ_CONFIDENTIALITY |
+    ASC_REQ_EXTENDED_ERROR | ASC_REQ_ALLOCATE_MEMORY | ASC_REQ_STREAM;
+
+static const DWORD SCH_EVERY_PROTOCOL = SP_PROT_TLS1_0 | SP_PROT_TLS1_1 | SP_PROT_TLS1_2 | SP_PROT_TLS1_3 |
+    SP_PROT_SSL3 | SP_PROT_SSL2 | SP_PROT_DTLS1_0 | SP_PROT_DTLS1_2;
+
+// Credentials: SCH_CREDENTIALS (Windows 10 1809 and later), with every
+// protocol but those enabled disabled; before that, SCHANNEL_CRED.
+static SECURITY_STATUS schCredentials(ULONG direction, DWORD flags, DWORD enabled, PCCERT_CONTEXT cert,
+                                      std::shared_ptr<SchCred> &out)
+{
+    TimeStamp expiry;
+    CredHandle h;
+    SCH_CREDENTIALS sc;
+    TLS_PARAMETERS tp;
+    memset(&sc, 0, sizeof(sc));
+    memset(&tp, 0, sizeof(tp));
+    sc.dwVersion = SCH_CREDENTIALS_VERSION;
+    sc.dwFlags = flags;
+    if (cert != nullptr)
+    {
+        sc.cCreds = 1;
+        sc.paCred = &cert;
+    }
+    tp.grbitDisabledProtocols = SCH_EVERY_PROTOCOL & ~enabled;
+    sc.cTlsParameters = 1;
+    sc.pTlsParameters = &tp;
+    SECURITY_STATUS st = AcquireCredentialsHandleW(nullptr, (LPWSTR)UNISP_NAME_W, direction, nullptr,
+                                                   &sc, nullptr, nullptr, &h, &expiry);
+    if (st != SEC_E_OK)
+    {
+        SCHANNEL_CRED lc;
+        memset(&lc, 0, sizeof(lc));
+        lc.dwVersion = SCHANNEL_CRED_VERSION;
+        lc.dwFlags = flags;
+        if (cert != nullptr)
+        {
+            lc.cCreds = 1;
+            lc.paCred = &cert;
+        }
+        lc.grbitEnabledProtocols = enabled;
+        st = AcquireCredentialsHandleW(nullptr, (LPWSTR)UNISP_NAME_W, direction, nullptr,
+                                       &lc, nullptr, nullptr, &h, &expiry);
+    }
+    if (st == SEC_E_OK)
+    {
+        out = std::make_shared<SchCred>(h);
+    }
+    return st;
+}
 
 // Schannel's names for the statuses a program may meet.
 static const char *secName(SECURITY_STATUS st)
@@ -1705,38 +1763,12 @@ static std::string narrow(const wchar_t *w)
 }
 
 // The client's credentials: TLS 1.2 and 1.3 (or only 1.3), no certificate
-// of our own, the server's validated by hand. SCH_CREDENTIALS (Windows 10
-// 1809 and later); before that, SCHANNEL_CRED.
+// of our own, the server's validated by hand.
 static SECURITY_STATUS schClientCredentials(Sch *c, bool only13)
 {
-    DWORD enabled = SP_PROT_TLS1_3_CLIENT | (only13 ? 0 : SP_PROT_TLS1_2_CLIENT);
-    DWORD every = SP_PROT_TLS1_0 | SP_PROT_TLS1_1 | SP_PROT_TLS1_2 | SP_PROT_TLS1_3 | SP_PROT_SSL3 | SP_PROT_SSL2 |
-                  SP_PROT_DTLS1_0 | SP_PROT_DTLS1_2;
-    DWORD flags = SCH_USE_STRONG_CRYPTO | SCH_CRED_NO_DEFAULT_CREDS | SCH_CRED_MANUAL_CRED_VALIDATION;
-    TimeStamp expiry;
-    SCH_CREDENTIALS sc;
-    TLS_PARAMETERS tp;
-    memset(&sc, 0, sizeof(sc));
-    memset(&tp, 0, sizeof(tp));
-    sc.dwVersion = SCH_CREDENTIALS_VERSION;
-    sc.dwFlags = flags;
-    tp.grbitDisabledProtocols = every & ~enabled;
-    sc.cTlsParameters = 1;
-    sc.pTlsParameters = &tp;
-    SECURITY_STATUS st = AcquireCredentialsHandleW(nullptr, (LPWSTR)UNISP_NAME_W, SECPKG_CRED_OUTBOUND, nullptr,
-                                                   &sc, nullptr, nullptr, &c->cred, &expiry);
-    if (st != SEC_E_OK)
-    {
-        SCHANNEL_CRED lc;
-        memset(&lc, 0, sizeof(lc));
-        lc.dwVersion = SCHANNEL_CRED_VERSION;
-        lc.dwFlags = flags;
-        lc.grbitEnabledProtocols = enabled;
-        st = AcquireCredentialsHandleW(nullptr, (LPWSTR)UNISP_NAME_W, SECPKG_CRED_OUTBOUND, nullptr,
-                                       &lc, nullptr, nullptr, &c->cred, &expiry);
-    }
-    c->haveCred = st == SEC_E_OK;
-    return st;
+    return schCredentials(SECPKG_CRED_OUTBOUND,
+                          SCH_USE_STRONG_CRYPTO | SCH_CRED_NO_DEFAULT_CREDS | SCH_CRED_MANUAL_CRED_VALIDATION,
+                          SP_PROT_TLS1_3_CLIENT | (only13 ? 0 : SP_PROT_TLS1_2_CLIENT), nullptr, c->cred);
 }
 
 // What the server's certificate is to be checked with: the system, or the
@@ -1819,8 +1851,15 @@ static std::string schControl(Sch *c, void *token, unsigned long size)
     SecBufferDesc od = { SECBUFFER_VERSION, 1, &ob };
     ULONG attrs = 0;
     TimeStamp expiry;
-    InitializeSecurityContextW(&c->cred, &c->ctx, nullptr, SCH_CLIENT_FLAGS, 0, 0, nullptr, 0, nullptr,
-                               &od, &attrs, &expiry);
+    if (c->server)
+    {
+        AcceptSecurityContext(&c->cred->h, &c->ctx, nullptr, SCH_SERVER_FLAGS, 0, nullptr, &od, &attrs, &expiry);
+    }
+    else
+    {
+        InitializeSecurityContextW(&c->cred->h, &c->ctx, nullptr, SCH_CLIENT_FLAGS, 0, 0, nullptr, 0, nullptr,
+                                   &od, &attrs, &expiry);
+    }
     std::string made;
     if (ob.pvBuffer != nullptr)
     {
@@ -1919,11 +1958,13 @@ static SchWant schFail(SchOutcome &o, SECURITY_STATUS st)
     return SCH_DONE;
 }
 
-// One call of InitializeSecurityContext with what is in in (none for the
-// first): its output goes to tok, what it did not use stays in in.
+// One call of InitializeSecurityContext (the client; with nothing, the first
+// time) or AcceptSecurityContext (the server) with what is in in: its output
+// goes to tok, what it did not use stays in in.
 static SECURITY_STATUS schInitialize(Sch *c, std::string &tok)
 {
     bool first = !c->haveCtx;
+    bool input = !first || c->server;
     SecBuffer inb[2] = { { (unsigned long)c->in.size(), SECBUFFER_TOKEN, c->in.empty() ? nullptr : &c->in[0] },
                          { 0, SECBUFFER_EMPTY, nullptr } };
     SecBufferDesc ind = { SECBUFFER_VERSION, 2, inb };
@@ -1932,8 +1973,11 @@ static SECURITY_STATUS schInitialize(Sch *c, std::string &tok)
     ULONG attrs = 0;
     TimeStamp expiry;
     SEC_WCHAR *target = c->target.empty() ? nullptr : &c->target[0];
-    SECURITY_STATUS st = InitializeSecurityContextW(&c->cred, first ? nullptr : &c->ctx, target, SCH_CLIENT_FLAGS,
-                                                    0, 0, first ? nullptr : &ind, 0, &c->ctx, &outd, &attrs, &expiry);
+    SECURITY_STATUS st = c->server
+        ? AcceptSecurityContext(&c->cred->h, first ? nullptr : &c->ctx, &ind, SCH_SERVER_FLAGS, 0,
+                                &c->ctx, &outd, &attrs, &expiry)
+        : InitializeSecurityContextW(&c->cred->h, first ? nullptr : &c->ctx, target, SCH_CLIENT_FLAGS,
+                                     0, 0, first ? nullptr : &ind, 0, &c->ctx, &outd, &attrs, &expiry);
     if (first && (st == SEC_I_CONTINUE_NEEDED || st == SEC_E_OK))
     {
         c->haveCtx = true;
@@ -1951,7 +1995,7 @@ static SECURITY_STATUS schInitialize(Sch *c, std::string &tok)
     {
         c->needMore = true;                  // in kept as it is
     }
-    else if (!first && st != SEC_I_INCOMPLETE_CREDENTIALS)
+    else if (input && st != SEC_I_INCOMPLETE_CREDENTIALS)
     {
         if (inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer > 0 && inb[1].cbBuffer <= c->in.size())
         {
@@ -1996,7 +2040,7 @@ static SchWant schHandshake(Sock *s, Sch *c, SchOutcome &o)
             o.status = TLS_OK;
             return SCH_DONE;
         }
-        if (c->haveCtx && (c->in.empty() || c->needMore))
+        if ((c->haveCtx || c->server) && (c->in.empty() || c->needMore))
         {
             int r = schFill(s, c, err);
             if (r == 0)
@@ -2031,7 +2075,7 @@ static SchWant schHandshake(Sock *s, Sch *c, SchOutcome &o)
             c->failed = st;
             continue;
         }
-        if (!c->checked)
+        if (!c->checked && !c->server)
         {
             // Before our next flight: is the server's certificate good?
             PCCERT_CONTEXT leaf = nullptr;
@@ -2068,8 +2112,26 @@ static SchWant schHandshake(Sock *s, Sch *c, SchOutcome &o)
 }
 
 // One step of a read: up to max bytes into got.
+static SchWant schHandshake(Sock *s, Sch *c, SchOutcome &o);
+
+// An accepted connection's handshake happens on its first read or write.
+static bool schHandshaken(Sock *s, Sch *c, SchOutcome &o, SchWant &want)
+{
+    if (c->done)
+    {
+        return true;
+    }
+    want = schHandshake(s, c, o);
+    return want == SCH_DONE && o.status == TLS_OK;
+}
+
 static SchWant schRecv(Sock *s, Sch *c, size_t max, std::string &got, SchOutcome &o)
 {
+    SchWant want = SCH_DONE;
+    if (!schHandshaken(s, c, o, want))
+    {
+        return want;
+    }
     for (;;)
     {
         if (!c->plain.empty())
@@ -2177,6 +2239,11 @@ static SchWant schRecv(Sock *s, Sch *c, size_t max, std::string &got, SchOutcome
 static SchWant schSend(Sock *s, Sch *c, const char *p, size_t left, size_t &n, SchOutcome &o)
 {
     n = 0;
+    SchWant want = SCH_DONE;
+    if (!schHandshaken(s, c, o, want))
+    {
+        return want;
+    }
     int err = 0;
     int f = schFlush(s, c, err);
     if (f < 0)
@@ -2438,6 +2505,136 @@ static void schInfo(Sch *c, std::string &protocol, std::string &cipher)
     }
 }
 
+// A server's credentials, from the certificate and key in file (PKCS#12
+// with its password, or PEM with both; read with OpenSSL, as for OpenSSL's
+// server). Schannel takes a key only from a key store: the key is imported,
+// persisted, and deleted again once the credentials are made, which keep
+// working without it (probes/schannel: an ephemeral key is refused).
+static bool schServerCredentials(const char *file, const char *password, const char *minVersion,
+                                 std::shared_ptr<SchCred> &out, std::string &why)
+{
+    if (!opensslHere())
+    {
+        why = "OpenSSL is needed to read the certificate";
+        return false;
+    }
+    std::string data;
+    std::vector<X509 *> certs;
+    EVP_PKEY *key = nullptr;
+    auto freeAll = [&]()
+    {
+        for (X509 *x : certs)
+        {
+            X509_free(x);
+        }
+        if (key != nullptr)
+        {
+            EVP_PKEY_free(key);
+        }
+    };
+    if (!readFile(file, data, why) || !loadCertificates(data, password, certs, &key, why))
+    {
+        freeAll();
+        return false;
+    }
+    if (key == nullptr)
+    {
+        freeAll();
+        why = "no private key in the file";
+        return false;
+    }
+    ERR_clear_error();
+    if (X509_check_private_key(certs[0], key) != 1)
+    {
+        freeAll();
+        ERR_clear_error();
+        why = "the private key is not the certificate's";
+        return false;
+    }
+    // Both, as a PKCS#12 in memory, for Windows to import.
+    STACK_OF(X509) *chain = sk_X509_new_null();
+    for (size_t i = 1; i < certs.size(); i++)
+    {
+        sk_X509_push(chain, certs[i]);
+    }
+    const char *pw = "oosockets";
+    PKCS12 *p12 = PKCS12_create(pw, nullptr, key, certs[0], chain, 0, 0, 0, 0, 0);
+    sk_X509_free(chain);
+    unsigned char *der = nullptr;
+    int len = p12 != nullptr ? i2d_PKCS12(p12, &der) : 0;
+    if (p12 != nullptr)
+    {
+        PKCS12_free(p12);
+    }
+    freeAll();
+    ERR_clear_error();
+    if (len <= 0)
+    {
+        why = "cannot read the private key";
+        return false;
+    }
+    CRYPT_DATA_BLOB blob = { (DWORD)len, der };
+    HCERTSTORE store = PFXImportCertStore(&blob, L"oosockets", CRYPT_USER_KEYSET | PKCS12_ALWAYS_CNG_KSP);
+    DWORD importError = GetLastError();
+    OPENSSL_free(der);
+    if (store == nullptr)
+    {
+        why = "Windows cannot import the certificate: " + secText((SECURITY_STATUS)HRESULT_FROM_WIN32(importError));
+        return false;
+    }
+    PCCERT_CONTEXT cert = nullptr, found = nullptr;
+    while ((cert = CertEnumCertificatesInStore(store, cert)) != nullptr)
+    {
+        DWORD n = 0;
+        if (CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, nullptr, &n))
+        {
+            found = CertDuplicateCertificateContext(cert);
+            CertFreeCertificateContext(cert);
+            break;
+        }
+    }
+    bool ok = false;
+    if (found == nullptr)
+    {
+        why = "Windows found no private key in the certificate";
+    }
+    else
+    {
+        DWORD enabled = SP_PROT_TLS1_3_SERVER | (strcmp(minVersion, "1.3") == 0 ? 0 : SP_PROT_TLS1_2_SERVER);
+        SECURITY_STATUS st = schCredentials(SECPKG_CRED_INBOUND, SCH_USE_STRONG_CRYPTO | SCH_CRED_DISABLE_RECONNECTS,
+                                            enabled, found, out);
+        ok = st == SEC_E_OK;
+        if (!ok)
+        {
+            why = "Schannel cannot use it: " + secText(st);
+        }
+        // The key is not left behind in the user's profile.
+        HCRYPTPROV_OR_NCRYPT_KEY_HANDLE k = 0;
+        DWORD spec = 0;
+        BOOL mustFree = FALSE;
+        if (CryptAcquireCertificatePrivateKey(found, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG,
+                                              nullptr, &k, &spec, &mustFree))
+        {
+            if (NCryptDeleteKey((NCRYPT_KEY_HANDLE)k, 0) != ERROR_SUCCESS && mustFree)
+            {
+                NCryptFreeObject((NCRYPT_KEY_HANDLE)k);
+            }
+        }
+        CertFreeCertificateContext(found);
+    }
+    CertCloseStore(store, 0);
+    return ok;
+}
+
+// A Sch for the server's side of a connection.
+static Sch *schServer(const std::shared_ptr<SchCred> &cred)
+{
+    Sch *c = new Sch();
+    c->server = true;
+    c->cred = cred;
+    return c;
+}
+
 #endif
 
 // Whether TLS has started on the Sock (OpenSSL's or Schannel's).
@@ -2679,6 +2876,23 @@ RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
         return errorArray(context, "TLS has already started on this connection", "", 0);
     }
     std::string why;
+#ifdef _WIN32
+    if (useSchannel())
+    {
+        std::shared_ptr<SchCred> cred;
+        if (!schServerCredentials(file, password, minVersion, cred, why))
+        {
+            return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
+        }
+        s->trust = TrustError();
+        {
+            std::lock_guard<std::mutex> guard(s->mu);
+            s->sch = schServer(cred);
+            setBlocking(s->fd, false);
+        }
+        return schHandshakeStep(context, s, timeout);
+    }
+#endif
     SSL_CTX *ctx = serverContext(file, password, TLS_server_method(), minVersionOf(minVersion), why);
     if (ctx == nullptr)
     {
@@ -2704,6 +2918,19 @@ RexxMethod4(RexxArrayObject, server_tls, CSELF, cself, CSTRING, file, CSTRING, p
         return closedResult(context);
     }
     std::string why;
+#ifdef _WIN32
+    if (useSchannel())
+    {
+        std::shared_ptr<SchCred> cred;
+        if (!schServerCredentials(file, password, minVersion, cred, why))
+        {
+            return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
+        }
+        std::lock_guard<std::mutex> guard(s->mu);
+        s->schCred = cred;
+        return statusResult(context, "OK");
+    }
+#endif
     SSL_CTX *ctx = serverContext(file, password, TLS_server_method(), minVersionOf(minVersion), why);
     if (ctx == nullptr)
     {
@@ -3403,6 +3630,14 @@ RexxMethod2(RexxArrayObject, server_accept, CSELF, cself, double, timeout)
                 {
                     SSL_CTX_up_ref(ctx);
                 }
+#ifdef _WIN32
+                if (s->schCred)
+                {
+                    // TLSServerSocket with Schannel: the handshake happens
+                    // on the first read or write, as below.
+                    c->sch = schServer(s->schCred);
+                }
+#endif
             }
             if (ctx != nullptr)
             {
