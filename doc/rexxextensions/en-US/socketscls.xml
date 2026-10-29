@@ -1,0 +1,3317 @@
+<?xml version='1.0' encoding='utf-8' ?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN" "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd" [
+<!ENTITY % BOOK_ENTITIES SYSTEM "rexxextensions.ent">
+%BOOK_ENTITIES;
+]>
+<!--#########################################################################
+    #
+    # Description: Open Object Rexx: RexxExtensions Library XML File
+    #
+    # Copyright (c) 2026, Rexx Language Association. All rights reserved.
+    #
+    # This program and the accompanying materials are made available under
+    # the terms of the Common Public License v1.0 which accompanies this
+    # distribution. A copy is also available at the following address:
+    # http://www.oorexx.org/license.html
+    #
+    # Redistribution and use in source and binary forms, with or
+    # without modification, are permitted provided that the following
+    # conditions are met:
+    #
+    # Redistributions of source code must retain the above copyright
+    # notice, this list of conditions and the following disclaimer.
+    # Redistributions in binary form must reproduce the above copyright
+    # notice, this list of conditions and the following disclaimer in
+    # the documentation and/or other materials provided with the distribution.
+    #
+    # Neither the name of Rexx Language Association nor the names
+    # of its contributors may be used to endorse or promote products
+    # derived from this software without specific prior written permission.
+    #
+    # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    # FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+    # OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+    # SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+    # TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+    # OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+    # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+    # NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+    # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+    #
+    #########################################################################
+-->
+<chapter id="socketscls"><title>Sockets (Package "sockets.cls")</title>
+<indexterm><primary>sockets.cls</primary></indexterm>
+
+<para>The <literal>sockets.cls</literal> package provides TCP and UDP
+sockets for ooRexx, over IPv4 and IPv6, with TLS for TCP and DTLS for UDP.
+A TCP socket is a Rexx stream: it is read and written with
+<methodname>lineIn</methodname>, <methodname>lineOut</methodname>,
+<methodname>charIn</methodname>, <methodname>charOut</methodname> and the
+other stream methods, and it reports the end of the connection and its
+errors with the <literal>NOTREADY</literal> condition, as any stream does.
+A UDP socket sends and receives datagrams.</para>
+
+<para>The package consists of two files: <literal>sockets.cls</literal>,
+and the native library it requires, <literal>oosockets</literal>
+(<filename>oosockets.dll</filename> on Windows,
+<filename>liboosockets.dylib</filename> on macOS,
+<filename>liboosockets.so</filename> on Linux and other Unix-like systems).
+A program uses it with the directive</para>
+
+<programlisting language="rexx">
+::requires "sockets.cls"
+</programlisting>
+
+<para>TLS and DTLS are provided by OpenSSL.  On Linux the library uses the
+system&apos;s OpenSSL; on Windows and macOS, where the system does not
+provide it, OpenSSL is linked into the library, so that nothing else has to
+be installed.  On every system, the operating system decides which
+certificates are trusted (see <xref linkend="socketsTrust"
+xrefstyle="select:title"/>).</para>
+
+<para>Strings are sequences of bytes, and so is what travels over a
+network: <literal>sockets.cls</literal> sends and receives the bytes of the
+strings it is given, and converts nothing.</para>
+
+<para>The package defines the following public classes:</para>
+
+<variablelist>
+ <varlistentry>
+  <term><xref linkend="clsSocket" xrefstyle="select:title"/></term>
+  <listitem><para>A connected TCP socket, the client&apos;s end or the
+   server&apos;s, as an <classname>InputOutputStream</classname>.</para></listitem>
+ </varlistentry>
+ <varlistentry>
+  <term><xref linkend="clsServerSocket" xrefstyle="select:title"/></term>
+  <listitem><para>A TCP socket that listens on a port and accepts
+   connections, returning a <classname>Socket</classname> for each.</para></listitem>
+ </varlistentry>
+ <varlistentry>
+  <term><xref linkend="clsTLSSocket" xrefstyle="select:title"/></term>
+  <listitem><para>A <classname>Socket</classname> over TLS, whose
+   server&apos;s certificate is always verified.</para></listitem>
+ </varlistentry>
+ <varlistentry>
+  <term><xref linkend="clsTLSServerSocket" xrefstyle="select:title"/></term>
+  <listitem><para>A <classname>ServerSocket</classname> whose connections
+   are TLS.</para></listitem>
+ </varlistentry>
+ <varlistentry>
+  <term><xref linkend="clsTLSOptions" xrefstyle="select:title"/></term>
+  <listitem><para>The settings of TLS and DTLS: the certificates trusted
+   explicitly, a server&apos;s own certificate, and the oldest version
+   accepted.</para></listitem>
+ </varlistentry>
+ <varlistentry>
+  <term><xref linkend="clsUDPSocket" xrefstyle="select:title"/></term>
+  <listitem><para>A UDP socket, which sends and receives
+   datagrams.</para></listitem>
+ </varlistentry>
+ <varlistentry>
+  <term><xref linkend="clsMulticastSocket" xrefstyle="select:title"/></term>
+  <listitem><para>A <classname>UDPSocket</classname> that joins multicast
+   groups.</para></listitem>
+ </varlistentry>
+ <varlistentry>
+  <term><xref linkend="clsDTLSSocket" xrefstyle="select:title"/></term>
+  <listitem><para>Datagrams over DTLS (TLS for UDP), between two ends that
+   have made a handshake.</para></listitem>
+ </varlistentry>
+ <varlistentry>
+  <term><xref linkend="clsDTLSServerSocket" xrefstyle="select:title"/></term>
+  <listitem><para>A DTLS server, which serves any number of clients on one
+   UDP port.</para></listitem>
+ </varlistentry>
+ <varlistentry>
+  <term><xref linkend="clsDatagram" xrefstyle="select:title"/></term>
+  <listitem><para>A datagram received, with the address and the port of
+   its sender.</para></listitem>
+ </varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Example 1 &#x2013; A client:</emphasis></para>
+<programlisting language="rexx">
+s = .Socket~new("localhost", 8888)    -- IPv6 or IPv4, whichever answers
+s~lineOut("Hello, this is from your ooRexx client!")
+say "Received from the server:" s~lineIn
+s~close
+
+::requires "sockets.cls"
+</programlisting>
+
+<para><emphasis role="bold">Example 2 &#x2013; A server that serves each
+client in an activity of its own:</emphasis></para>
+<programlisting language="rexx">
+srv = .ServerSocket~new(8888)         -- every address, IPv6 and IPv4
+loop
+  .Session~new(srv~accept)~start("serve")
+end
+
+::class Session
+::method init
+  expose s
+  use strict arg s
+::method serve
+  expose s
+  s~readTimeout = 30
+  signal on notready                  -- the client went away, or was silent
+  loop
+    line = s~lineIn
+    if line = "bye" then leave
+    s~lineOut("You said:" line)
+  end
+notready:
+  s~close
+
+::requires "sockets.cls"
+</programlisting>
+
+<para><emphasis role="bold">Example 3 &#x2013; An HTTPS request:</emphasis></para>
+<programlisting language="rexx">
+s = .TLSSocket~new("www.example.com", 443)   -- the certificate is verified
+s~lineOut("HEAD / HTTP/1.1")
+s~lineOut("Host: www.example.com")
+s~lineOut("Connection: close")
+s~lineOut("")
+say s~lineIn                                 -- HTTP/1.1 200 OK
+s~close
+
+::requires "sockets.cls"
+</programlisting>
+
+<para><emphasis role="bold">Example 4 &#x2013; A UDP server that answers
+each datagram, and a client:</emphasis></para>
+<programlisting language="rexx">
+s = .UDPSocket~new(5000)              -- every address, IPv6 and IPv4
+loop
+  d = s~receive                       -- waits; returns a Datagram
+  s~send(d~data~upper, d~address, d~port)
+end
+
+::requires "sockets.cls"
+</programlisting>
+
+<programlisting language="rexx">
+c = .UDPSocket~new                    -- a port chosen by the system
+c~receiveTimeout = 2
+c~send("hello", "localhost", 5000)
+d = c~receive
+if d == .nil then say "No answer in 2 seconds"
+             else say d               -- HELLO
+
+::requires "sockets.cls"
+</programlisting>
+
+<!-- ================================================================== -->
+<!--  Hosts, Addresses and Ports                                        -->
+<!-- ================================================================== -->
+
+<section id="socketsAddresses"><title>Hosts, Addresses and Ports</title>
+<indexterm><primary>sockets.cls</primary><secondary>addresses</secondary></indexterm>
+
+<para>A <emphasis role="italic">host</emphasis> is a name
+(<literal>"www.example.com"</literal>, <literal>"localhost"</literal>), an
+IPv4 address (<literal>"127.0.0.1"</literal>) or an IPv6 address
+(<literal>"::1"</literal>, without brackets).  A name is looked up when a
+socket is made or a datagram sent, and may have several addresses, IPv4 and
+IPv6: a TCP connection tries them in turn until one answers.  The time
+spent looking up a name cannot be limited by a timeout or interrupted by a
+<literal>HALT</literal> (see <xref linkend="socketsActivities"
+xrefstyle="select:title"/>).</para>
+
+<para>A <emphasis role="italic">port</emphasis> is a whole number from 0 to
+65535.  Where a socket connects or sends, a service name such as
+<literal>"http"</literal> may be used instead.  Where a socket is made to
+listen or receive, port 0 asks the system to choose a free port, which
+<methodname>localPort</methodname> then returns.</para>
+
+<para>A server or UDP socket made without an
+<emphasis role="italic">address</emphasis> receives on every address of
+the machine, IPv6 and IPv4, with one socket.  Addresses are returned as
+strings, IPv6 ones in their short form (<literal>"::1"</literal>); an IPv4
+peer of such a socket is shown as an IPv4 address
+(<literal>"127.0.0.1"</literal>), not as an IPv4-mapped IPv6 one
+(<literal>"::ffff:127.0.0.1"</literal>).  The
+<methodname>string</methodname> method of a connected socket returns its
+host and port, with brackets around an IPv6 address:
+<literal>"localhost:8888"</literal>, <literal>"[::1]:8888"</literal>.</para>
+</section>
+
+<!-- ================================================================== -->
+<!--  Errors and Conditions                                             -->
+<!-- ================================================================== -->
+
+<section id="socketsErrors"><title>Errors and Conditions</title>
+<indexterm><primary>sockets.cls</primary><secondary>errors</secondary></indexterm>
+
+<para><emphasis role="bold">Making a connection.</emphasis>  Failing to
+connect, to listen, or to make a TLS handshake raises a
+<literal>SYNTAX</literal> condition with code <literal>48.900</literal>
+(<emphasis role="italic">Failure in system service</emphasis>), whose
+message says what failed and where:</para>
+
+<programlisting>
+Socket error: connection refused (localhost, port 8888)
+Socket error: unknown host (no-such-host.invalid, port 80)
+TLS error: certificate has expired (expired.badssl.com, port 443)
+</programlisting>
+
+<para>The additional information of the condition is an array of three
+items: the message, the name of the system&apos;s error
+(<literal>ECONNREFUSED</literal>, <literal>EAI_NONAME</literal>, the name of
+a Windows or OpenSSL error), and its number.  The message is the same on
+every system for the common errors; the name and the number are the
+system&apos;s own.</para>
+
+<programlisting language="rexx">
+signal on syntax
+s = .Socket~new("localhost", 1)
+...
+syntax:
+  info = condition("A")
+  say info[1]      -- Socket error: connection refused (localhost, port 1)
+  say info[2]      -- ECONNREFUSED
+  say info[3]      -- 111 (on Linux)
+
+::requires "sockets.cls"
+</programlisting>
+
+<para>Every error of the UDP, multicast and DTLS classes, which are not
+streams, is such a <literal>SYNTAX</literal> condition too.  Invalid
+arguments (a port out of range, a negative timeout) raise
+<literal>SYNTAX</literal> conditions with code
+<literal>88.900</literal>.</para>
+
+<para><emphasis role="bold">Once connected.</emphasis>  A
+<classname>Socket</classname> is a stream: the end of the connection, an
+expired timeout or an error while reading or writing raise a
+<literal>NOTREADY</literal> condition, and the methods return what
+streams return in that case (<methodname>lineIn</methodname> an empty
+string, <methodname>lineOut</methodname> <literal>1</literal>).  The object
+of the condition is the socket, and its description, which
+<methodname>description</methodname> also returns, says what
+happened:</para>
+
+<variablelist>
+ <varlistentry><term><literal>READY:</literal></term>
+ <listitem><para>The last operation succeeded.</para></listitem></varlistentry>
+ <varlistentry><term><literal>NOTREADY:EOF</literal></term>
+ <listitem><para>The peer has closed the connection (or its side of it,
+ see <methodname>shutdownOutput</methodname>), and everything it sent has
+ been read.</para></listitem></varlistentry>
+ <varlistentry><term><literal>NOTREADY:TIMEOUT</literal></term>
+ <listitem><para>A <methodname>readTimeout</methodname> or a
+ <methodname>writeTimeout</methodname> expired.  The socket can still be
+ used.</para></listitem></varlistentry>
+ <varlistentry><term><literal>NOTREADY:closed</literal></term>
+ <listitem><para>The socket was closed by this program.</para></listitem></varlistentry>
+ <varlistentry><term><literal>ERROR:</literal><emphasis role="italic">name</emphasis> <emphasis role="italic">text</emphasis></term>
+ <listitem><para>The connection failed: <literal>ERROR:ECONNRESET
+ connection reset by peer</literal>, <literal>ERROR:TLS handshake failed:
+ tlsv1 alert unknown ca</literal>.</para></listitem></varlistentry>
+ <varlistentry><term><literal>UNKNOWN:</literal></term>
+ <listitem><para>After <methodname>close</methodname>.</para></listitem></varlistentry>
+</variablelist>
+
+<programlisting language="rexx">
+signal on notready
+loop
+  say s~lineIn
+end
+notready:
+  say "The connection ended:" s~description     -- e.g. NOTREADY:EOF
+  s~close
+</programlisting>
+</section>
+
+<!-- ================================================================== -->
+<!--  Timeouts, Activities and HALT                                     -->
+<!-- ================================================================== -->
+
+<section id="socketsActivities"><title>Timeouts, Activities and HALT</title>
+<indexterm><primary>sockets.cls</primary><secondary>timeouts</secondary></indexterm>
+<indexterm><primary>sockets.cls</primary><secondary>HALT condition</secondary></indexterm>
+
+<para><emphasis role="bold">Timeouts.</emphasis>  Every method that may
+wait for the network can be given a limit, in seconds (fractions are
+allowed): <methodname>new</methodname>&apos;s
+<emphasis role="italic">connectTimeout</emphasis>, and the attributes
+<methodname>readTimeout</methodname>, <methodname>writeTimeout</methodname>,
+<methodname>acceptTimeout</methodname> and
+<methodname>receiveTimeout</methodname>.  Their default,
+<literal>.nil</literal>, means as long as it takes.  An expired
+<methodname>accept</methodname> or <methodname>receive</methodname>
+returns <literal>.nil</literal>; an expired read or write of a
+<classname>Socket</classname> raises <literal>NOTREADY</literal>
+(<literal>NOTREADY:TIMEOUT</literal>); an expired connection is a
+<literal>SYNTAX</literal> condition, <literal>48.900</literal>
+(<literal>Socket error: timed out</literal>).</para>
+
+<para><emphasis role="bold">Activities.</emphasis>  A method that waits
+blocks only the activity that called it.  A server can serve each client
+in an activity of its own (Example 2 above), and on one
+<classname>Socket</classname> one activity can read while another writes.
+A <methodname>close</methodname> from another activity ends a
+<methodname>receive</methodname> waiting on a UDP or DTLS socket, which
+then raises a <literal>SYNTAX</literal> condition (<literal>Socket error:
+the UDP socket is closed</literal>).</para>
+
+<para><emphasis role="bold">HALT.</emphasis>  A <literal>HALT</literal>
+condition (Ctrl-C) interrupts any wait: a <methodname>lineIn</methodname>,
+an <methodname>accept</methodname>, a <methodname>receive</methodname>, a
+write to a peer that does not read, a connection or a handshake that does
+not progress.  The condition is raised at the line of the program that
+called the method, where a <literal>SIGNAL ON HALT</literal> of the program
+catches it.  A socket whose read was interrupted can still be used, and
+nothing that arrives later is lost; an interrupted write may have sent
+part of its data; after an interrupted TLS handshake, the socket should be
+closed.  A waiting activity costs no measurable processor time.</para>
+</section>
+
+<!-- ================================================================== -->
+<!--  Certificates and Trust                                            -->
+<!-- ================================================================== -->
+
+<section id="socketsTrust"><title>Certificates and Trust</title>
+<indexterm><primary>sockets.cls</primary><secondary>certificates</secondary></indexterm>
+<indexterm><primary>TLS</primary><secondary>certificate verification</secondary></indexterm>
+
+<para>A <classname>TLSSocket</classname> and a
+<classname>DTLSSocket</classname> always verify the server&apos;s
+certificate, and there is no way to turn the verification off.  The
+certificate must be valid for the host name the socket was given, and
+trusted.  Unless trusted certificates are given explicitly, the operating
+system decides, with its own trusted roots and rules: on Windows,
+<function>CertGetCertificateChain</function> and
+<function>CertVerifyCertificateChainPolicy</function>; on macOS,
+<function>SecTrustEvaluateWithError</function>; on Linux, OpenSSL with the
+system&apos;s certificate store.  A certificate that does not verify is a
+<literal>SYNTAX</literal> condition, <literal>48.900</literal>; the most
+common reasons read the same on every system: <literal>certificate has
+expired</literal>, <literal>certificate does not match the host
+name</literal>, <literal>certificate is not trusted</literal>.</para>
+
+<para>Revocation is not checked, as by default in Java and .NET.  macOS
+may still refuse a revoked certificate on its own.</para>
+
+<para>A server with a certificate of its own, not issued by an authority
+the system trusts (a test server, a classroom one), is reached by trusting
+that certificate explicitly, with <xref linkend="mthTLSOptionsTrust"
+xrefstyle="select:title"/>.  Then only the certificates trusted so count:
+the system&apos;s roots do not, and OpenSSL checks the certificate, with
+the host name, in the same way on every system.</para>
+
+<programlisting language="rexx">
+opts = .TLSOptions~new~trust("mySrvKeystore.p12", "123456")
+s = .TLSSocket~new("localhost", 9999, opts)
+
+::requires "sockets.cls"
+</programlisting>
+
+<para>Such a certificate can be made with Java&apos;s
+<command>keytool</command>.  On 26 October 2026, with the
+<command>keytool</command> of OpenJDK 21, the command</para>
+
+<programlisting>
+keytool -genkeypair -alias mysrv -keyalg RSA -dname "CN=localhost"
+        -ext "SAN=dns:localhost,ip:127.0.0.1,ip:::1" -ext EKU=serverAuth
+        -validity 825 -keystore mySrvKeystore.p12 -storepass 123456
+</programlisting>
+
+<para>(on one line) made a PKCS#12 keystore that worked both as the
+certificate of a <classname>TLSServerSocket</classname> and as the
+certificate trusted by its clients, for <literal>localhost</literal> and
+<literal>127.0.0.1</literal>.  Clients check the host name against the
+names in <literal>SAN</literal> only, not against <literal>CN</literal>.
+<literal>EKU=serverAuth</literal> and a validity of at most 825 days are
+not needed by <literal>sockets.cls</literal>, but macOS&apos;s own clients
+refuse a certificate without them.  The rules for certificates keep
+tightening: a command that worked at one date may need changes at a later
+one.</para>
+</section>
+
+<!-- ================================================================== -->
+<!--  Using sockets.cls with socket.cls                                 -->
+<!-- ================================================================== -->
+
+<section id="socketsRxsock"><title>Using sockets.cls with socket.cls</title>
+<indexterm><primary>sockets.cls</primary><secondary>and rxsock</secondary></indexterm>
+
+<para><literal>sockets.cls</literal> does not use or change the
+<literal>rxsock</literal> library or the <literal>socket.cls</literal> and
+<literal>streamsocket.cls</literal> packages.  Both
+<literal>socket.cls</literal> and <literal>sockets.cls</literal> define a
+public class named <classname>Socket</classname>.  A program that requires
+both (or <literal>smtp.cls</literal>, which requires
+<literal>socket.cls</literal>) should require <literal>sockets.cls</literal>
+first, or refer to its classes through a namespace:</para>
+
+<programlisting language="rexx">
+s = oo:Socket~new("localhost", 8888)    -- sockets.cls's Socket
+...
+::requires "socket.cls"
+::requires "sockets.cls" namespace oo
+</programlisting>
+</section>
+
+<!-- ================================================================== -->
+<!--  Socket Class                                                    -->
+<!-- ================================================================== -->
+<section id="clsSocket"><title>&added52; Socket Class</title>
+<indexterm><primary>Socket class</primary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>bufferOutput attribute</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>charIn method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>charOut method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>chars method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>cipher method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>close method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>description method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>flush method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>lineEnd attribute</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>lineIn method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>lineOut method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>lines method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>localAddress method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>localPort method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>new method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>noDelay attribute</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>protocol method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>read method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>readTimeout attribute</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>remoteAddress method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>remotePort method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>resolve method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>say method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>secure method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>shutdownOutput method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>startTLS method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>startTLSServer method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>state method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>string method</secondary></indexterm>
+<indexterm><primary>Socket class</primary>
+<secondary>writeTimeout attribute</secondary></indexterm>
+
+<para>A connected TCP socket: the end a client makes with
+<methodname>new</methodname>, or the end a server gets from
+<xref linkend="mthServerSocketAccept" xrefstyle="select:title"/>.  It is an
+<classname>InputOutputStream</classname>: it can be read and written with
+the stream methods, used with <literal>NOTREADY</literal>, and be the
+destination of the <literal>.output</literal> monitor.  It has no
+positions: <methodname>lineIn</methodname> and
+<methodname>charIn</methodname> do not take a position argument, and the
+<methodname>position</methodname> method is not supported.  Its
+<methodname>open</methodname> method does nothing: a socket is open from
+the moment it is made.</para>
+
+<para>Lines read may end in a line feed or in a carriage return and a line
+feed; lines written end in a carriage return and a line feed, the line end
+of the network protocols, unless <methodname>lineEnd</methodname> says
+otherwise.</para>
+
+<para>Writes go out when they are made.  A program that writes many small
+pieces can ask for them to be kept and sent together, with
+<methodname>bufferOutput</methodname>.</para>
+
+<para>The <classname>Socket</classname> class is a subclass of the
+<classname>InputOutputStream</classname> class.  The
+<methodname>arrayIn</methodname> and <methodname>arrayOut</methodname>
+methods it inherits read and write lines with
+<methodname>lineIn</methodname> and <methodname>lineOut</methodname>.</para>
+
+<table id="ooRexxSocketClass" frame="all" pgwide="1">
+<title>Socket Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">+ OutputStream (Mixin Class)</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the OutputStream class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">+ InputStream (Mixin Class)</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the InputStream class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">InputOutputStream (Mixin Class)</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the InputOutputStream class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">Socket</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthSocketBufferOutput" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketCharIn" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketCharOut" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketChars" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketCipher" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketClose" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketDescription" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketFlush" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketLineEnd" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketLineIn" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketLineOut" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketLines" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketLocalAddress" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketLocalPort" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketNew" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketNoDelay" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketProtocol" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketRead" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketReadTimeout" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketRemoteAddress" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketRemotePort" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketResolve" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketSay" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketSecure" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketShutdownOutput" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketStartTLS" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketStartTLSServer" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketState" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketString" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthSocketWriteTimeout" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- bufferOutput attribute -->
+<section id="mthSocketBufferOutput"><title>&added52; bufferOutput (Attribute)</title>
+<indexterm><primary>bufferOutput attribute</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_bufferOutput.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">bufferOutput get:</emphasis></term>
+  <listitem><para>Returns <literal>.true</literal> when writes are kept in a
+  buffer, <literal>.false</literal> (the default) when each goes out when it
+  is made.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">bufferOutput set:</emphasis></term>
+  <listitem><para><literal>.true</literal> keeps writes in a buffer of 65536
+  bytes, a whole number keeps them in a buffer of that many bytes, and
+  <literal>.false</literal> sends what was kept and stops keeping
+  writes.</para></listitem></varlistentry>
+</variablelist>
+
+<para>What is kept is sent when the buffer is full, by
+<methodname>flush</methodname>, <methodname>close</methodname> and
+<methodname>shutdownOutput</methodname>, and before any read of this
+socket that has to wait, so that a request is never left in the buffer
+while its answer is awaited.  A read that is already waiting in another
+activity does not send it: call <methodname>flush</methodname>.  If what
+was kept cannot be sent, the method that sends it raises
+<literal>NOTREADY</literal>.</para>
+
+<para>For example, 100,000 lines of 50 bytes written with
+<methodname>lineOut</methodname> to a peer on the same machine took about
+3 seconds without a buffer and 0.3 seconds with one (Linux).</para>
+</section>
+
+
+<!-- charIn method -->
+<section id="mthSocketCharIn"><title>&added52; charIn</title>
+<indexterm><primary>charIn method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_charIn.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Reads <emphasis role="italic">length</emphasis> bytes, waiting until
+they have all arrived.  If the connection ends before, the bytes that
+arrived are returned and <literal>NOTREADY</literal> is raised.  The first
+argument, a position, must be omitted.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">length</emphasis></term>
+ <listitem><para>The number of bytes to read, a non-negative whole number.
+ The default is 1.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> the bytes read.</para>
+
+<para>See also <xref linkend="mthSocketRead" xrefstyle="select:title"/>,
+which returns what has arrived without waiting for more.</para>
+</section>
+
+
+<!-- charOut method -->
+<section id="mthSocketCharOut"><title>&added52; charOut</title>
+<indexterm><primary>charOut method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_charOut.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Writes the bytes of <emphasis role="italic">string</emphasis>,
+nothing else.  The second argument, a position, must be omitted.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">string</emphasis></term>
+ <listitem><para>The data to write.  If omitted, nothing is
+ written.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> <literal>0</literal> if the
+data was written (or kept, see <methodname>bufferOutput</methodname>);
+otherwise, the number of bytes not written, and
+<literal>NOTREADY</literal> is raised.</para>
+</section>
+
+
+<!-- chars method -->
+<section id="mthSocketChars"><title>&added52; chars</title>
+<indexterm><primary>chars method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_chars.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the number of bytes that have arrived and not been read.  If
+none have, it returns <literal>1</literal> while the connection is open
+(more may come) and <literal>0</literal> when it has ended.  It never
+waits.</para>
+
+<para><emphasis role="bold">Returns:</emphasis> a non-negative whole
+number.</para>
+</section>
+
+
+<!-- cipher method -->
+<section id="mthSocketCipher"><title>&added52; cipher</title>
+<indexterm><primary>cipher method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_cipher.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the name of the cipher suite in use, for example
+<literal>TLS_AES_256_GCM_SHA384</literal>, once TLS has started, and an
+empty string before.</para>
+</section>
+
+
+<!-- close method -->
+<section id="mthSocketClose"><title>&added52; close</title>
+<indexterm><primary>close method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_close.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Sends what <methodname>bufferOutput</methodname> has kept, then
+closes the connection.  Closing a socket that is already closed has no
+effect.  If what was kept cannot be sent, the socket is closed all the
+same and <literal>NOTREADY</literal> is raised.  On a TLS connection, the
+peer is told that the connection ends (TLS&apos;s
+<literal>close_notify</literal>).</para>
+
+<para><emphasis role="bold">Returns:</emphasis> <literal>READY:</literal>,
+or the description of the failure.</para>
+</section>
+
+
+<!-- description method -->
+<section id="mthSocketDescription"><title>&added52; description</title>
+<indexterm><primary>description method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_description.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the state of the socket and what caused it, as for any
+stream: <literal>READY:</literal>, <literal>NOTREADY:EOF</literal>,
+<literal>NOTREADY:TIMEOUT</literal>, <literal>NOTREADY:closed</literal>,
+<literal>ERROR:</literal> followed by the error, or
+<literal>UNKNOWN:</literal> once closed.  See
+<xref linkend="socketsErrors" xrefstyle="select:title"/>.</para>
+</section>
+
+
+<!-- flush method -->
+<section id="mthSocketFlush"><title>&added52; flush</title>
+<indexterm><primary>flush method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_flush.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Sends what <methodname>bufferOutput</methodname> has kept.  If it
+cannot be sent, <literal>NOTREADY</literal> is raised.</para>
+
+<para><emphasis role="bold">Returns:</emphasis> <literal>READY:</literal>,
+or the description of the failure.</para>
+</section>
+
+
+<!-- lineEnd attribute -->
+<section id="mthSocketLineEnd"><title>&added52; lineEnd (Attribute)</title>
+<indexterm><primary>lineEnd attribute</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_lineEnd.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">lineEnd get:</emphasis></term>
+  <listitem><para>Returns the line end that <methodname>lineOut</methodname>
+  and <methodname>say</methodname> write after each line; by default, a
+  carriage return and a line feed, <literal>"0d0a"x</literal>.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">lineEnd set:</emphasis></term>
+  <listitem><para>Sets the line end, for example to
+  <literal>"0a"x</literal>.  It does not change what
+  <methodname>lineIn</methodname> accepts.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- lineIn method -->
+<section id="mthSocketLineIn"><title>&added52; lineIn</title>
+<indexterm><primary>lineIn method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_lineIn.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Reads one line, waiting until it has arrived whole.  A line ends with
+a line feed; a carriage return before it is removed too.  When the
+connection ends, a last line without a line feed is returned, and the next
+<methodname>lineIn</methodname> raises <literal>NOTREADY</literal>.  The
+first argument, a line number, must be omitted.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">count</emphasis></term>
+ <listitem><para><literal>1</literal> (the default) reads a line;
+ <literal>0</literal> reads nothing and returns an empty
+ string.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> the line, without its line
+end; an empty string with <literal>NOTREADY</literal>.</para>
+</section>
+
+
+<!-- lineOut method -->
+<section id="mthSocketLineOut"><title>&added52; lineOut</title>
+<indexterm><primary>lineOut method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_lineOut.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Writes <emphasis role="italic">string</emphasis> followed by the line
+end (see <methodname>lineEnd</methodname>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">string</emphasis></term>
+ <listitem><para>The line to write.  If omitted, nothing is
+ written.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> <literal>0</literal> if the
+line was written (or kept, see <methodname>bufferOutput</methodname>);
+otherwise <literal>1</literal>, and <literal>NOTREADY</literal> is
+raised.</para>
+</section>
+
+
+<!-- lines method -->
+<section id="mthSocketLines"><title>&added52; lines</title>
+<indexterm><primary>lines method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_lines.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns <literal>1</literal> while a line can still be read: when
+bytes have arrived and not been read, or while the connection is open.
+Returns <literal>0</literal> when the connection has ended and everything
+has been read.  It never waits.  The <emphasis role="italic">option</emphasis>
+argument is accepted, as for streams, and has no effect.</para>
+
+<para><emphasis role="bold">Returns:</emphasis> <literal>1</literal> or
+<literal>0</literal>.</para>
+</section>
+
+
+<!-- localAddress method -->
+<section id="mthSocketLocalAddress"><title>&added52; localAddress</title>
+<indexterm><primary>localAddress method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_localAddress.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the address of this end of the connection, or an empty
+string if the socket is closed.</para>
+</section>
+
+
+<!-- localPort method -->
+<section id="mthSocketLocalPort"><title>&added52; localPort</title>
+<indexterm><primary>localPort method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_localPort.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the port of this end of the connection, or
+<literal>0</literal> if the socket is closed.</para>
+</section>
+
+
+<!-- new method -->
+<section id="mthSocketNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Connects to <emphasis role="italic">host</emphasis> and
+<emphasis role="italic">port</emphasis>.  If the host has several
+addresses, they are tried in turn until one accepts the connection.  If
+none does, a <literal>SYNTAX</literal> condition is raised
+(<literal>48.900</literal>, <literal>Socket error: connection refused
+(localhost, port 8888)</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">host</emphasis></term>
+ <listitem><para>A host name or an address (see
+ <xref linkend="socketsAddresses" xrefstyle="select:title"/>).</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number, or a service name such as
+ <literal>"http"</literal>.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">connectTimeout</emphasis></term>
+ <listitem><para>The seconds the connection may take; fractions are
+ allowed.  If omitted or <literal>.nil</literal>, the
+ system&apos;s.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> a new, connected
+<classname>Socket</classname>.</para>
+</section>
+
+
+<!-- noDelay attribute -->
+<section id="mthSocketNoDelay"><title>&added52; noDelay (Attribute)</title>
+<indexterm><primary>noDelay attribute</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_noDelay.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">noDelay get:</emphasis></term>
+  <listitem><para>Returns <literal>.true</literal> when small writes go out at
+  once, <literal>.false</literal> (the system&apos;s default) when the system
+  may wait a little to send them together (Nagle&apos;s
+  algorithm).</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">noDelay set:</emphasis></term>
+  <listitem><para>Sets the TCP option <literal>TCP_NODELAY</literal> to
+  <literal>.true</literal> or <literal>.false</literal>.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- protocol method -->
+<section id="mthSocketProtocol"><title>&added52; protocol</title>
+<indexterm><primary>protocol method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_protocol.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the TLS protocol in use, <literal>TLSv1.3</literal> or
+<literal>TLSv1.2</literal>, once TLS has started, and an empty string
+before.</para>
+</section>
+
+
+<!-- read method -->
+<section id="mthSocketRead"><title>&added52; read</title>
+<indexterm><primary>read method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_read.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the bytes that have arrived, up to
+<emphasis role="italic">max</emphasis>, waiting only if none have.  At the
+end of the connection, it returns an empty string and raises
+<literal>NOTREADY</literal>.  Unlike <methodname>charIn</methodname>, it
+does not wait for a given number of bytes: it suits protocols that do not
+say how long their messages are.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">max</emphasis></term>
+ <listitem><para>The largest number of bytes to return, a positive whole
+ number.  The default is 65536.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> the bytes read.</para>
+</section>
+
+
+<!-- readTimeout attribute -->
+<section id="mthSocketReadTimeout"><title>&added52; readTimeout (Attribute)</title>
+<indexterm><primary>readTimeout attribute</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_readTimeout.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">readTimeout get:</emphasis></term>
+  <listitem><para>Returns the seconds a read may wait, or
+  <literal>.nil</literal> (the default), as long as it
+  takes.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">readTimeout set:</emphasis></term>
+  <listitem><para>Sets it, to a non-negative number of seconds (fractions
+  are allowed) or to <literal>.nil</literal>.</para></listitem></varlistentry>
+</variablelist>
+
+<para>A read that waits longer raises <literal>NOTREADY</literal>, and
+<methodname>description</methodname> returns
+<literal>NOTREADY:TIMEOUT</literal>.  The socket can still be used.  The
+timeout also limits the handshakes of <methodname>startTLS</methodname>
+and <methodname>startTLSServer</methodname>, and that of a socket accepted
+by a <classname>TLSServerSocket</classname>.</para>
+</section>
+
+
+<!-- remoteAddress method -->
+<section id="mthSocketRemoteAddress"><title>&added52; remoteAddress</title>
+<indexterm><primary>remoteAddress method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_remoteAddress.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the address of the peer, or an empty string if the socket is
+closed.</para>
+</section>
+
+
+<!-- remotePort method -->
+<section id="mthSocketRemotePort"><title>&added52; remotePort</title>
+<indexterm><primary>remotePort method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_remotePort.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the port of the peer, or <literal>0</literal> if the socket
+is closed.</para>
+</section>
+
+
+<!-- resolve method -->
+<section id="mthSocketResolve"><title>&added52; resolve (Class Method)</title>
+<indexterm><primary>resolve method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_resolve.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Looks up a host name.  A name that cannot be found raises a
+<literal>SYNTAX</literal> condition (<literal>48.900</literal>,
+<literal>Socket error: unknown host (no-such-host.invalid)</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">host</emphasis></term>
+ <listitem><para>A host name or an address.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> an
+<classname>Array</classname> of the addresses of the host, as strings,
+IPv6 and IPv4.</para>
+
+<programlisting language="rexx">
+say .Socket~resolve("localhost")~toString(, " ")   -- e.g. ::1 127.0.0.1
+
+::requires "sockets.cls"
+</programlisting>
+</section>
+
+
+<!-- say method -->
+<section id="mthSocketSay"><title>&added52; say</title>
+<indexterm><primary>say method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_say.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Writes <emphasis role="italic">string</emphasis> followed by the line
+end, as <methodname>lineOut</methodname> does, so that a socket can be the
+destination of the <literal>.output</literal> monitor and of
+<literal>SAY</literal>.  Without an argument, it writes the line end
+only.</para>
+
+<para><emphasis role="bold">Returns:</emphasis> <literal>0</literal>, or
+<literal>1</literal> with <literal>NOTREADY</literal>.</para>
+</section>
+
+
+<!-- secure method -->
+<section id="mthSocketSecure"><title>&added52; secure</title>
+<indexterm><primary>secure method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_secure.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns <literal>.true</literal> once TLS has started on the
+connection (a <classname>TLSSocket</classname>, or after
+<methodname>startTLS</methodname> or
+<methodname>startTLSServer</methodname>), <literal>.false</literal>
+before.</para>
+</section>
+
+
+<!-- shutdownOutput method -->
+<section id="mthSocketShutdownOutput"><title>&added52; shutdownOutput</title>
+<indexterm><primary>shutdownOutput method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_shutdownOutput.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Sends what <methodname>bufferOutput</methodname> has kept and tells
+the peer that nothing more will be written: the peer reads the end of the
+stream.  This end can still read what the peer sends.</para>
+
+<para><emphasis role="bold">Returns:</emphasis> <literal>0</literal>, or
+<literal>1</literal> with <literal>NOTREADY</literal>.</para>
+</section>
+
+
+<!-- startTLS method -->
+<section id="mthSocketStartTLS"><title>&added52; startTLS</title>
+<indexterm><primary>startTLS method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_startTLS.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Starts TLS on this connection, as the client, for the protocols that
+begin in clear and switch to TLS, such as SMTP, IMAP and FTP after their
+<literal>STARTTLS</literal> command.  The server&apos;s certificate is
+verified as for a <classname>TLSSocket</classname>.  The handshake waits
+at most <methodname>readTimeout</methodname>.  If it fails, the socket is
+closed and a <literal>SYNTAX</literal> condition is raised
+(<literal>48.900</literal>).  Bytes that arrived in clear and were not
+read before the handshake are refused, with the same condition, as they
+would otherwise be taken as if they had come over TLS.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">host</emphasis></term>
+ <listitem><para>The name the server&apos;s certificate must be valid for.
+ The default is the host this socket was made with.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">options</emphasis></term>
+ <listitem><para>A <xref linkend="clsTLSOptions" xrefstyle="select:title"/>
+ object.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> the socket, which is still
+a <classname>Socket</classname> and now <methodname>secure</methodname>.</para>
+
+<programlisting language="rexx">
+s = .Socket~new("smtp.example.com", 587)
+say s~lineIn                          -- 220 smtp.example.com ESMTP
+s~lineOut("EHLO me.example.com")
+loop until line~substr(4, 1) == " "   -- the reply's last line
+  line = s~lineIn
+end
+s~lineOut("STARTTLS")
+say s~lineIn                          -- 220 Ready to start TLS
+s~startTLS
+...
+
+::requires "sockets.cls"
+</programlisting>
+</section>
+
+
+<!-- startTLSServer method -->
+<section id="mthSocketStartTLSServer"><title>&added52; startTLSServer</title>
+<indexterm><primary>startTLSServer method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_startTLSServer.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Starts TLS on this connection, as the server, after the
+protocol&apos;s own command (SMTP&apos;s <literal>STARTTLS</literal>).  The
+handshake is made at once and waits at most
+<methodname>readTimeout</methodname>.  If it fails, the socket is closed
+and a <literal>SYNTAX</literal> condition is raised
+(<literal>48.900</literal>).  As with <methodname>startTLS</methodname>,
+bytes that arrived in clear and were not read are refused.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">options</emphasis></term>
+ <listitem><para>A <xref linkend="clsTLSOptions" xrefstyle="select:title"/>
+ object with the server&apos;s certificate (see
+ <xref linkend="mthTLSOptionsCertificate" xrefstyle="select:title"/>).</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> the socket.</para>
+</section>
+
+
+<!-- state method -->
+<section id="mthSocketState"><title>&added52; state</title>
+<indexterm><primary>state method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_state.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the state of the socket, as for any stream:
+<literal>READY</literal>, <literal>NOTREADY</literal>,
+<literal>ERROR</literal>, or <literal>UNKNOWN</literal> once closed.  See
+<methodname>description</methodname>.</para>
+</section>
+
+
+<!-- string method -->
+<section id="mthSocketString"><title>&added52; string</title>
+<indexterm><primary>string method</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_string.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the host and the port, as given to
+<methodname>new</methodname> or, for an accepted socket, the peer&apos;s:
+<literal>localhost:8888</literal>, <literal>[::1]:8888</literal>.</para>
+</section>
+
+
+<!-- writeTimeout attribute -->
+<section id="mthSocketWriteTimeout"><title>&added52; writeTimeout (Attribute)</title>
+<indexterm><primary>writeTimeout attribute</primary>
+<secondary>of Socket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/socket_writeTimeout.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">writeTimeout get:</emphasis></term>
+  <listitem><para>Returns the seconds a write may wait, or
+  <literal>.nil</literal> (the default), as long as it
+  takes.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">writeTimeout set:</emphasis></term>
+  <listitem><para>Sets it, to a non-negative number of seconds (fractions
+  are allowed) or to <literal>.nil</literal>.</para></listitem></varlistentry>
+</variablelist>
+
+<para>A write waits when the peer does not read and the system&apos;s
+buffers are full.  A write that waits longer raises
+<literal>NOTREADY</literal> (<literal>NOTREADY:TIMEOUT</literal>); part of
+its data may have been sent.</para>
+</section>
+
+</section>
+<!-- End of Socket class -->
+
+<!-- ================================================================== -->
+<!--  ServerSocket Class                                              -->
+<!-- ================================================================== -->
+<section id="clsServerSocket"><title>&added52; ServerSocket Class</title>
+<indexterm><primary>ServerSocket class</primary></indexterm>
+<indexterm><primary>ServerSocket class</primary>
+<secondary>accept method</secondary></indexterm>
+<indexterm><primary>ServerSocket class</primary>
+<secondary>acceptTimeout attribute</secondary></indexterm>
+<indexterm><primary>ServerSocket class</primary>
+<secondary>close method</secondary></indexterm>
+<indexterm><primary>ServerSocket class</primary>
+<secondary>localAddress method</secondary></indexterm>
+<indexterm><primary>ServerSocket class</primary>
+<secondary>localPort method</secondary></indexterm>
+<indexterm><primary>ServerSocket class</primary>
+<secondary>new method</secondary></indexterm>
+<indexterm><primary>ServerSocket class</primary>
+<secondary>string method</secondary></indexterm>
+
+<para>A TCP socket that listens on a port and accepts the connections of
+clients.</para>
+
+<table id="ooRexxServerSocketClass" frame="all" pgwide="1">
+<title>ServerSocket Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">ServerSocket</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthServerSocketAccept" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthServerSocketAcceptTimeout" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthServerSocketClose" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthServerSocketLocalAddress" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthServerSocketLocalPort" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthServerSocketNew" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthServerSocketString" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- accept method -->
+<section id="mthServerSocketAccept"><title>&added52; accept</title>
+<indexterm><primary>accept method</primary>
+<secondary>of ServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/serverSocket_accept.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Waits for a client to connect, at most
+<methodname>acceptTimeout</methodname>.</para>
+
+<para><emphasis role="bold">Returns:</emphasis> a
+<xref linkend="clsSocket" xrefstyle="select:title"/> connected to the
+client, or <literal>.nil</literal> if <methodname>acceptTimeout</methodname>
+expired.</para>
+</section>
+
+
+<!-- acceptTimeout attribute -->
+<section id="mthServerSocketAcceptTimeout"><title>&added52; acceptTimeout (Attribute)</title>
+<indexterm><primary>acceptTimeout attribute</primary>
+<secondary>of ServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/serverSocket_acceptTimeout.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">acceptTimeout get:</emphasis></term>
+  <listitem><para>Returns the seconds <methodname>accept</methodname> may
+  wait, or <literal>.nil</literal> (the default), as long as it
+  takes.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">acceptTimeout set:</emphasis></term>
+  <listitem><para>Sets it, to a non-negative number of seconds (fractions
+  are allowed) or to <literal>.nil</literal>.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- close method -->
+<section id="mthServerSocketClose"><title>&added52; close</title>
+<indexterm><primary>close method</primary>
+<secondary>of ServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/serverSocket_close.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Stops listening.  The sockets already accepted are not
+affected.</para>
+
+<para><emphasis role="bold">Returns:</emphasis> <literal>READY:</literal>.</para>
+</section>
+
+
+<!-- localAddress method -->
+<section id="mthServerSocketLocalAddress"><title>&added52; localAddress</title>
+<indexterm><primary>localAddress method</primary>
+<secondary>of ServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/serverSocket_localAddress.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the address the socket listens on (<literal>::</literal> or
+<literal>0.0.0.0</literal> for every address).</para>
+</section>
+
+
+<!-- localPort method -->
+<section id="mthServerSocketLocalPort"><title>&added52; localPort</title>
+<indexterm><primary>localPort method</primary>
+<secondary>of ServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/serverSocket_localPort.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the port the socket listens on: the one the system chose,
+if it was made with port 0.</para>
+</section>
+
+
+<!-- new method -->
+<section id="mthServerSocketNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of ServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/serverSocket_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Listens on <emphasis role="italic">port</emphasis>.  If the port
+cannot be used (another socket listens on it, or the program may not use
+it), a <literal>SYNTAX</literal> condition is raised
+(<literal>48.900</literal>, <literal>Socket error: address already in use
+(port 8888)</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number; 0 asks the system to choose one (see
+ <methodname>localPort</methodname>).</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">address</emphasis></term>
+ <listitem><para>The address to listen on, one of the machine&apos;s, for
+ example <literal>"127.0.0.1"</literal> to accept connections from this
+ machine only.  If omitted or empty, every address, IPv6 and
+ IPv4.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">backlog</emphasis></term>
+ <listitem><para>How many connections the system may hold while they wait
+ for <methodname>accept</methodname>.  If omitted or 0, the
+ system&apos;s default.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> a new
+<classname>ServerSocket</classname>.</para>
+</section>
+
+
+<!-- string method -->
+<section id="mthServerSocketString"><title>&added52; string</title>
+<indexterm><primary>string method</primary>
+<secondary>of ServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/serverSocket_string.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns a description of the socket, <literal>a ServerSocket on port
+8888</literal>.</para>
+</section>
+
+</section>
+<!-- End of ServerSocket class -->
+
+<!-- ================================================================== -->
+<!--  TLSSocket Class                                                 -->
+<!-- ================================================================== -->
+<section id="clsTLSSocket"><title>&added52; TLSSocket Class</title>
+<indexterm><primary>TLSSocket class</primary></indexterm>
+<indexterm><primary>TLSSocket class</primary>
+<secondary>new method</secondary></indexterm>
+
+<para>A <classname>Socket</classname> over TLS.  It is made by connecting
+to a server and making the TLS handshake, in which the server&apos;s
+certificate is verified (see <xref linkend="socketsTrust"
+xrefstyle="select:title"/>); a server&apos;s
+<xref linkend="clsTLSServerSocket" xrefstyle="select:title"/> returns them
+too.  Once made, it is used exactly as a <classname>Socket</classname>,
+with the same methods and the same <literal>NOTREADY</literal>
+conditions; its <methodname>secure</methodname> method returns
+<literal>.true</literal>, and <methodname>protocol</methodname> and
+<methodname>cipher</methodname> say what the handshake agreed on.</para>
+
+<para>A peer that closes the connection without TLS&apos;s own closing
+message (<literal>close_notify</literal>), as many HTTP servers do, is
+taken as the end of the stream.  Client certificates (mutual TLS) are not
+supported.</para>
+
+<table id="ooRexxTLSSocketClass" frame="all" pgwide="1">
+<title>TLSSocket Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">+ OutputStream (Mixin Class)</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the OutputStream class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">+ InputStream (Mixin Class)</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the InputStream class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">InputOutputStream (Mixin Class)</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the InputOutputStream class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">Socket</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the <link linkend="clsSocket">Socket class</link></entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">TLSSocket</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthTLSSocketNew" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- new method -->
+<section id="mthTLSSocketNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of TLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/tlsSocket_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Connects to <emphasis role="italic">host</emphasis> and
+<emphasis role="italic">port</emphasis> and makes the TLS handshake.  The
+server&apos;s certificate must be valid for
+<emphasis role="italic">host</emphasis> and trusted.  If the connection or
+the handshake fails, a <literal>SYNTAX</literal> condition is raised
+(<literal>48.900</literal>, <literal>TLS error: certificate has expired
+(expired.badssl.com, port 443)</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">host</emphasis></term>
+ <listitem><para>A host name or an address.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number, or a service name such as
+ <literal>"https"</literal>.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">options</emphasis></term>
+ <listitem><para>A <xref linkend="clsTLSOptions" xrefstyle="select:title"/>
+ object.  If omitted, the system decides which certificates are trusted,
+ and TLS 1.2 and 1.3 are accepted.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">connectTimeout</emphasis></term>
+ <listitem><para>The seconds the connection and the handshake may take
+ together.  If omitted or <literal>.nil</literal>, no limit.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> a new, connected
+<classname>TLSSocket</classname>.</para>
+</section>
+
+</section>
+<!-- End of TLSSocket class -->
+
+<!-- ================================================================== -->
+<!--  TLSServerSocket Class                                           -->
+<!-- ================================================================== -->
+<section id="clsTLSServerSocket"><title>&added52; TLSServerSocket Class</title>
+<indexterm><primary>TLSServerSocket class</primary></indexterm>
+<indexterm><primary>TLSServerSocket class</primary>
+<secondary>new method</secondary></indexterm>
+<indexterm><primary>TLSServerSocket class</primary>
+<secondary>string method</secondary></indexterm>
+
+<para>A <classname>ServerSocket</classname> whose connections are TLS.  Its
+<methodname>accept</methodname> method returns a
+<xref linkend="clsTLSSocket" xrefstyle="select:title"/> at once; the TLS
+handshake is made on its first read or write, in the activity that serves
+the client, and waits at most <methodname>readTimeout</methodname> (or
+<methodname>writeTimeout</methodname>, if it starts with a write).  A
+client that fails the handshake (a browser that does not trust the
+server&apos;s certificate, a port scanner) does not stop the server: that
+socket raises <literal>NOTREADY</literal>, and its
+<methodname>description</methodname> says why (<literal>ERROR:TLS handshake
+failed: tlsv1 alert unknown ca</literal>).</para>
+
+<programlisting language="rexx">
+opts = .TLSOptions~new~certificate("mySrvKeystore.p12", "123456")
+srv = .TLSServerSocket~new(9999, opts)
+loop
+  .Session~new(srv~accept)~start("serve")   -- as in Example 2
+end
+</programlisting>
+
+<table id="ooRexxTLSServerSocketClass" frame="all" pgwide="1">
+<title>TLSServerSocket Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">ServerSocket</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the <link linkend="clsServerSocket">ServerSocket class</link></entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">TLSServerSocket</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthTLSServerSocketNew" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthTLSServerSocketString" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- new method -->
+<section id="mthTLSServerSocketNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of TLSServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/tlsServerSocket_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Listens on <emphasis role="italic">port</emphasis>, as
+<xref linkend="mthServerSocketNew" xrefstyle="select:title"/> does, and
+prepares TLS with the server&apos;s certificate.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number; 0 asks the system to choose
+ one.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">options</emphasis></term>
+ <listitem><para>A <xref linkend="clsTLSOptions" xrefstyle="select:title"/>
+ object with the server&apos;s certificate (see
+ <xref linkend="mthTLSOptionsCertificate" xrefstyle="select:title"/>).</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">address</emphasis></term>
+ <listitem><para>The address to listen on.  If omitted or empty, every
+ address, IPv6 and IPv4.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">backlog</emphasis></term>
+ <listitem><para>How many connections the system may hold while they wait
+ for <methodname>accept</methodname>.  If omitted or 0, the
+ system&apos;s default.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> a new
+<classname>TLSServerSocket</classname>.</para>
+</section>
+
+
+<!-- string method -->
+<section id="mthTLSServerSocketString"><title>&added52; string</title>
+<indexterm><primary>string method</primary>
+<secondary>of TLSServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/tlsServerSocket_string.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns a description of the socket, <literal>a TLSServerSocket on
+port 9999</literal>.</para>
+</section>
+
+</section>
+<!-- End of TLSServerSocket class -->
+
+<!-- ================================================================== -->
+<!--  TLSOptions Class                                                -->
+<!-- ================================================================== -->
+<section id="clsTLSOptions"><title>&added52; TLSOptions Class</title>
+<indexterm><primary>TLSOptions class</primary></indexterm>
+<indexterm><primary>TLSOptions class</primary>
+<secondary>certificate method</secondary></indexterm>
+<indexterm><primary>TLSOptions class</primary>
+<secondary>identity method</secondary></indexterm>
+<indexterm><primary>TLSOptions class</primary>
+<secondary>minVersion attribute</secondary></indexterm>
+<indexterm><primary>TLSOptions class</primary>
+<secondary>new method</secondary></indexterm>
+<indexterm><primary>TLSOptions class</primary>
+<secondary>trust method</secondary></indexterm>
+<indexterm><primary>TLSOptions class</primary>
+<secondary>trusted method</secondary></indexterm>
+
+<para>The settings of a TLS or DTLS connection: the certificates trusted
+explicitly, the certificate a server presents, and the oldest version of
+the protocol accepted.  The methods <methodname>trust</methodname> and
+<methodname>certificate</methodname> return the
+<classname>TLSOptions</classname> object, so that they can be
+chained:</para>
+
+<programlisting language="rexx">
+opts = .TLSOptions~new~trust("ca.pem")
+opts~minVersion = "1.3"
+
+::requires "sockets.cls"
+</programlisting>
+
+<para>Nothing in a <classname>TLSOptions</classname> object turns the
+verification of certificates off.</para>
+
+<table id="ooRexxTLSOptionsClass" frame="all" pgwide="1">
+<title>TLSOptions Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">TLSOptions</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthTLSOptionsCertificate" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthTLSOptionsIdentity" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthTLSOptionsMinVersion" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthTLSOptionsNew" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthTLSOptionsTrust" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthTLSOptionsTrusted" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- certificate method -->
+<section id="mthTLSOptionsCertificate"><title>&added52; certificate</title>
+<indexterm><primary>certificate method</primary>
+<secondary>of TLSOptions class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/tlsOptions_certificate.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Sets the certificate this end presents, with its private key: what a
+<classname>TLSServerSocket</classname>, a
+<classname>DTLSServerSocket</classname> or
+<methodname>startTLSServer</methodname> needs.  A file that cannot be used
+(no private key, a wrong password, a key that is not the
+certificate&apos;s) raises a <literal>SYNTAX</literal> condition
+(<literal>48.900</literal>, <literal>TLS error: cannot use
+server.p12: ...</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">file</emphasis></term>
+ <listitem><para>A PKCS#12 keystore (as Java&apos;s
+ <command>keytool</command> makes them), or a PEM file with the certificate
+ and its private key.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">password</emphasis></term>
+ <listitem><para>The password of the keystore or of the key.  The default
+ is an empty string.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> the
+<classname>TLSOptions</classname> object.</para>
+</section>
+
+
+<!-- identity method -->
+<section id="mthTLSOptionsIdentity"><title>&added52; identity</title>
+<indexterm><primary>identity method</primary>
+<secondary>of TLSOptions class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/tlsOptions_identity.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the file and the password given to
+<methodname>certificate</methodname>, as an <classname>Array</classname>
+of two items, or <literal>.nil</literal> if none were given.</para>
+</section>
+
+
+<!-- minVersion attribute -->
+<section id="mthTLSOptionsMinVersion"><title>&added52; minVersion (Attribute)</title>
+<indexterm><primary>minVersion attribute</primary>
+<secondary>of TLSOptions class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/tlsOptions_minVersion.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">minVersion get:</emphasis></term>
+  <listitem><para>Returns the oldest version of TLS accepted:
+  <literal>"1.2"</literal> (the default) or
+  <literal>"1.3"</literal>.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">minVersion set:</emphasis></term>
+  <listitem><para>Sets it to <literal>"1.2"</literal> or
+  <literal>"1.3"</literal>.  DTLS has no version 1.3: a
+  <classname>DTLSSocket</classname> or a
+  <classname>DTLSServerSocket</classname> made with
+  <literal>"1.3"</literal> raises a <literal>SYNTAX</literal> condition
+  (<literal>48.900</literal>, <literal>DTLS 1.3 is not
+  supported</literal>).</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- new method -->
+<section id="mthTLSOptionsNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of TLSOptions class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/tlsOptions_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns a new <classname>TLSOptions</classname> object, with no
+certificates trusted explicitly (the system decides), no certificate of
+its own, and <methodname>minVersion</methodname>
+<literal>"1.2"</literal>.</para>
+</section>
+
+
+<!-- trust method -->
+<section id="mthTLSOptionsTrust"><title>&added52; trust</title>
+<indexterm><primary>trust method</primary>
+<secondary>of TLSOptions class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/tlsOptions_trust.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Trusts the certificates in <emphasis role="italic">file</emphasis>.
+From then on, only the certificates trusted so count: the system&apos;s
+trusted roots no longer do (see <xref linkend="socketsTrust"
+xrefstyle="select:title"/>).  It may be called more than once, to trust the
+certificates of several files.  A file that cannot be used raises a
+<literal>SYNTAX</literal> condition (<literal>48.900</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">file</emphasis></term>
+ <listitem><para>A file of certificates: PEM (one or more), DER, or a
+ PKCS#12 keystore.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">password</emphasis></term>
+ <listitem><para>The password of a PKCS#12 keystore.  The default is an
+ empty string.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> the
+<classname>TLSOptions</classname> object.</para>
+</section>
+
+
+<!-- trusted method -->
+<section id="mthTLSOptionsTrusted"><title>&added52; trusted</title>
+<indexterm><primary>trusted method</primary>
+<secondary>of TLSOptions class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/tlsOptions_trusted.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the certificates trusted explicitly, as an
+<classname>Array</classname> of strings, each a certificate in DER form.
+The array is empty when the system decides.</para>
+</section>
+
+</section>
+<!-- End of TLSOptions class -->
+
+<!-- ================================================================== -->
+<!--  UDPSocket Class                                                 -->
+<!-- ================================================================== -->
+<section id="clsUDPSocket"><title>&added52; UDPSocket Class</title>
+<indexterm><primary>UDPSocket class</primary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>broadcast attribute</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>close method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>connect method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>connected method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>localAddress method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>localPort method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>new method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>receive method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>receiveTimeout attribute</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>remoteAddress method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>remotePort method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>send method</secondary></indexterm>
+<indexterm><primary>UDPSocket class</primary>
+<secondary>string method</secondary></indexterm>
+
+<para>A UDP socket.  It is not a stream: each
+<methodname>send</methodname> sends one datagram, which arrives whole or
+not at all, and <methodname>receive</methodname> returns the next datagram
+with the address and the port of its sender.  Nothing says whether a
+datagram arrived, and datagrams may arrive in another order than they were
+sent.</para>
+
+<para>Every error is a <literal>SYNTAX</literal> condition,
+<literal>48.900</literal> (<literal>Socket error: message too long
+(localhost, port 5000)</literal>); there is no <literal>NOTREADY</literal>.</para>
+
+<table id="ooRexxUDPSocketClass" frame="all" pgwide="1">
+<title>UDPSocket Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">UDPSocket</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthUDPSocketBroadcast" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketClose" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketConnect" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketConnected" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketLocalAddress" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketLocalPort" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketNew" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketReceive" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketReceiveTimeout" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketRemoteAddress" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketRemotePort" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketSend" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthUDPSocketString" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- broadcast attribute -->
+<section id="mthUDPSocketBroadcast"><title>&added52; broadcast (Attribute)</title>
+<indexterm><primary>broadcast attribute</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_broadcast.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">broadcast get:</emphasis></term>
+  <listitem><para>Returns <literal>.true</literal> when the socket may send
+  to broadcast addresses (<literal>255.255.255.255</literal>, or a
+  network&apos;s own), <literal>.false</literal> (the default)
+  otherwise.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">broadcast set:</emphasis></term>
+  <listitem><para>Sets it to <literal>.true</literal> or
+  <literal>.false</literal>.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- close method -->
+<section id="mthUDPSocketClose"><title>&added52; close</title>
+<indexterm><primary>close method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_close.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Closes the socket.  A <methodname>receive</methodname> waiting in
+another activity ends with a <literal>SYNTAX</literal> condition
+(<literal>Socket error: the UDP socket is closed (port 5000)</literal>).</para>
+</section>
+
+
+<!-- connect method -->
+<section id="mthUDPSocketConnect"><title>&added52; connect</title>
+<indexterm><primary>connect method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_connect.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Fixes the peer of the socket.  From then on,
+<methodname>send</methodname> takes only the data and sends it to that
+peer, and <methodname>receive</methodname> returns only the datagrams the
+peer sends.  If the peer has nobody listening on its port, the system may
+be told so, and the next <methodname>receive</methodname> or
+<methodname>send</methodname> then raises a <literal>SYNTAX</literal>
+condition (<literal>Socket error: connection refused</literal>); a socket
+that is not connected is never told.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">host</emphasis></term>
+ <listitem><para>A host name or an address.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number, or a service name.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- connected method -->
+<section id="mthUDPSocketConnected"><title>&added52; connected</title>
+<indexterm><primary>connected method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_connected.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns <literal>.true</literal> once <methodname>connect</methodname>
+has been called, <literal>.false</literal> before.</para>
+</section>
+
+
+<!-- localAddress method -->
+<section id="mthUDPSocketLocalAddress"><title>&added52; localAddress</title>
+<indexterm><primary>localAddress method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_localAddress.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the address of the socket (<literal>::</literal> or
+<literal>0.0.0.0</literal> for every address).</para>
+</section>
+
+
+<!-- localPort method -->
+<section id="mthUDPSocketLocalPort"><title>&added52; localPort</title>
+<indexterm><primary>localPort method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_localPort.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the port of the socket: the one the system chose, if it was
+made without a port.</para>
+</section>
+
+
+<!-- new method -->
+<section id="mthUDPSocketNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Makes a UDP socket on <emphasis role="italic">port</emphasis>.  If
+the port cannot be used, a <literal>SYNTAX</literal> condition is raised
+(<literal>48.900</literal>, <literal>Socket error: address already in use
+(port 5000)</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number.  If omitted or 0, the system chooses one
+ (see <methodname>localPort</methodname>): what a client
+ needs.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">address</emphasis></term>
+ <listitem><para>The address to receive on, one of the machine&apos;s.  If
+ omitted or empty, every address, IPv6 and IPv4.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> a new
+<classname>UDPSocket</classname>.</para>
+</section>
+
+
+<!-- receive method -->
+<section id="mthUDPSocketReceive"><title>&added52; receive</title>
+<indexterm><primary>receive method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_receive.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Waits for the next datagram, at most
+<methodname>receiveTimeout</methodname>.  A datagram is never
+truncated.</para>
+
+<para><emphasis role="bold">Returns:</emphasis> a
+<xref linkend="clsDatagram" xrefstyle="select:title"/>, or
+<literal>.nil</literal> if <methodname>receiveTimeout</methodname>
+expired.  <literal>.nil</literal> means only that: every other outcome is a
+datagram or a <literal>SYNTAX</literal> condition.</para>
+</section>
+
+
+<!-- receiveTimeout attribute -->
+<section id="mthUDPSocketReceiveTimeout"><title>&added52; receiveTimeout (Attribute)</title>
+<indexterm><primary>receiveTimeout attribute</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_receiveTimeout.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">receiveTimeout get:</emphasis></term>
+  <listitem><para>Returns the seconds <methodname>receive</methodname> may
+  wait, or <literal>.nil</literal> (the default), as long as it
+  takes.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">receiveTimeout set:</emphasis></term>
+  <listitem><para>Sets it, to a non-negative number of seconds (fractions
+  are allowed) or to <literal>.nil</literal>.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- remoteAddress method -->
+<section id="mthUDPSocketRemoteAddress"><title>&added52; remoteAddress</title>
+<indexterm><primary>remoteAddress method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_remoteAddress.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the address of the peer given to
+<methodname>connect</methodname>, or an empty string if the socket is not
+connected.</para>
+</section>
+
+
+<!-- remotePort method -->
+<section id="mthUDPSocketRemotePort"><title>&added52; remotePort</title>
+<indexterm><primary>remotePort method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_remotePort.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the port of the peer given to
+<methodname>connect</methodname>, or <literal>0</literal> if the socket is
+not connected.</para>
+</section>
+
+
+<!-- send method -->
+<section id="mthUDPSocketSend"><title>&added52; send</title>
+<indexterm><primary>send method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_send.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Sends <emphasis role="italic">data</emphasis> as one datagram.  The
+host is looked up on every call.  A name with IPv4 and IPv6 addresses,
+such as <literal>localhost</literal>, is sent to over IPv4 when the socket
+can: UDP cannot try the next address when nobody answers, as TCP does.  A
+datagram can hold up to 65,507 bytes over IPv4 and 65,527 over IPv6; more
+raises a <literal>SYNTAX</literal> condition (<literal>Socket error:
+message too long</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">data</emphasis></term>
+ <listitem><para>The data to send.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">host</emphasis></term>
+ <listitem><para>A host name or an address.  Must be omitted, with
+ <emphasis role="italic">port</emphasis>, on a connected socket, and given
+ otherwise.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number, or a service name.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- string method -->
+<section id="mthUDPSocketString"><title>&added52; string</title>
+<indexterm><primary>string method</primary>
+<secondary>of UDPSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/udpSocket_string.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns a description of the socket, <literal>a UDPSocket on port
+5000</literal>.</para>
+</section>
+
+</section>
+<!-- End of UDPSocket class -->
+
+<!-- ================================================================== -->
+<!--  MulticastSocket Class                                           -->
+<!-- ================================================================== -->
+<section id="clsMulticastSocket"><title>&added52; MulticastSocket Class</title>
+<indexterm><primary>MulticastSocket class</primary></indexterm>
+<indexterm><primary>MulticastSocket class</primary>
+<secondary>joinGroup method</secondary></indexterm>
+<indexterm><primary>MulticastSocket class</primary>
+<secondary>leaveGroup method</secondary></indexterm>
+<indexterm><primary>MulticastSocket class</primary>
+<secondary>loopback attribute</secondary></indexterm>
+<indexterm><primary>MulticastSocket class</primary>
+<secondary>networkInterface attribute</secondary></indexterm>
+<indexterm><primary>MulticastSocket class</primary>
+<secondary>new method</secondary></indexterm>
+<indexterm><primary>MulticastSocket class</primary>
+<secondary>string method</secondary></indexterm>
+<indexterm><primary>MulticastSocket class</primary>
+<secondary>timeToLive attribute</secondary></indexterm>
+
+<para>A <classname>UDPSocket</classname> that joins multicast groups: a
+datagram sent to a group reaches every member of the group.  A group is an
+IPv4 address from <literal>224.0.0.0</literal> to
+<literal>239.255.255.255</literal> (<literal>239.x.x.x</literal> for a
+group of one&apos;s own) or an IPv6 address that begins with
+<literal>ff</literal>.  One socket made without an address can join IPv4
+and IPv6 groups.</para>
+
+<para>The port of a <classname>MulticastSocket</classname> can be shared:
+several programs on one machine can be members of a group on the same
+port, and each receives the datagrams of the groups it joined.  A datagram
+sent to the port alone, not to a group, reaches only one of them.  Sending
+to a group needs no membership; a <classname>MulticastSocket</classname>
+sends to IPv4 and IPv6 groups on every system, and can choose how far the
+datagram goes (<methodname>timeToLive</methodname>) and from which
+interface it leaves (<methodname>networkInterface</methodname>).</para>
+
+<programlisting language="rexx">
+m = .MulticastSocket~new(5000)
+m~joinGroup("239.1.2.3")
+loop
+  d = m~receive                       -- what anyone sends to the group
+  say d~address":" d~data
+end
+
+::requires "sockets.cls"
+</programlisting>
+
+<programlisting language="rexx">
+s = .MulticastSocket~new
+s~send("hello, everybody", "239.1.2.3", 5000)
+
+::requires "sockets.cls"
+</programlisting>
+
+<para>An <emphasis role="italic">interface</emphasis> is a network
+interface of the machine, given by its name (<literal>eth0</literal>,
+<literal>en0</literal>; on Windows, also its friendly name), its index, or
+one of its addresses (<literal>192.168.1.10</literal>; the loopback
+interface is <literal>127.0.0.1</literal>).</para>
+
+<table id="ooRexxMulticastSocketClass" frame="all" pgwide="1">
+<title>MulticastSocket Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">UDPSocket</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the <link linkend="clsUDPSocket">UDPSocket class</link></entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">MulticastSocket</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthMulticastSocketJoinGroup" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthMulticastSocketLeaveGroup" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthMulticastSocketLoopback" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthMulticastSocketNetworkInterface" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthMulticastSocketNew" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthMulticastSocketString" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthMulticastSocketTimeToLive" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- joinGroup method -->
+<section id="mthMulticastSocketJoinGroup"><title>&added52; joinGroup</title>
+<indexterm><primary>joinGroup method</primary>
+<secondary>of MulticastSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/multicastSocket_joinGroup.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Makes the socket a member of <emphasis role="italic">group</emphasis>:
+from then on, <methodname>receive</methodname> returns the datagrams sent to
+the group too.  An address that is not a multicast group raises a
+<literal>SYNTAX</literal> condition (<literal>48.900</literal>,
+<literal>Socket error: not a multicast address (10.0.0.1, port
+5000)</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">group</emphasis></term>
+ <listitem><para>The address of the group.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">interface</emphasis></term>
+ <listitem><para>The interface on which to receive the group&apos;s
+ datagrams.  If omitted or empty, the system chooses.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- leaveGroup method -->
+<section id="mthMulticastSocketLeaveGroup"><title>&added52; leaveGroup</title>
+<indexterm><primary>leaveGroup method</primary>
+<secondary>of MulticastSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/multicastSocket_leaveGroup.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Ends the membership of <emphasis role="italic">group</emphasis>
+started by <methodname>joinGroup</methodname>, with the same
+arguments.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">group</emphasis></term>
+ <listitem><para>The address of the group.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">interface</emphasis></term>
+ <listitem><para>The interface given to
+ <methodname>joinGroup</methodname>.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- loopback attribute -->
+<section id="mthMulticastSocketLoopback"><title>&added52; loopback (Attribute)</title>
+<indexterm><primary>loopback attribute</primary>
+<secondary>of MulticastSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/multicastSocket_loopback.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">loopback get:</emphasis></term>
+  <listitem><para>Returns <literal>.true</literal> (the default) when the
+  datagrams this socket sends to a group reach the members on the same
+  machine too, <literal>.false</literal> otherwise.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">loopback set:</emphasis></term>
+  <listitem><para>Sets it to <literal>.true</literal> or
+  <literal>.false</literal>.</para></listitem></varlistentry>
+</variablelist>
+
+<para>On Windows it is the setting of the receiving socket that counts:
+there, <literal>.false</literal> means that this socket does not receive
+what is sent to its groups from the same machine.</para>
+</section>
+
+
+<!-- networkInterface attribute -->
+<section id="mthMulticastSocketNetworkInterface"><title>&added52; networkInterface (Attribute)</title>
+<indexterm><primary>networkInterface attribute</primary>
+<secondary>of MulticastSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/multicastSocket_networkInterface.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">networkInterface get:</emphasis></term>
+  <listitem><para>Returns the interface the datagrams sent to a group leave
+  from, or an empty string (the default) if the system
+  chooses.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">networkInterface set:</emphasis></term>
+  <listitem><para>Sets it, to an interface or to an empty
+  string.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- new method -->
+<section id="mthMulticastSocketNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of MulticastSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/multicastSocket_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Makes a <classname>MulticastSocket</classname> on
+<emphasis role="italic">port</emphasis>, which other sockets may share.
+The arguments are those of <xref linkend="mthUDPSocketNew"
+xrefstyle="select:title"/>; a socket that receives the datagrams of a group
+must be made on the port they are sent to, and without an address.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number.  If omitted or 0, the system chooses
+ one.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">address</emphasis></term>
+ <listitem><para>The address to receive on.  If omitted or empty, every
+ address, IPv6 and IPv4.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> a new
+<classname>MulticastSocket</classname>.</para>
+</section>
+
+
+<!-- string method -->
+<section id="mthMulticastSocketString"><title>&added52; string</title>
+<indexterm><primary>string method</primary>
+<secondary>of MulticastSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/multicastSocket_string.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns a description of the socket, <literal>a MulticastSocket on
+port 5000</literal>.</para>
+</section>
+
+
+<!-- timeToLive attribute -->
+<section id="mthMulticastSocketTimeToLive"><title>&added52; timeToLive (Attribute)</title>
+<indexterm><primary>timeToLive attribute</primary>
+<secondary>of MulticastSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/multicastSocket_timeToLive.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">timeToLive get:</emphasis></term>
+  <listitem><para>Returns how many routers a datagram sent to a group may
+  cross: <literal>1</literal> (the default) keeps it in the local network,
+  <literal>0</literal> in this machine.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">timeToLive set:</emphasis></term>
+  <listitem><para>Sets it, to a whole number from 0 to 255.  It is the
+  time to live of IPv4 and the hop limit of IPv6.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+</section>
+<!-- End of MulticastSocket class -->
+
+<!-- ================================================================== -->
+<!--  DTLSSocket Class                                                -->
+<!-- ================================================================== -->
+<section id="clsDTLSSocket"><title>&added52; DTLSSocket Class</title>
+<indexterm><primary>DTLSSocket class</primary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>cipher method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>close method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>localAddress method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>localPort method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>new method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>protocol method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>receive method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>receiveTimeout attribute</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>remoteAddress method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>remotePort method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>secure method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>send method</secondary></indexterm>
+<indexterm><primary>DTLSSocket class</primary>
+<secondary>string method</secondary></indexterm>
+
+<para>Datagrams over DTLS, the version of TLS for UDP: they are encrypted,
+and sent between two ends that have made a handshake in which the
+server&apos;s certificate was verified, as for a
+<classname>TLSSocket</classname> (see <xref linkend="socketsTrust"
+xrefstyle="select:title"/>).  As with a <classname>UDPSocket</classname>,
+each <methodname>send</methodname> is one datagram, and datagrams may be
+lost or arrive in another order: DTLS protects them, it does not deliver
+them.  The version of DTLS is 1.2.</para>
+
+<para>A client makes a <classname>DTLSSocket</classname> with
+<methodname>new</methodname>; a server gets one for each client from
+<xref linkend="mthDTLSServerSocketAccept" xrefstyle="select:title"/>.
+Every error is a <literal>SYNTAX</literal> condition,
+<literal>48.900</literal>: <literal>TLS error:</literal> for the handshake
+and for TLS&apos;s own errors, <literal>Socket error:</literal> for those of
+the socket.</para>
+
+<programlisting language="rexx">
+opts = .TLSOptions~new~trust("server.p12", "secret")
+s = .DTLSSocket~new("localhost", 4433, opts, 10)
+s~send("hello")
+say s~receive                         -- HELLO
+s~close
+
+::requires "sockets.cls"
+</programlisting>
+
+<table id="ooRexxDTLSSocketClass" frame="all" pgwide="1">
+<title>DTLSSocket Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">DTLSSocket</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthDTLSSocketCipher" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketClose" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketLocalAddress" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketLocalPort" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketNew" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketProtocol" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketReceive" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketReceiveTimeout" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketRemoteAddress" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketRemotePort" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketSecure" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketSend" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSSocketString" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- cipher method -->
+<section id="mthDTLSSocketCipher"><title>&added52; cipher</title>
+<indexterm><primary>cipher method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_cipher.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the name of the cipher suite in use, for example
+<literal>ECDHE-RSA-AES256-GCM-SHA384</literal>.</para>
+</section>
+
+
+<!-- close method -->
+<section id="mthDTLSSocketClose"><title>&added52; close</title>
+<indexterm><primary>close method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_close.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Tells the peer that the connection ends (TLS&apos;s
+<literal>close_notify</literal>), and closes the socket.</para>
+</section>
+
+
+<!-- localAddress method -->
+<section id="mthDTLSSocketLocalAddress"><title>&added52; localAddress</title>
+<indexterm><primary>localAddress method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_localAddress.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the address of this end.</para>
+</section>
+
+
+<!-- localPort method -->
+<section id="mthDTLSSocketLocalPort"><title>&added52; localPort</title>
+<indexterm><primary>localPort method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_localPort.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the port of this end.</para>
+</section>
+
+
+<!-- new method -->
+<section id="mthDTLSSocketNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Makes a UDP socket that sends to <emphasis role="italic">host</emphasis>
+and <emphasis role="italic">port</emphasis> only, and makes the DTLS
+handshake.  If the handshake fails, a <literal>SYNTAX</literal> condition
+is raised (<literal>48.900</literal>, <literal>TLS error: certificate has
+expired (localhost, port 4433)</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">host</emphasis></term>
+ <listitem><para>A host name or an address.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number, or a service name.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">options</emphasis></term>
+ <listitem><para>A <xref linkend="clsTLSOptions" xrefstyle="select:title"/>
+ object.  If omitted, the system decides which certificates are
+ trusted.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">connectTimeout</emphasis></term>
+ <listitem><para>The seconds the handshake may take.  DTLS sends its
+ messages again when they are lost, so without a timeout a server that
+ never answers makes <methodname>new</methodname> wait for about a minute
+ before it fails.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> a new
+<classname>DTLSSocket</classname>, its handshake made.</para>
+</section>
+
+
+<!-- protocol method -->
+<section id="mthDTLSSocketProtocol"><title>&added52; protocol</title>
+<indexterm><primary>protocol method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_protocol.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the protocol in use, <literal>DTLSv1.2</literal>.</para>
+</section>
+
+
+<!-- receive method -->
+<section id="mthDTLSSocketReceive"><title>&added52; receive</title>
+<indexterm><primary>receive method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_receive.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Waits for the next datagram from the peer, at most
+<methodname>receiveTimeout</methodname>, and decrypts it.  Once the peer
+has closed the connection, it raises a <literal>SYNTAX</literal> condition
+(<literal>48.900</literal>, <literal>TLS error: the peer closed the
+connection (localhost, port 4433)</literal>).</para>
+
+<para><emphasis role="bold">Returns:</emphasis> a
+<xref linkend="clsDatagram" xrefstyle="select:title"/>, or
+<literal>.nil</literal> if <methodname>receiveTimeout</methodname>
+expired.  <literal>.nil</literal> means only that: every other outcome is a
+datagram or a <literal>SYNTAX</literal> condition.</para>
+</section>
+
+
+<!-- receiveTimeout attribute -->
+<section id="mthDTLSSocketReceiveTimeout"><title>&added52; receiveTimeout (Attribute)</title>
+<indexterm><primary>receiveTimeout attribute</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_receiveTimeout.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">receiveTimeout get:</emphasis></term>
+  <listitem><para>Returns the seconds <methodname>receive</methodname> may
+  wait, or <literal>.nil</literal> (the default), as long as it
+  takes.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">receiveTimeout set:</emphasis></term>
+  <listitem><para>Sets it, to a non-negative number of seconds (fractions
+  are allowed) or to <literal>.nil</literal>.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- remoteAddress method -->
+<section id="mthDTLSSocketRemoteAddress"><title>&added52; remoteAddress</title>
+<indexterm><primary>remoteAddress method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_remoteAddress.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the address of the peer.</para>
+</section>
+
+
+<!-- remotePort method -->
+<section id="mthDTLSSocketRemotePort"><title>&added52; remotePort</title>
+<indexterm><primary>remotePort method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_remotePort.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the port of the peer.</para>
+</section>
+
+
+<!-- secure method -->
+<section id="mthDTLSSocketSecure"><title>&added52; secure</title>
+<indexterm><primary>secure method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_secure.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns <literal>.true</literal>: a <classname>DTLSSocket</classname>
+is always secure.</para>
+</section>
+
+
+<!-- send method -->
+<section id="mthDTLSSocketSend"><title>&added52; send</title>
+<indexterm><primary>send method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_send.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Encrypts <emphasis role="italic">data</emphasis> and sends it to the
+peer as one datagram.  Up to 16,384 bytes can be sent at a time; more
+raises a <literal>SYNTAX</literal> condition (<literal>Socket error:
+message too long</literal>).</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">data</emphasis></term>
+ <listitem><para>The data to send.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- string method -->
+<section id="mthDTLSSocketString"><title>&added52; string</title>
+<indexterm><primary>string method</primary>
+<secondary>of DTLSSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsSocket_string.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the host and the port of the peer, as given to
+<methodname>new</methodname> or, for an accepted socket, its address:
+<literal>localhost:4433</literal>, <literal>[::1]:4433</literal>.</para>
+</section>
+
+</section>
+<!-- End of DTLSSocket class -->
+
+<!-- ================================================================== -->
+<!--  DTLSServerSocket Class                                          -->
+<!-- ================================================================== -->
+<section id="clsDTLSServerSocket"><title>&added52; DTLSServerSocket Class</title>
+<indexterm><primary>DTLSServerSocket class</primary></indexterm>
+<indexterm><primary>DTLSServerSocket class</primary>
+<secondary>accept method</secondary></indexterm>
+<indexterm><primary>DTLSServerSocket class</primary>
+<secondary>acceptTimeout attribute</secondary></indexterm>
+<indexterm><primary>DTLSServerSocket class</primary>
+<secondary>close method</secondary></indexterm>
+<indexterm><primary>DTLSServerSocket class</primary>
+<secondary>localAddress method</secondary></indexterm>
+<indexterm><primary>DTLSServerSocket class</primary>
+<secondary>localPort method</secondary></indexterm>
+<indexterm><primary>DTLSServerSocket class</primary>
+<secondary>new method</secondary></indexterm>
+<indexterm><primary>DTLSServerSocket class</primary>
+<secondary>string method</secondary></indexterm>
+
+<para>A DTLS server: one UDP socket, on one port, that serves any number of
+clients, each with its own handshake.  Its <methodname>accept</methodname>
+method returns a <xref linkend="clsDTLSSocket" xrefstyle="select:title"/>
+for each client whose handshake has finished.  A client is first sent a
+cookie that it must send back, so that a client with a forged address costs
+the server nothing.  A client that fails the handshake, or never finishes
+it, is dropped, and the server goes on.</para>
+
+<para>The server answers the messages of the handshakes while something
+waits on it: an <methodname>accept</methodname>, or a
+<methodname>receive</methodname> on one of the sockets it accepted.  Closing
+the server ends the connections it accepted.</para>
+
+<programlisting language="rexx">
+opts = .TLSOptions~new~certificate("server.p12", "secret")
+srv = .DTLSServerSocket~new(4433, opts)
+loop
+  c = srv~accept                      -- a client, its handshake made
+  d = c~receive
+  c~send(d~data~upper)
+  c~close                             -- tells the client
+end
+
+::requires "sockets.cls"
+</programlisting>
+
+<table id="ooRexxDTLSServerSocketClass" frame="all" pgwide="1">
+<title>DTLSServerSocket Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">DTLSServerSocket</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthDTLSServerSocketAccept" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSServerSocketAcceptTimeout" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSServerSocketClose" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSServerSocketLocalAddress" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSServerSocketLocalPort" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSServerSocketNew" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDTLSServerSocketString" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- accept method -->
+<section id="mthDTLSServerSocketAccept"><title>&added52; accept</title>
+<indexterm><primary>accept method</primary>
+<secondary>of DTLSServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsServerSocket_accept.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Waits, at most <methodname>acceptTimeout</methodname>, for a client
+whose handshake has finished.</para>
+
+<para><emphasis role="bold">Returns:</emphasis> a
+<classname>DTLSSocket</classname> for the client, or
+<literal>.nil</literal> if <methodname>acceptTimeout</methodname>
+expired.</para>
+</section>
+
+
+<!-- acceptTimeout attribute -->
+<section id="mthDTLSServerSocketAcceptTimeout"><title>&added52; acceptTimeout (Attribute)</title>
+<indexterm><primary>acceptTimeout attribute</primary>
+<secondary>of DTLSServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsServerSocket_acceptTimeout.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<variablelist>
+  <varlistentry><term><emphasis role="bold">acceptTimeout get:</emphasis></term>
+  <listitem><para>Returns the seconds <methodname>accept</methodname> may
+  wait, or <literal>.nil</literal> (the default), as long as it
+  takes.</para></listitem></varlistentry>
+  <varlistentry><term><emphasis role="bold">acceptTimeout set:</emphasis></term>
+  <listitem><para>Sets it, to a non-negative number of seconds (fractions
+  are allowed) or to <literal>.nil</literal>.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- close method -->
+<section id="mthDTLSServerSocketClose"><title>&added52; close</title>
+<indexterm><primary>close method</primary>
+<secondary>of DTLSServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsServerSocket_close.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Stops the server.  The connections it accepted end with it.</para>
+</section>
+
+
+<!-- localAddress method -->
+<section id="mthDTLSServerSocketLocalAddress"><title>&added52; localAddress</title>
+<indexterm><primary>localAddress method</primary>
+<secondary>of DTLSServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsServerSocket_localAddress.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the address the server receives on.</para>
+</section>
+
+
+<!-- localPort method -->
+<section id="mthDTLSServerSocketLocalPort"><title>&added52; localPort</title>
+<indexterm><primary>localPort method</primary>
+<secondary>of DTLSServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsServerSocket_localPort.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the port the server receives on: the one the system chose,
+if it was made with port 0.</para>
+</section>
+
+
+<!-- new method -->
+<section id="mthDTLSServerSocketNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of DTLSServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsServerSocket_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Makes a DTLS server on <emphasis role="italic">port</emphasis>.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>A port number; 0 asks the system to choose
+ one.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">options</emphasis></term>
+ <listitem><para>A <xref linkend="clsTLSOptions" xrefstyle="select:title"/>
+ object with the server&apos;s certificate (see
+ <xref linkend="mthTLSOptionsCertificate" xrefstyle="select:title"/>).</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">address</emphasis></term>
+ <listitem><para>The address to receive on.  If omitted or empty, every
+ address, IPv6 and IPv4.</para></listitem></varlistentry>
+</variablelist>
+
+<para><emphasis role="bold">Returns:</emphasis> a new
+<classname>DTLSServerSocket</classname>.</para>
+</section>
+
+
+<!-- string method -->
+<section id="mthDTLSServerSocketString"><title>&added52; string</title>
+<indexterm><primary>string method</primary>
+<secondary>of DTLSServerSocket class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/dtlsServerSocket_string.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns a description of the server, <literal>a DTLSServerSocket on
+port 4433</literal>.</para>
+</section>
+
+</section>
+<!-- End of DTLSServerSocket class -->
+
+<!-- ================================================================== -->
+<!--  Datagram Class                                                  -->
+<!-- ================================================================== -->
+<section id="clsDatagram"><title>&added52; Datagram Class</title>
+<indexterm><primary>Datagram class</primary></indexterm>
+<indexterm><primary>Datagram class</primary>
+<secondary>address attribute</secondary></indexterm>
+<indexterm><primary>Datagram class</primary>
+<secondary>data attribute</secondary></indexterm>
+<indexterm><primary>Datagram class</primary>
+<secondary>makeString method</secondary></indexterm>
+<indexterm><primary>Datagram class</primary>
+<secondary>new method</secondary></indexterm>
+<indexterm><primary>Datagram class</primary>
+<secondary>port attribute</secondary></indexterm>
+<indexterm><primary>Datagram class</primary>
+<secondary>string method</secondary></indexterm>
+
+<para>A datagram received by <xref linkend="mthUDPSocketReceive"
+xrefstyle="select:title"/> or <xref linkend="mthDTLSSocketReceive"
+xrefstyle="select:title"/>: its data, and the address and the port of its
+sender.  Its string value is its data, so that <literal>say d</literal>
+shows what was received.</para>
+
+<table id="ooRexxDatagramClass" frame="all" pgwide="1">
+<title>Datagram Class</title>
+<tgroup cols="1">
+<tbody>
+ <row><entry align="center"><emphasis role="bold">Object</emphasis></entry>
+ </row>
+ <row><entry>Methods inherited from the Object class</entry>
+ </row>
+ <row><entry align="center"><emphasis role="bold">Datagram</emphasis></entry>
+ </row>
+ <row><entry>
+  <simplelist columns="3">
+   <member><xref linkend="mthDatagramAddress" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDatagramData" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDatagramMakeString" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDatagramNew" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDatagramPort" xrefstyle="select:title"/></member>
+   <member><xref linkend="mthDatagramString" xrefstyle="select:title"/></member>
+  </simplelist>
+ </entry></row>
+</tbody>
+</tgroup>
+</table>
+
+
+<!-- address attribute -->
+<section id="mthDatagramAddress"><title>&added52; address (Attribute)</title>
+<indexterm><primary>address attribute</primary>
+<secondary>of Datagram class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/datagram_address.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the address of the sender: <literal>"127.0.0.1"</literal>
+for IPv4, <literal>"::1"</literal> for IPv6.  This is a read-only
+attribute.</para>
+</section>
+
+
+<!-- data attribute -->
+<section id="mthDatagramData"><title>&added52; data (Attribute)</title>
+<indexterm><primary>data attribute</primary>
+<secondary>of Datagram class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/datagram_data.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the bytes received.  This is a read-only attribute.</para>
+</section>
+
+
+<!-- makeString method -->
+<section id="mthDatagramMakeString"><title>&added52; makeString</title>
+<indexterm><primary>makeString method</primary>
+<secondary>of Datagram class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/datagram_makeString.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the data, so that a <classname>Datagram</classname> can be
+used where a string is expected.</para>
+</section>
+
+
+<!-- new method -->
+<section id="mthDatagramNew"><title>&added52; new (Class Method)</title>
+<indexterm><primary>new method</primary>
+<secondary>of Datagram class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/datagram_new.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns a new <classname>Datagram</classname>.  Programs do not
+normally make them: <methodname>receive</methodname> does.</para>
+
+<para><emphasis role="bold">Arguments:</emphasis></para>
+<variablelist>
+ <varlistentry><term><emphasis role="italic">data</emphasis></term>
+ <listitem><para>The bytes.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">address</emphasis></term>
+ <listitem><para>The address of the sender.</para></listitem></varlistentry>
+ <varlistentry><term><emphasis role="italic">port</emphasis></term>
+ <listitem><para>The port of the sender.</para></listitem></varlistentry>
+</variablelist>
+</section>
+
+
+<!-- port attribute -->
+<section id="mthDatagramPort"><title>&added52; port (Attribute)</title>
+<indexterm><primary>port attribute</primary>
+<secondary>of Datagram class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/datagram_port.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the port of the sender.  This is a read-only
+attribute.</para>
+</section>
+
+
+<!-- string method -->
+<section id="mthDatagramString"><title>&added52; string</title>
+<indexterm><primary>string method</primary>
+<secondary>of Datagram class</secondary></indexterm>
+
+<mediaobject>
+<imageobject>
+<imagedata fileref="images/sockets/datagram_string.svg" scale="55" />
+</imageobject>
+</mediaobject>
+
+<para>Returns the data.</para>
+</section>
+
+</section>
+<!-- End of Datagram class -->
+
+</chapter>

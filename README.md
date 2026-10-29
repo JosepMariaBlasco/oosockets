@@ -377,6 +377,13 @@ the certificates in `tests/certs/` (made by `scripts/make-test-certs.sh`);
 those that need real servers (badssl.com) run only with
 `OOSOCKETS_ONLINE=1`, as the CI does.
 
+## Reference
+
+`doc/` holds the reference of every class, method and attribute: a
+chapter for ooRexx's *Rexx Extensions Library Reference*, in the style of
+that book, with its syntax diagrams (`doc/README.md` says how to build
+it).
+
 ## Licence
 
 [Common Public License 1.0](LICENSE), the licence of ooRexx, so that the

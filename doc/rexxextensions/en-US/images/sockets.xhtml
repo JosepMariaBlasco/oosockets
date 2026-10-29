@@ -1,0 +1,1827 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="generator" content="Railroad Diagram Generator 1.67" />
+      <style type="text/css">
+    ::-moz-selection
+    {
+      color: #FFFCF0;
+      background: #0F0C00;
+    }
+    ::selection
+    {
+      color: #FFFCF0;
+      background: #0F0C00;
+    }
+    .ebnf a, .grammar a
+    {
+      text-decoration: none;
+    }
+    .ebnf a:hover, .grammar a:hover
+    {
+      color: #050400;
+      text-decoration: underline;
+    }
+    .signature
+    {
+      color: #806600;
+      font-size: 11px;
+      text-align: right;
+    }
+    body
+    {
+      font: normal 12px Verdana, sans-serif;
+      color: #0F0C00;
+      background: #FFFCF0;
+    }
+    a:link, a:visited
+    {
+      color: #0F0C00;
+    }
+    a:link.signature, a:visited.signature
+    {
+      color: #806600;
+    }
+    a.button, #tabs li a
+    {
+      padding: 0.25em 0.5em;
+      border: 1px solid #806600;
+      background: #F1E8C6;
+      color: #806600;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    a.button:hover, #tabs li a:hover
+    {
+      color: #050400;
+      background: #FFF6D1;
+      border-color: #050400;
+    }
+    #tabs
+    {
+      padding: 3px 10px;
+      margin-left: 0;
+      margin-top: 58px;
+      border-bottom: 1px solid #0F0C00;
+    }
+    #tabs li
+    {
+      list-style: none;
+      margin-left: 5px;
+      display: inline;
+    }
+    #tabs li a
+    {
+      border-bottom: 1px solid #0F0C00;
+    }
+    #tabs li a.active
+    {
+      color: #0F0C00;
+      background: #FFFCF0;
+      border-color: #0F0C00;
+      border-bottom: 1px solid #FFFCF0;
+      outline: none;
+    }
+    #divs div
+    {
+      display: none;
+      overflow:auto;
+    }
+    #divs div.active
+    {
+      display: block;
+    }
+    #text
+    {
+      border-color: #806600;
+      background: #FFFEFA;
+      color: #050400;
+    }
+    .small
+    {
+      vertical-align: top;
+      text-align: right;
+      font-size: 9px;
+      font-weight: normal;
+      line-height: 120%;
+    }
+    td.small
+    {
+      padding-top: 0px;
+    }
+    .hidden
+    {
+      visibility: hidden;
+    }
+    td:hover .hidden
+    {
+      visibility: visible;
+    }
+    div.download
+    {
+      display: none;
+      background: #FFFCF0;
+      position: absolute;
+      right: 34px;
+      top: 94px;
+      padding: 10px;
+      border: 1px dotted #0F0C00;
+    }
+    #divs div.ebnf, .ebnf code
+    {
+      display: block;
+      padding: 10px;
+      background: #FFF6D1;
+      width: 992px;
+    }
+    #divs div.grammar
+    {
+      display: block;
+      padding-left: 16px;
+      padding-top: 2px;
+      padding-bottom: 2px;
+      background: #FFF6D1;
+    }
+    pre
+    {
+      margin: 0px;
+    }
+    .ebnf div
+    {
+      padding-left: 13ch;
+      text-indent: -13ch;
+    }
+    .ebnf code, .grammar code, textarea, pre
+    {
+      font:12px SFMono-Regular,Consolas,Liberation Mono,Menlo,Courier,monospace;
+    }
+    tr.option-line td:first-child
+    {
+      text-align: right
+    }
+    tr.option-text td
+    {
+      padding-bottom: 10px
+    }
+    table.palette
+    {
+      border-top: 1px solid #050400;
+      border-right: 1px solid #050400;
+      margin-bottom: 4px
+    }
+    td.palette
+    {
+      border-bottom: 1px solid #050400;
+      border-left: 1px solid #050400;
+    }
+    a.palette
+    {
+      padding: 2px 3px 2px 10px;
+      text-decoration: none;
+    }
+    .palette
+    {
+      -webkit-user-select: none;
+      -khtml-user-select: none;
+      -moz-user-select: none;
+      -o-user-select: none;
+      -ms-user-select: none;
+    }
+  </style><svg xmlns="http://www.w3.org/2000/svg">
+         <defs>
+            <style type="text/css">
+    @namespace "http://www.w3.org/2000/svg";
+    .line                 {fill: none; stroke: #332900; stroke-width: 1;}
+    .bold-line            {stroke: #141000; shape-rendering: crispEdges; stroke-width: 2;}
+    .thin-line            {stroke: #1F1800; shape-rendering: crispEdges}
+    .filled               {fill: #332900; stroke: none;}
+    text.terminal         {font-family: Verdana, Sans-serif;
+                            font-size: 12px;
+                            fill: #141000;
+                            font-weight: bold;
+                          }
+    text.nonterminal      {font-family: Verdana, Sans-serif;
+                            font-size: 12px;
+                            fill: #1A1400;
+                            font-weight: normal;
+                          }
+    text.regexp           {font-family: Verdana, Sans-serif;
+                            font-size: 12px;
+                            fill: #1F1800;
+                            font-weight: normal;
+                          }
+    rect, circle, polygon {fill: #332900; stroke: #332900;}
+    rect.terminal         {fill: #FFDB4D; stroke: #332900; stroke-width: 1;}
+    rect.nonterminal      {fill: #FFEC9E; stroke: #332900; stroke-width: 1;}
+    rect.text             {fill: none; stroke: none;}
+    polygon.regexp        {fill: #FFF4C7; stroke: #332900; stroke-width: 1;}
+  </style>
+         </defs></svg></head>
+   <body>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_new">socket_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="563" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="56" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#host" xlink:title="host">
+            <rect x="107" y="3" width="48" height="32"></rect>
+            <rect x="105" y="1" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="115" y="21">host</text></a><rect x="175" y="3" width="24" height="32" rx="10"></rect>
+         <rect x="173" y="1" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="183" y="21">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="219" y="3" width="46" height="32"></rect>
+            <rect x="217" y="1" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="227" y="21">port</text></a><rect x="305" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="303" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="313" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#connectTimeout" xlink:title="connectTimeout">
+            <rect x="349" y="35" width="120" height="32"></rect>
+            <rect x="347" y="33" width="120" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="357" y="53">connectTimeout</text></a><rect x="509" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="507" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="517" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m56 0 h10 m0 0 h10 m48 0 h10 m0 0 h10 m24 0 h10 m0 0 h10 m46 0 h10 m20 0 h10 m0 0 h174 m-204 0 h20 m184 0 h20 m-224 0 q10 0 10 10 m204 0 q0 -10 10 -10 m-214 10 v12 m204 0 v-12 m-204 12 q0 10 10 10 m184 0 q10 0 10 -10 m-194 10 h10 m24 0 h10 m0 0 h10 m120 0 h10 m20 -32 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="553 17 561 13 561 21"></polygon>
+         <polygon points="553 17 545 13 545 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_new" title="socket_new">socket_new</a></div>
+               <div>         ::= 'new(' <a href="#host" title="host">host</a> ',' <a href="#port" title="port">port</a> ( ',' <a href="#connectTimeout" title="connectTimeout">connectTimeout</a> )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_resolve">socket_resolve:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="249" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="76" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="76" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">resolve(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#host" xlink:title="host">
+            <rect x="127" y="3" width="48" height="32"></rect>
+            <rect x="125" y="1" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="135" y="21">host</text></a><rect x="195" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="193" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="203" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m76 0 h10 m0 0 h10 m48 0 h10 m0 0 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="239 17 247 13 247 21"></polygon>
+         <polygon points="239 17 231 13 231 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_resolve" title="socket_resolve">socket_resolve</a></div>
+               <div>         ::= 'resolve(' <a href="#host" title="host">host</a> ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_bufferOutput">socket_bufferOutput:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="373" height="157">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="108" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="108" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">bufferOutput</text>
+         <rect x="179" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="177" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="187" y="53">=</text>
+         <rect x="249" y="35" width="52" height="32" rx="10"></rect>
+         <rect x="247" y="33" width="52" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="257" y="53">.true</text>
+         <rect x="249" y="79" width="56" height="32" rx="10"></rect>
+         <rect x="247" y="77" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="257" y="97">.false</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#size" xlink:title="size">
+            <rect x="249" y="123" width="44" height="32"></rect>
+            <rect x="247" y="121" width="44" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="257" y="141">size</text></a><path class="line" d="m17 17 h2 m0 0 h10 m108 0 h10 m20 0 h10 m0 0 h156 m-186 0 h20 m166 0 h20 m-206 0 q10 0 10 10 m186 0 q0 -10 10 -10 m-196 10 v12 m186 0 v-12 m-186 12 q0 10 10 10 m166 0 q10 0 10 -10 m-176 10 h10 m30 0 h10 m20 0 h10 m52 0 h10 m0 0 h4 m-96 0 h20 m76 0 h20 m-116 0 q10 0 10 10 m96 0 q0 -10 10 -10 m-106 10 v24 m96 0 v-24 m-96 24 q0 10 10 10 m76 0 q10 0 10 -10 m-86 10 h10 m56 0 h10 m-86 -10 v20 m96 0 v-20 m-96 20 v24 m96 0 v-24 m-96 24 q0 10 10 10 m76 0 q10 0 10 -10 m-86 10 h10 m44 0 h10 m0 0 h12 m43 -120 h-3"></path>
+         <polygon points="363 17 371 13 371 21"></polygon>
+         <polygon points="363 17 355 13 355 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_bufferOutput" title="socket_bufferOutput">socket_bufferOutput</a></div>
+               <div>         ::= 'bufferOutput' ( '=' ( '.true' | '.false' | <a href="#size" title="size">size</a> ) )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_charIn">socket_charIn:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="419" height="101">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="64" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="64" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">charIn</text>
+         <rect x="135" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="133" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="143" y="53">(</text>
+         <rect x="201" y="67" width="24" height="32" rx="10"></rect>
+         <rect x="199" y="65" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="209" y="85">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#length" xlink:title="length">
+            <rect x="245" y="67" width="60" height="32"></rect>
+            <rect x="243" y="65" width="60" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="253" y="85">length</text></a><rect x="345" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="343" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="353" y="53">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m64 0 h10 m20 0 h10 m0 0 h246 m-276 0 h20 m256 0 h20 m-296 0 q10 0 10 10 m276 0 q0 -10 10 -10 m-286 10 v12 m276 0 v-12 m-276 12 q0 10 10 10 m256 0 q10 0 10 -10 m-266 10 h10 m26 0 h10 m20 0 h10 m0 0 h114 m-144 0 h20 m124 0 h20 m-164 0 q10 0 10 10 m144 0 q0 -10 10 -10 m-154 10 v12 m144 0 v-12 m-144 12 q0 10 10 10 m124 0 q10 0 10 -10 m-134 10 h10 m24 0 h10 m0 0 h10 m60 0 h10 m20 -32 h10 m26 0 h10 m23 -32 h-3"></path>
+         <polygon points="409 17 417 13 417 21"></polygon>
+         <polygon points="409 17 401 13 401 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_charIn" title="socket_charIn">socket_charIn</a></div>
+               <div>         ::= 'charIn' ( '(' ( ',' <a href="#length" title="length">length</a> )? ')' )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_charOut">socket_charOut:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="301" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="80" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="80" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">charOut(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#string" xlink:title="string">
+            <rect x="151" y="35" width="56" height="32"></rect>
+            <rect x="149" y="33" width="56" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="159" y="53">string</text></a><rect x="247" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="245" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="255" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m80 0 h10 m20 0 h10 m0 0 h66 m-96 0 h20 m76 0 h20 m-116 0 q10 0 10 10 m96 0 q0 -10 10 -10 m-106 10 v12 m96 0 v-12 m-96 12 q0 10 10 10 m76 0 q10 0 10 -10 m-86 10 h10 m56 0 h10 m20 -32 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="291 17 299 13 299 21"></polygon>
+         <polygon points="291 17 283 13 283 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_charOut" title="socket_charOut">socket_charOut</a></div>
+               <div>         ::= 'charOut(' <a href="#string" title="string">string</a>? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_chars">socket_chars:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="115" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="56" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">chars</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m56 0 h10 m3 0 h-3"></path>
+         <polygon points="105 17 113 13 113 21"></polygon>
+         <polygon points="105 17 97 13 97 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_chars" title="socket_chars">socket_chars</a></div>
+               <div>         ::= 'chars'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_cipher">socket_cipher:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="121" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="62" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="62" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">cipher</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m62 0 h10 m3 0 h-3"></path>
+         <polygon points="111 17 119 13 119 21"></polygon>
+         <polygon points="111 17 103 13 103 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_cipher" title="socket_cipher">socket_cipher</a></div>
+               <div>         ::= 'cipher'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_close">socket_close:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="113" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="54" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="54" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">close</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m54 0 h10 m3 0 h-3"></path>
+         <polygon points="103 17 111 13 111 21"></polygon>
+         <polygon points="103 17 95 13 95 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_close" title="socket_close">socket_close</a></div>
+               <div>         ::= 'close'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_description">socket_description:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="153" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="94" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="94" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">description</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m94 0 h10 m3 0 h-3"></path>
+         <polygon points="143 17 151 13 151 21"></polygon>
+         <polygon points="143 17 135 13 135 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_description" title="socket_description">socket_description</a></div>
+               <div>         ::= 'description'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_flush">socket_flush:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="111" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="52" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="52" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">flush</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m52 0 h10 m3 0 h-3"></path>
+         <polygon points="101 17 109 13 109 21"></polygon>
+         <polygon points="101 17 93 13 93 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_flush" title="socket_flush">socket_flush</a></div>
+               <div>         ::= 'flush'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_lineEnd">socket_lineEnd:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="295" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="70" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="70" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">lineEnd</text>
+         <rect x="141" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="139" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="149" y="53">=</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#string" xlink:title="string">
+            <rect x="191" y="35" width="56" height="32"></rect>
+            <rect x="189" y="33" width="56" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="199" y="53">string</text></a><path class="line" d="m17 17 h2 m0 0 h10 m70 0 h10 m20 0 h10 m0 0 h116 m-146 0 h20 m126 0 h20 m-166 0 q10 0 10 10 m146 0 q0 -10 10 -10 m-156 10 v12 m146 0 v-12 m-146 12 q0 10 10 10 m126 0 q10 0 10 -10 m-136 10 h10 m30 0 h10 m0 0 h10 m56 0 h10 m23 -32 h-3"></path>
+         <polygon points="285 17 293 13 293 21"></polygon>
+         <polygon points="285 17 277 13 277 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_lineEnd" title="socket_lineEnd">socket_lineEnd</a></div>
+               <div>         ::= 'lineEnd' ( '=' <a href="#string" title="string">string</a> )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_lineIn">socket_lineIn:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="409" height="101">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="60" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="60" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">lineIn</text>
+         <rect x="131" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="129" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="139" y="53">(</text>
+         <rect x="197" y="67" width="24" height="32" rx="10"></rect>
+         <rect x="195" y="65" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="205" y="85">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#count" xlink:title="count">
+            <rect x="241" y="67" width="54" height="32"></rect>
+            <rect x="239" y="65" width="54" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="249" y="85">count</text></a><rect x="335" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="333" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="343" y="53">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m60 0 h10 m20 0 h10 m0 0 h240 m-270 0 h20 m250 0 h20 m-290 0 q10 0 10 10 m270 0 q0 -10 10 -10 m-280 10 v12 m270 0 v-12 m-270 12 q0 10 10 10 m250 0 q10 0 10 -10 m-260 10 h10 m26 0 h10 m20 0 h10 m0 0 h108 m-138 0 h20 m118 0 h20 m-158 0 q10 0 10 10 m138 0 q0 -10 10 -10 m-148 10 v12 m138 0 v-12 m-138 12 q0 10 10 10 m118 0 q10 0 10 -10 m-128 10 h10 m24 0 h10 m0 0 h10 m54 0 h10 m20 -32 h10 m26 0 h10 m23 -32 h-3"></path>
+         <polygon points="399 17 407 13 407 21"></polygon>
+         <polygon points="399 17 391 13 391 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_lineIn" title="socket_lineIn">socket_lineIn</a></div>
+               <div>         ::= 'lineIn' ( '(' ( ',' <a href="#count" title="count">count</a> )? ')' )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_lineOut">socket_lineOut:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="297" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="76" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="76" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">lineOut(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#string" xlink:title="string">
+            <rect x="147" y="35" width="56" height="32"></rect>
+            <rect x="145" y="33" width="56" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="155" y="53">string</text></a><rect x="243" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="241" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="251" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m76 0 h10 m20 0 h10 m0 0 h66 m-96 0 h20 m76 0 h20 m-116 0 q10 0 10 10 m96 0 q0 -10 10 -10 m-106 10 v12 m96 0 v-12 m-96 12 q0 10 10 10 m76 0 q10 0 10 -10 m-86 10 h10 m56 0 h10 m20 -32 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="287 17 295 13 295 21"></polygon>
+         <polygon points="287 17 279 13 279 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_lineOut" title="socket_lineOut">socket_lineOut</a></div>
+               <div>         ::= 'lineOut(' <a href="#string" title="string">string</a>? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_lines">socket_lines:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="323" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="52" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="52" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">lines</text>
+         <rect x="123" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="121" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="131" y="53">(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#option" xlink:title="option">
+            <rect x="169" y="35" width="60" height="32"></rect>
+            <rect x="167" y="33" width="60" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="177" y="53">option</text></a><rect x="249" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="247" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="257" y="53">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m52 0 h10 m20 0 h10 m0 0 h162 m-192 0 h20 m172 0 h20 m-212 0 q10 0 10 10 m192 0 q0 -10 10 -10 m-202 10 v12 m192 0 v-12 m-192 12 q0 10 10 10 m172 0 q10 0 10 -10 m-182 10 h10 m26 0 h10 m0 0 h10 m60 0 h10 m0 0 h10 m26 0 h10 m23 -32 h-3"></path>
+         <polygon points="313 17 321 13 321 21"></polygon>
+         <polygon points="313 17 305 13 305 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_lines" title="socket_lines">socket_lines</a></div>
+               <div>         ::= 'lines' ( '(' <a href="#option" title="option">option</a> ')' )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_localAddress">socket_localAddress:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="165" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="106" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="106" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localAddress</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m106 0 h10 m3 0 h-3"></path>
+         <polygon points="155 17 163 13 163 21"></polygon>
+         <polygon points="155 17 147 13 147 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_localAddress" title="socket_localAddress">socket_localAddress</a></div>
+               <div>         ::= 'localAddress'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_localPort">socket_localPort:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="139" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="80" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="80" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localPort</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m80 0 h10 m3 0 h-3"></path>
+         <polygon points="129 17 137 13 137 21"></polygon>
+         <polygon points="129 17 121 13 121 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_localPort" title="socket_localPort">socket_localPort</a></div>
+               <div>         ::= 'localPort'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_noDelay">socket_noDelay:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="339" height="113">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="74" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="74" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">noDelay</text>
+         <rect x="145" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="143" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="153" y="53">=</text>
+         <rect x="215" y="35" width="52" height="32" rx="10"></rect>
+         <rect x="213" y="33" width="52" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="223" y="53">.true</text>
+         <rect x="215" y="79" width="56" height="32" rx="10"></rect>
+         <rect x="213" y="77" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="223" y="97">.false</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m74 0 h10 m20 0 h10 m0 0 h156 m-186 0 h20 m166 0 h20 m-206 0 q10 0 10 10 m186 0 q0 -10 10 -10 m-196 10 v12 m186 0 v-12 m-186 12 q0 10 10 10 m166 0 q10 0 10 -10 m-176 10 h10 m30 0 h10 m20 0 h10 m52 0 h10 m0 0 h4 m-96 0 h20 m76 0 h20 m-116 0 q10 0 10 10 m96 0 q0 -10 10 -10 m-106 10 v24 m96 0 v-24 m-96 24 q0 10 10 10 m76 0 q10 0 10 -10 m-86 10 h10 m56 0 h10 m43 -76 h-3"></path>
+         <polygon points="329 17 337 13 337 21"></polygon>
+         <polygon points="329 17 321 13 321 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_noDelay" title="socket_noDelay">socket_noDelay</a></div>
+               <div>         ::= 'noDelay' ( '=' ( '.true' | '.false' ) )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_protocol">socket_protocol:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="135" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="76" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="76" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">protocol</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m76 0 h10 m3 0 h-3"></path>
+         <polygon points="125 17 133 13 133 21"></polygon>
+         <polygon points="125 17 117 13 117 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_protocol" title="socket_protocol">socket_protocol</a></div>
+               <div>         ::= 'protocol'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_read">socket_read:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="307" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="50" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="50" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">read</text>
+         <rect x="121" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="119" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="129" y="53">(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#max" xlink:title="max">
+            <rect x="167" y="35" width="46" height="32"></rect>
+            <rect x="165" y="33" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="175" y="53">max</text></a><rect x="233" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="231" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="241" y="53">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m50 0 h10 m20 0 h10 m0 0 h148 m-178 0 h20 m158 0 h20 m-198 0 q10 0 10 10 m178 0 q0 -10 10 -10 m-188 10 v12 m178 0 v-12 m-178 12 q0 10 10 10 m158 0 q10 0 10 -10 m-168 10 h10 m26 0 h10 m0 0 h10 m46 0 h10 m0 0 h10 m26 0 h10 m23 -32 h-3"></path>
+         <polygon points="297 17 305 13 305 21"></polygon>
+         <polygon points="297 17 289 13 289 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_read" title="socket_read">socket_read</a></div>
+               <div>         ::= 'read' ( '(' <a href="#max" title="max">max</a> ')' )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_readTimeout">socket_readTimeout:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="347" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="106" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="106" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">readTimeout</text>
+         <rect x="177" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="175" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="185" y="53">=</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#seconds" xlink:title="seconds">
+            <rect x="227" y="35" width="72" height="32"></rect>
+            <rect x="225" y="33" width="72" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="235" y="53">seconds</text></a><path class="line" d="m17 17 h2 m0 0 h10 m106 0 h10 m20 0 h10 m0 0 h132 m-162 0 h20 m142 0 h20 m-182 0 q10 0 10 10 m162 0 q0 -10 10 -10 m-172 10 v12 m162 0 v-12 m-162 12 q0 10 10 10 m142 0 q10 0 10 -10 m-152 10 h10 m30 0 h10 m0 0 h10 m72 0 h10 m23 -32 h-3"></path>
+         <polygon points="337 17 345 13 345 21"></polygon>
+         <polygon points="337 17 329 13 329 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_readTimeout" title="socket_readTimeout">socket_readTimeout</a></div>
+               <div>         ::= 'readTimeout' ( '=' <a href="#seconds" title="seconds">seconds</a> )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_remoteAddress">socket_remoteAddress:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="181" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="122" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="122" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">remoteAddress</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m122 0 h10 m3 0 h-3"></path>
+         <polygon points="171 17 179 13 179 21"></polygon>
+         <polygon points="171 17 163 13 163 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_remoteAddress" title="socket_remoteAddress">socket_remoteAddress</a></div>
+               <div>         ::= 'remoteAddress'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_remotePort">socket_remotePort:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="155" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="96" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="96" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">remotePort</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m96 0 h10 m3 0 h-3"></path>
+         <polygon points="145 17 153 13 153 21"></polygon>
+         <polygon points="145 17 137 13 137 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_remotePort" title="socket_remotePort">socket_remotePort</a></div>
+               <div>         ::= 'remotePort'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_say">socket_say:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="309" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="42" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="42" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">say</text>
+         <rect x="113" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="111" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="121" y="53">(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#string" xlink:title="string">
+            <rect x="159" y="35" width="56" height="32"></rect>
+            <rect x="157" y="33" width="56" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="167" y="53">string</text></a><rect x="235" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="233" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="243" y="53">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m42 0 h10 m20 0 h10 m0 0 h158 m-188 0 h20 m168 0 h20 m-208 0 q10 0 10 10 m188 0 q0 -10 10 -10 m-198 10 v12 m188 0 v-12 m-188 12 q0 10 10 10 m168 0 q10 0 10 -10 m-178 10 h10 m26 0 h10 m0 0 h10 m56 0 h10 m0 0 h10 m26 0 h10 m23 -32 h-3"></path>
+         <polygon points="299 17 307 13 307 21"></polygon>
+         <polygon points="299 17 291 13 291 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_say" title="socket_say">socket_say</a></div>
+               <div>         ::= 'say' ( '(' <a href="#string" title="string">string</a> ')' )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_secure">socket_secure:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="123" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="64" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="64" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">secure</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m64 0 h10 m3 0 h-3"></path>
+         <polygon points="113 17 121 13 121 21"></polygon>
+         <polygon points="113 17 105 13 105 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_secure" title="socket_secure">socket_secure</a></div>
+               <div>         ::= 'secure'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_shutdownOutput">socket_shutdownOutput:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="193" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="134" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="134" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">shutdownOutput</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m134 0 h10 m3 0 h-3"></path>
+         <polygon points="183 17 191 13 191 21"></polygon>
+         <polygon points="183 17 175 13 175 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_shutdownOutput" title="socket_shutdownOutput">socket_shutdownOutput</a></div>
+               <div>         ::= 'shutdownOutput'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_startTLS">socket_startTLS:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="545" height="101">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="76" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="76" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">startTLS</text>
+         <rect x="147" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="145" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="155" y="53">(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#host" xlink:title="host">
+            <rect x="213" y="67" width="48" height="32"></rect>
+            <rect x="211" y="65" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="221" y="85">host</text></a><rect x="321" y="67" width="24" height="32" rx="10"></rect>
+         <rect x="319" y="65" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="329" y="85">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#options" xlink:title="options">
+            <rect x="365" y="67" width="66" height="32"></rect>
+            <rect x="363" y="65" width="66" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="373" y="85">options</text></a><rect x="471" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="469" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="479" y="53">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m76 0 h10 m20 0 h10 m0 0 h360 m-390 0 h20 m370 0 h20 m-410 0 q10 0 10 10 m390 0 q0 -10 10 -10 m-400 10 v12 m390 0 v-12 m-390 12 q0 10 10 10 m370 0 q10 0 10 -10 m-380 10 h10 m26 0 h10 m20 0 h10 m0 0 h58 m-88 0 h20 m68 0 h20 m-108 0 q10 0 10 10 m88 0 q0 -10 10 -10 m-98 10 v12 m88 0 v-12 m-88 12 q0 10 10 10 m68 0 q10 0 10 -10 m-78 10 h10 m48 0 h10 m40 -32 h10 m0 0 h120 m-150 0 h20 m130 0 h20 m-170 0 q10 0 10 10 m150 0 q0 -10 10 -10 m-160 10 v12 m150 0 v-12 m-150 12 q0 10 10 10 m130 0 q10 0 10 -10 m-140 10 h10 m24 0 h10 m0 0 h10 m66 0 h10 m20 -32 h10 m26 0 h10 m23 -32 h-3"></path>
+         <polygon points="535 17 543 13 543 21"></polygon>
+         <polygon points="535 17 527 13 527 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_startTLS" title="socket_startTLS">socket_startTLS</a></div>
+               <div>         ::= 'startTLS' ( '(' <a href="#host" title="host">host</a>? ( ',' <a href="#options" title="options">options</a> )? ')' )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_startTLSServer">socket_startTLSServer:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="319" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="128" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="128" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">startTLSServer(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#options" xlink:title="options">
+            <rect x="179" y="3" width="66" height="32"></rect>
+            <rect x="177" y="1" width="66" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="187" y="21">options</text></a><rect x="265" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="263" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="273" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m128 0 h10 m0 0 h10 m66 0 h10 m0 0 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="309 17 317 13 317 21"></polygon>
+         <polygon points="309 17 301 13 301 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_startTLSServer" title="socket_startTLSServer">socket_startTLSServer</a></div>
+               <div>         ::= 'startTLSServer(' <a href="#options" title="options">options</a> ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_state">socket_state:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="113" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="54" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="54" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">state</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m54 0 h10 m3 0 h-3"></path>
+         <polygon points="103 17 111 13 111 21"></polygon>
+         <polygon points="103 17 95 13 95 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_state" title="socket_state">socket_state</a></div>
+               <div>         ::= 'state'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_string">socket_string:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="119" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="60" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="60" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">string</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m60 0 h10 m3 0 h-3"></path>
+         <polygon points="109 17 117 13 117 21"></polygon>
+         <polygon points="109 17 101 13 101 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_string" title="socket_string">socket_string</a></div>
+               <div>         ::= 'string'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="socket_writeTimeout">socket_writeTimeout:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="351" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="110" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="110" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">writeTimeout</text>
+         <rect x="181" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="179" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="189" y="53">=</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#seconds" xlink:title="seconds">
+            <rect x="231" y="35" width="72" height="32"></rect>
+            <rect x="229" y="33" width="72" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="239" y="53">seconds</text></a><path class="line" d="m17 17 h2 m0 0 h10 m110 0 h10 m20 0 h10 m0 0 h132 m-162 0 h20 m142 0 h20 m-182 0 q10 0 10 10 m162 0 q0 -10 10 -10 m-172 10 v12 m162 0 v-12 m-162 12 q0 10 10 10 m142 0 q10 0 10 -10 m-152 10 h10 m30 0 h10 m0 0 h10 m72 0 h10 m23 -32 h-3"></path>
+         <polygon points="341 17 349 13 349 21"></polygon>
+         <polygon points="341 17 333 13 333 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#socket_writeTimeout" title="socket_writeTimeout">socket_writeTimeout</a></div>
+               <div>         ::= 'writeTimeout' ( '=' <a href="#seconds" title="seconds">seconds</a> )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="serverSocket_new">serverSocket_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="613" height="101">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="56" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="107" y="3" width="46" height="32"></rect>
+            <rect x="105" y="1" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="115" y="21">port</text></a><rect x="193" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="191" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="201" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#address" xlink:title="address">
+            <rect x="257" y="67" width="70" height="32"></rect>
+            <rect x="255" y="65" width="70" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="265" y="85">address</text></a><rect x="387" y="67" width="24" height="32" rx="10"></rect>
+         <rect x="385" y="65" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="395" y="85">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#backlog" xlink:title="backlog">
+            <rect x="431" y="67" width="68" height="32"></rect>
+            <rect x="429" y="65" width="68" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="439" y="85">backlog</text></a><rect x="559" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="557" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="567" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m56 0 h10 m0 0 h10 m46 0 h10 m20 0 h10 m0 0 h336 m-366 0 h20 m346 0 h20 m-386 0 q10 0 10 10 m366 0 q0 -10 10 -10 m-376 10 v12 m366 0 v-12 m-366 12 q0 10 10 10 m346 0 q10 0 10 -10 m-356 10 h10 m24 0 h10 m20 0 h10 m0 0 h80 m-110 0 h20 m90 0 h20 m-130 0 q10 0 10 10 m110 0 q0 -10 10 -10 m-120 10 v12 m110 0 v-12 m-110 12 q0 10 10 10 m90 0 q10 0 10 -10 m-100 10 h10 m70 0 h10 m40 -32 h10 m0 0 h122 m-152 0 h20 m132 0 h20 m-172 0 q10 0 10 10 m152 0 q0 -10 10 -10 m-162 10 v12 m152 0 v-12 m-152 12 q0 10 10 10 m132 0 q10 0 10 -10 m-142 10 h10 m24 0 h10 m0 0 h10 m68 0 h10 m40 -64 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="603 17 611 13 611 21"></polygon>
+         <polygon points="603 17 595 13 595 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#serverSocket_new" title="serverSocket_new">serverSocket_new</a></div>
+               <div>         ::= 'new(' <a href="#port" title="port">port</a> ( ',' <a href="#address" title="address">address</a>? ( ',' <a href="#backlog" title="backlog">backlog</a> )? )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="serverSocket_accept">serverSocket_accept:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="123" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="64" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="64" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">accept</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m64 0 h10 m3 0 h-3"></path>
+         <polygon points="113 17 121 13 121 21"></polygon>
+         <polygon points="113 17 105 13 105 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#serverSocket_accept" title="serverSocket_accept">serverSocket_accept</a></div>
+               <div>         ::= 'accept'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="serverSocket_acceptTimeout">serverSocket_acceptTimeout:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="359" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="118" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="118" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">acceptTimeout</text>
+         <rect x="189" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="187" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="197" y="53">=</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#seconds" xlink:title="seconds">
+            <rect x="239" y="35" width="72" height="32"></rect>
+            <rect x="237" y="33" width="72" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="247" y="53">seconds</text></a><path class="line" d="m17 17 h2 m0 0 h10 m118 0 h10 m20 0 h10 m0 0 h132 m-162 0 h20 m142 0 h20 m-182 0 q10 0 10 10 m162 0 q0 -10 10 -10 m-172 10 v12 m162 0 v-12 m-162 12 q0 10 10 10 m142 0 q10 0 10 -10 m-152 10 h10 m30 0 h10 m0 0 h10 m72 0 h10 m23 -32 h-3"></path>
+         <polygon points="349 17 357 13 357 21"></polygon>
+         <polygon points="349 17 341 13 341 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#serverSocket_acceptTimeout" title="serverSocket_acceptTimeout">serverSocket_acceptTimeout</a></div>
+               <div>         ::= 'acceptTimeout' ( '=' <a href="#seconds" title="seconds">seconds</a> )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="serverSocket_close">serverSocket_close:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="113" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="54" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="54" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">close</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m54 0 h10 m3 0 h-3"></path>
+         <polygon points="103 17 111 13 111 21"></polygon>
+         <polygon points="103 17 95 13 95 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#serverSocket_close" title="serverSocket_close">serverSocket_close</a></div>
+               <div>         ::= 'close'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="serverSocket_localAddress">serverSocket_localAddress:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="165" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="106" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="106" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localAddress</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m106 0 h10 m3 0 h-3"></path>
+         <polygon points="155 17 163 13 163 21"></polygon>
+         <polygon points="155 17 147 13 147 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#serverSocket_localAddress" title="serverSocket_localAddress">serverSocket_localAddress</a></div>
+               <div>         ::= 'localAddress'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="serverSocket_localPort">serverSocket_localPort:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="139" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="80" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="80" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localPort</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m80 0 h10 m3 0 h-3"></path>
+         <polygon points="129 17 137 13 137 21"></polygon>
+         <polygon points="129 17 121 13 121 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#serverSocket_localPort" title="serverSocket_localPort">serverSocket_localPort</a></div>
+               <div>         ::= 'localPort'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="serverSocket_string">serverSocket_string:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="119" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="60" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="60" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">string</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m60 0 h10 m3 0 h-3"></path>
+         <polygon points="109 17 117 13 117 21"></polygon>
+         <polygon points="109 17 101 13 101 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#serverSocket_string" title="serverSocket_string">serverSocket_string</a></div>
+               <div>         ::= 'string'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="tlsSocket_new">tlsSocket_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="773" height="101">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="56" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#host" xlink:title="host">
+            <rect x="107" y="3" width="48" height="32"></rect>
+            <rect x="105" y="1" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="115" y="21">host</text></a><rect x="175" y="3" width="24" height="32" rx="10"></rect>
+         <rect x="173" y="1" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="183" y="21">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="219" y="3" width="46" height="32"></rect>
+            <rect x="217" y="1" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="227" y="21">port</text></a><rect x="305" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="303" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="313" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#options" xlink:title="options">
+            <rect x="369" y="67" width="66" height="32"></rect>
+            <rect x="367" y="65" width="66" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="377" y="85">options</text></a><rect x="495" y="67" width="24" height="32" rx="10"></rect>
+         <rect x="493" y="65" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="503" y="85">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#connectTimeout" xlink:title="connectTimeout">
+            <rect x="539" y="67" width="120" height="32"></rect>
+            <rect x="537" y="65" width="120" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="547" y="85">connectTimeout</text></a><rect x="719" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="717" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="727" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m56 0 h10 m0 0 h10 m48 0 h10 m0 0 h10 m24 0 h10 m0 0 h10 m46 0 h10 m20 0 h10 m0 0 h384 m-414 0 h20 m394 0 h20 m-434 0 q10 0 10 10 m414 0 q0 -10 10 -10 m-424 10 v12 m414 0 v-12 m-414 12 q0 10 10 10 m394 0 q10 0 10 -10 m-404 10 h10 m24 0 h10 m20 0 h10 m0 0 h76 m-106 0 h20 m86 0 h20 m-126 0 q10 0 10 10 m106 0 q0 -10 10 -10 m-116 10 v12 m106 0 v-12 m-106 12 q0 10 10 10 m86 0 q10 0 10 -10 m-96 10 h10 m66 0 h10 m40 -32 h10 m0 0 h174 m-204 0 h20 m184 0 h20 m-224 0 q10 0 10 10 m204 0 q0 -10 10 -10 m-214 10 v12 m204 0 v-12 m-204 12 q0 10 10 10 m184 0 q10 0 10 -10 m-194 10 h10 m24 0 h10 m0 0 h10 m120 0 h10 m40 -64 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="763 17 771 13 771 21"></polygon>
+         <polygon points="763 17 755 13 755 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#tlsSocket_new" title="tlsSocket_new">tlsSocket_new</a></div>
+               <div>         ::= 'new(' <a href="#host" title="host">host</a> ',' <a href="#port" title="port">port</a> ( ',' <a href="#options" title="options">options</a>? ( ',' <a href="#connectTimeout" title="connectTimeout">connectTimeout</a> )? )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="tlsServerSocket_new">tlsServerSocket_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="743" height="101">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="56" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="107" y="3" width="46" height="32"></rect>
+            <rect x="105" y="1" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="115" y="21">port</text></a><rect x="173" y="3" width="24" height="32" rx="10"></rect>
+         <rect x="171" y="1" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="181" y="21">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#options" xlink:title="options">
+            <rect x="217" y="3" width="66" height="32"></rect>
+            <rect x="215" y="1" width="66" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="225" y="21">options</text></a><rect x="323" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="321" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="331" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#address" xlink:title="address">
+            <rect x="387" y="67" width="70" height="32"></rect>
+            <rect x="385" y="65" width="70" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="395" y="85">address</text></a><rect x="517" y="67" width="24" height="32" rx="10"></rect>
+         <rect x="515" y="65" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="525" y="85">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#backlog" xlink:title="backlog">
+            <rect x="561" y="67" width="68" height="32"></rect>
+            <rect x="559" y="65" width="68" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="569" y="85">backlog</text></a><rect x="689" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="687" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="697" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m56 0 h10 m0 0 h10 m46 0 h10 m0 0 h10 m24 0 h10 m0 0 h10 m66 0 h10 m20 0 h10 m0 0 h336 m-366 0 h20 m346 0 h20 m-386 0 q10 0 10 10 m366 0 q0 -10 10 -10 m-376 10 v12 m366 0 v-12 m-366 12 q0 10 10 10 m346 0 q10 0 10 -10 m-356 10 h10 m24 0 h10 m20 0 h10 m0 0 h80 m-110 0 h20 m90 0 h20 m-130 0 q10 0 10 10 m110 0 q0 -10 10 -10 m-120 10 v12 m110 0 v-12 m-110 12 q0 10 10 10 m90 0 q10 0 10 -10 m-100 10 h10 m70 0 h10 m40 -32 h10 m0 0 h122 m-152 0 h20 m132 0 h20 m-172 0 q10 0 10 10 m152 0 q0 -10 10 -10 m-162 10 v12 m152 0 v-12 m-152 12 q0 10 10 10 m132 0 q10 0 10 -10 m-142 10 h10 m24 0 h10 m0 0 h10 m68 0 h10 m40 -64 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="733 17 741 13 741 21"></polygon>
+         <polygon points="733 17 725 13 725 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#tlsServerSocket_new" title="tlsServerSocket_new">tlsServerSocket_new</a></div>
+               <div>         ::= 'new(' <a href="#port" title="port">port</a> ',' <a href="#options" title="options">options</a> ( ',' <a href="#address" title="address">address</a>? ( ',' <a href="#backlog" title="backlog">backlog</a> )? )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="tlsServerSocket_string">tlsServerSocket_string:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="119" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="60" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="60" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">string</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m60 0 h10 m3 0 h-3"></path>
+         <polygon points="109 17 117 13 117 21"></polygon>
+         <polygon points="109 17 101 13 101 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#tlsServerSocket_string" title="tlsServerSocket_string">tlsServerSocket_string</a></div>
+               <div>         ::= 'string'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="tlsOptions_new">tlsOptions_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="107" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="48" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="48" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m48 0 h10 m3 0 h-3"></path>
+         <polygon points="97 17 105 13 105 21"></polygon>
+         <polygon points="97 17 89 13 89 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#tlsOptions_new" title="tlsOptions_new">tlsOptions_new</a></div>
+               <div>         ::= 'new'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="tlsOptions_certificate">tlsOptions_certificate:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="441" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="94" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="94" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">certificate(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#file" xlink:title="file">
+            <rect x="145" y="3" width="38" height="32"></rect>
+            <rect x="143" y="1" width="38" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="153" y="21">file</text></a><rect x="223" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="221" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="231" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#password" xlink:title="password">
+            <rect x="267" y="35" width="80" height="32"></rect>
+            <rect x="265" y="33" width="80" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="275" y="53">password</text></a><rect x="387" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="385" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="395" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m94 0 h10 m0 0 h10 m38 0 h10 m20 0 h10 m0 0 h134 m-164 0 h20 m144 0 h20 m-184 0 q10 0 10 10 m164 0 q0 -10 10 -10 m-174 10 v12 m164 0 v-12 m-164 12 q0 10 10 10 m144 0 q10 0 10 -10 m-154 10 h10 m24 0 h10 m0 0 h10 m80 0 h10 m20 -32 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="431 17 439 13 439 21"></polygon>
+         <polygon points="431 17 423 13 423 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#tlsOptions_certificate" title="tlsOptions_certificate">tlsOptions_certificate</a></div>
+               <div>         ::= 'certificate(' <a href="#file" title="file">file</a> ( ',' <a href="#password" title="password">password</a> )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="tlsOptions_identity">tlsOptions_identity:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="131" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="72" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="72" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">identity</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m72 0 h10 m3 0 h-3"></path>
+         <polygon points="121 17 129 13 129 21"></polygon>
+         <polygon points="121 17 113 13 113 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#tlsOptions_identity" title="tlsOptions_identity">tlsOptions_identity</a></div>
+               <div>         ::= 'identity'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="tlsOptions_minVersion">tlsOptions_minVersion:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="361" height="113">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="96" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="96" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">minVersion</text>
+         <rect x="167" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="165" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="175" y="53">=</text>
+         <rect x="237" y="35" width="56" height="32" rx="10"></rect>
+         <rect x="235" y="33" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="245" y="53">"1.2"</text>
+         <rect x="237" y="79" width="56" height="32" rx="10"></rect>
+         <rect x="235" y="77" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="245" y="97">"1.3"</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m96 0 h10 m20 0 h10 m0 0 h156 m-186 0 h20 m166 0 h20 m-206 0 q10 0 10 10 m186 0 q0 -10 10 -10 m-196 10 v12 m186 0 v-12 m-186 12 q0 10 10 10 m166 0 q10 0 10 -10 m-176 10 h10 m30 0 h10 m20 0 h10 m56 0 h10 m-96 0 h20 m76 0 h20 m-116 0 q10 0 10 10 m96 0 q0 -10 10 -10 m-106 10 v24 m96 0 v-24 m-96 24 q0 10 10 10 m76 0 q10 0 10 -10 m-86 10 h10 m56 0 h10 m43 -76 h-3"></path>
+         <polygon points="351 17 359 13 359 21"></polygon>
+         <polygon points="351 17 343 13 343 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#tlsOptions_minVersion" title="tlsOptions_minVersion">tlsOptions_minVersion</a></div>
+               <div>         ::= 'minVersion' ( '=' ( '"1.2"' | '"1.3"' ) )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="tlsOptions_trust">tlsOptions_trust:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="405" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="58" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="58" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">trust(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#file" xlink:title="file">
+            <rect x="109" y="3" width="38" height="32"></rect>
+            <rect x="107" y="1" width="38" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="117" y="21">file</text></a><rect x="187" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="185" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="195" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#password" xlink:title="password">
+            <rect x="231" y="35" width="80" height="32"></rect>
+            <rect x="229" y="33" width="80" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="239" y="53">password</text></a><rect x="351" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="349" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="359" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m58 0 h10 m0 0 h10 m38 0 h10 m20 0 h10 m0 0 h134 m-164 0 h20 m144 0 h20 m-184 0 q10 0 10 10 m164 0 q0 -10 10 -10 m-174 10 v12 m164 0 v-12 m-164 12 q0 10 10 10 m144 0 q10 0 10 -10 m-154 10 h10 m24 0 h10 m0 0 h10 m80 0 h10 m20 -32 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="395 17 403 13 403 21"></polygon>
+         <polygon points="395 17 387 13 387 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#tlsOptions_trust" title="tlsOptions_trust">tlsOptions_trust</a></div>
+               <div>         ::= 'trust(' <a href="#file" title="file">file</a> ( ',' <a href="#password" title="password">password</a> )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="tlsOptions_trusted">tlsOptions_trusted:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="127" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="68" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="68" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">trusted</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m68 0 h10 m3 0 h-3"></path>
+         <polygon points="117 17 125 13 125 21"></polygon>
+         <polygon points="117 17 109 13 109 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#tlsOptions_trusted" title="tlsOptions_trusted">tlsOptions_trusted</a></div>
+               <div>         ::= 'trusted'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_new">udpSocket_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="519" height="101">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="48" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="48" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new</text>
+         <rect x="119" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="117" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="127" y="53">(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="185" y="67" width="46" height="32"></rect>
+            <rect x="183" y="65" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="193" y="85">port</text></a><rect x="291" y="67" width="24" height="32" rx="10"></rect>
+         <rect x="289" y="65" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="299" y="85">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#address" xlink:title="address">
+            <rect x="335" y="67" width="70" height="32"></rect>
+            <rect x="333" y="65" width="70" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="343" y="85">address</text></a><rect x="445" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="443" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="453" y="53">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m48 0 h10 m20 0 h10 m0 0 h362 m-392 0 h20 m372 0 h20 m-412 0 q10 0 10 10 m392 0 q0 -10 10 -10 m-402 10 v12 m392 0 v-12 m-392 12 q0 10 10 10 m372 0 q10 0 10 -10 m-382 10 h10 m26 0 h10 m20 0 h10 m0 0 h56 m-86 0 h20 m66 0 h20 m-106 0 q10 0 10 10 m86 0 q0 -10 10 -10 m-96 10 v12 m86 0 v-12 m-86 12 q0 10 10 10 m66 0 q10 0 10 -10 m-76 10 h10 m46 0 h10 m40 -32 h10 m0 0 h124 m-154 0 h20 m134 0 h20 m-174 0 q10 0 10 10 m154 0 q0 -10 10 -10 m-164 10 v12 m154 0 v-12 m-154 12 q0 10 10 10 m134 0 q10 0 10 -10 m-144 10 h10 m24 0 h10 m0 0 h10 m70 0 h10 m20 -32 h10 m26 0 h10 m23 -32 h-3"></path>
+         <polygon points="509 17 517 13 517 21"></polygon>
+         <polygon points="509 17 501 13 501 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_new" title="udpSocket_new">udpSocket_new</a></div>
+               <div>         ::= 'new' ( '(' <a href="#port" title="port">port</a>? ( ',' <a href="#address" title="address">address</a> )? ')' )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_broadcast">udpSocket_broadcast:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="351" height="113">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="86" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="86" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">broadcast</text>
+         <rect x="157" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="155" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="165" y="53">=</text>
+         <rect x="227" y="35" width="52" height="32" rx="10"></rect>
+         <rect x="225" y="33" width="52" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="235" y="53">.true</text>
+         <rect x="227" y="79" width="56" height="32" rx="10"></rect>
+         <rect x="225" y="77" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="235" y="97">.false</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m86 0 h10 m20 0 h10 m0 0 h156 m-186 0 h20 m166 0 h20 m-206 0 q10 0 10 10 m186 0 q0 -10 10 -10 m-196 10 v12 m186 0 v-12 m-186 12 q0 10 10 10 m166 0 q10 0 10 -10 m-176 10 h10 m30 0 h10 m20 0 h10 m52 0 h10 m0 0 h4 m-96 0 h20 m76 0 h20 m-116 0 q10 0 10 10 m96 0 q0 -10 10 -10 m-106 10 v24 m96 0 v-24 m-96 24 q0 10 10 10 m76 0 q10 0 10 -10 m-86 10 h10 m56 0 h10 m43 -76 h-3"></path>
+         <polygon points="341 17 349 13 349 21"></polygon>
+         <polygon points="341 17 333 13 333 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_broadcast" title="udpSocket_broadcast">udpSocket_broadcast</a></div>
+               <div>         ::= 'broadcast' ( '=' ( '.true' | '.false' ) )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_close">udpSocket_close:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="113" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="54" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="54" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">close</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m54 0 h10 m3 0 h-3"></path>
+         <polygon points="103 17 111 13 111 21"></polygon>
+         <polygon points="103 17 95 13 95 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_close" title="udpSocket_close">udpSocket_close</a></div>
+               <div>         ::= 'close'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_connect">udpSocket_connect:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="363" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="80" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="80" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">connect(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#host" xlink:title="host">
+            <rect x="131" y="3" width="48" height="32"></rect>
+            <rect x="129" y="1" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="139" y="21">host</text></a><rect x="199" y="3" width="24" height="32" rx="10"></rect>
+         <rect x="197" y="1" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="207" y="21">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="243" y="3" width="46" height="32"></rect>
+            <rect x="241" y="1" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="251" y="21">port</text></a><rect x="309" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="307" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="317" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m80 0 h10 m0 0 h10 m48 0 h10 m0 0 h10 m24 0 h10 m0 0 h10 m46 0 h10 m0 0 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="353 17 361 13 361 21"></polygon>
+         <polygon points="353 17 345 13 345 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_connect" title="udpSocket_connect">udpSocket_connect</a></div>
+               <div>         ::= 'connect(' <a href="#host" title="host">host</a> ',' <a href="#port" title="port">port</a> ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_connected">udpSocket_connected:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="147" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="88" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="88" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">connected</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m88 0 h10 m3 0 h-3"></path>
+         <polygon points="137 17 145 13 145 21"></polygon>
+         <polygon points="137 17 129 13 129 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_connected" title="udpSocket_connected">udpSocket_connected</a></div>
+               <div>         ::= 'connected'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_localAddress">udpSocket_localAddress:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="165" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="106" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="106" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localAddress</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m106 0 h10 m3 0 h-3"></path>
+         <polygon points="155 17 163 13 163 21"></polygon>
+         <polygon points="155 17 147 13 147 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_localAddress" title="udpSocket_localAddress">udpSocket_localAddress</a></div>
+               <div>         ::= 'localAddress'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_localPort">udpSocket_localPort:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="139" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="80" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="80" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localPort</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m80 0 h10 m3 0 h-3"></path>
+         <polygon points="129 17 137 13 137 21"></polygon>
+         <polygon points="129 17 121 13 121 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_localPort" title="udpSocket_localPort">udpSocket_localPort</a></div>
+               <div>         ::= 'localPort'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_receive">udpSocket_receive:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="127" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="68" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="68" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">receive</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m68 0 h10 m3 0 h-3"></path>
+         <polygon points="117 17 125 13 125 21"></polygon>
+         <polygon points="117 17 109 13 109 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_receive" title="udpSocket_receive">udpSocket_receive</a></div>
+               <div>         ::= 'receive'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_receiveTimeout">udpSocket_receiveTimeout:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="365" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="124" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="124" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">receiveTimeout</text>
+         <rect x="195" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="193" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="203" y="53">=</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#seconds" xlink:title="seconds">
+            <rect x="245" y="35" width="72" height="32"></rect>
+            <rect x="243" y="33" width="72" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="253" y="53">seconds</text></a><path class="line" d="m17 17 h2 m0 0 h10 m124 0 h10 m20 0 h10 m0 0 h132 m-162 0 h20 m142 0 h20 m-182 0 q10 0 10 10 m162 0 q0 -10 10 -10 m-172 10 v12 m162 0 v-12 m-162 12 q0 10 10 10 m142 0 q10 0 10 -10 m-152 10 h10 m30 0 h10 m0 0 h10 m72 0 h10 m23 -32 h-3"></path>
+         <polygon points="355 17 363 13 363 21"></polygon>
+         <polygon points="355 17 347 13 347 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_receiveTimeout" title="udpSocket_receiveTimeout">udpSocket_receiveTimeout</a></div>
+               <div>         ::= 'receiveTimeout' ( '=' <a href="#seconds" title="seconds">seconds</a> )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_remoteAddress">udpSocket_remoteAddress:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="181" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="122" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="122" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">remoteAddress</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m122 0 h10 m3 0 h-3"></path>
+         <polygon points="171 17 179 13 179 21"></polygon>
+         <polygon points="171 17 163 13 163 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_remoteAddress" title="udpSocket_remoteAddress">udpSocket_remoteAddress</a></div>
+               <div>         ::= 'remoteAddress'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_remotePort">udpSocket_remotePort:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="155" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="96" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="96" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">remotePort</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m96 0 h10 m3 0 h-3"></path>
+         <polygon points="145 17 153 13 153 21"></polygon>
+         <polygon points="145 17 137 13 137 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_remotePort" title="udpSocket_remotePort">udpSocket_remotePort</a></div>
+               <div>         ::= 'remotePort'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_send">udpSocket_send:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="493" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="58" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="58" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">send(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#data" xlink:title="data">
+            <rect x="109" y="3" width="48" height="32"></rect>
+            <rect x="107" y="1" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="117" y="21">data</text></a><rect x="197" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="195" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="205" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#host" xlink:title="host">
+            <rect x="241" y="35" width="48" height="32"></rect>
+            <rect x="239" y="33" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="249" y="53">host</text></a><rect x="309" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="307" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="317" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="353" y="35" width="46" height="32"></rect>
+            <rect x="351" y="33" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="361" y="53">port</text></a><rect x="439" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="437" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="447" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m58 0 h10 m0 0 h10 m48 0 h10 m20 0 h10 m0 0 h212 m-242 0 h20 m222 0 h20 m-262 0 q10 0 10 10 m242 0 q0 -10 10 -10 m-252 10 v12 m242 0 v-12 m-242 12 q0 10 10 10 m222 0 q10 0 10 -10 m-232 10 h10 m24 0 h10 m0 0 h10 m48 0 h10 m0 0 h10 m24 0 h10 m0 0 h10 m46 0 h10 m20 -32 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="483 17 491 13 491 21"></polygon>
+         <polygon points="483 17 475 13 475 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_send" title="udpSocket_send">udpSocket_send</a></div>
+               <div>         ::= 'send(' <a href="#data" title="data">data</a> ( ',' <a href="#host" title="host">host</a> ',' <a href="#port" title="port">port</a> )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="udpSocket_string">udpSocket_string:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="119" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="60" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="60" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">string</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m60 0 h10 m3 0 h-3"></path>
+         <polygon points="109 17 117 13 117 21"></polygon>
+         <polygon points="109 17 101 13 101 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#udpSocket_string" title="udpSocket_string">udpSocket_string</a></div>
+               <div>         ::= 'string'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="multicastSocket_new">multicastSocket_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="519" height="101">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="48" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="48" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new</text>
+         <rect x="119" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="117" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="127" y="53">(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="185" y="67" width="46" height="32"></rect>
+            <rect x="183" y="65" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="193" y="85">port</text></a><rect x="291" y="67" width="24" height="32" rx="10"></rect>
+         <rect x="289" y="65" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="299" y="85">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#address" xlink:title="address">
+            <rect x="335" y="67" width="70" height="32"></rect>
+            <rect x="333" y="65" width="70" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="343" y="85">address</text></a><rect x="445" y="35" width="26" height="32" rx="10"></rect>
+         <rect x="443" y="33" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="453" y="53">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m48 0 h10 m20 0 h10 m0 0 h362 m-392 0 h20 m372 0 h20 m-412 0 q10 0 10 10 m392 0 q0 -10 10 -10 m-402 10 v12 m392 0 v-12 m-392 12 q0 10 10 10 m372 0 q10 0 10 -10 m-382 10 h10 m26 0 h10 m20 0 h10 m0 0 h56 m-86 0 h20 m66 0 h20 m-106 0 q10 0 10 10 m86 0 q0 -10 10 -10 m-96 10 v12 m86 0 v-12 m-86 12 q0 10 10 10 m66 0 q10 0 10 -10 m-76 10 h10 m46 0 h10 m40 -32 h10 m0 0 h124 m-154 0 h20 m134 0 h20 m-174 0 q10 0 10 10 m154 0 q0 -10 10 -10 m-164 10 v12 m154 0 v-12 m-154 12 q0 10 10 10 m134 0 q10 0 10 -10 m-144 10 h10 m24 0 h10 m0 0 h10 m70 0 h10 m20 -32 h10 m26 0 h10 m23 -32 h-3"></path>
+         <polygon points="509 17 517 13 517 21"></polygon>
+         <polygon points="509 17 501 13 501 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#multicastSocket_new" title="multicastSocket_new">multicastSocket_new</a></div>
+               <div>         ::= 'new' ( '(' <a href="#port" title="port">port</a>? ( ',' <a href="#address" title="address">address</a> )? ')' )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="multicastSocket_joinGroup">multicastSocket_joinGroup:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="455" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="94" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="94" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">joinGroup(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#group" xlink:title="group">
+            <rect x="145" y="3" width="56" height="32"></rect>
+            <rect x="143" y="1" width="56" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="153" y="21">group</text></a><rect x="241" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="239" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="249" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#interface" xlink:title="interface">
+            <rect x="285" y="35" width="76" height="32"></rect>
+            <rect x="283" y="33" width="76" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="293" y="53">interface</text></a><rect x="401" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="399" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="409" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m94 0 h10 m0 0 h10 m56 0 h10 m20 0 h10 m0 0 h130 m-160 0 h20 m140 0 h20 m-180 0 q10 0 10 10 m160 0 q0 -10 10 -10 m-170 10 v12 m160 0 v-12 m-160 12 q0 10 10 10 m140 0 q10 0 10 -10 m-150 10 h10 m24 0 h10 m0 0 h10 m76 0 h10 m20 -32 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="445 17 453 13 453 21"></polygon>
+         <polygon points="445 17 437 13 437 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#multicastSocket_joinGroup" title="multicastSocket_joinGroup">multicastSocket_joinGroup</a></div>
+               <div>         ::= 'joinGroup(' <a href="#group" title="group">group</a> ( ',' <a href="#interface" title="interface">interface</a> )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="multicastSocket_leaveGroup">multicastSocket_leaveGroup:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="465" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="104" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="104" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">leaveGroup(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#group" xlink:title="group">
+            <rect x="155" y="3" width="56" height="32"></rect>
+            <rect x="153" y="1" width="56" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="163" y="21">group</text></a><rect x="251" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="249" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="259" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#interface" xlink:title="interface">
+            <rect x="295" y="35" width="76" height="32"></rect>
+            <rect x="293" y="33" width="76" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="303" y="53">interface</text></a><rect x="411" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="409" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="419" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m104 0 h10 m0 0 h10 m56 0 h10 m20 0 h10 m0 0 h130 m-160 0 h20 m140 0 h20 m-180 0 q10 0 10 10 m160 0 q0 -10 10 -10 m-170 10 v12 m160 0 v-12 m-160 12 q0 10 10 10 m140 0 q10 0 10 -10 m-150 10 h10 m24 0 h10 m0 0 h10 m76 0 h10 m20 -32 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="455 17 463 13 463 21"></polygon>
+         <polygon points="455 17 447 13 447 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#multicastSocket_leaveGroup" title="multicastSocket_leaveGroup">multicastSocket_leaveGroup</a></div>
+               <div>         ::= 'leaveGroup(' <a href="#group" title="group">group</a> ( ',' <a href="#interface" title="interface">interface</a> )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="multicastSocket_loopback">multicastSocket_loopback:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="345" height="113">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="80" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="80" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">loopback</text>
+         <rect x="151" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="149" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="159" y="53">=</text>
+         <rect x="221" y="35" width="52" height="32" rx="10"></rect>
+         <rect x="219" y="33" width="52" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="229" y="53">.true</text>
+         <rect x="221" y="79" width="56" height="32" rx="10"></rect>
+         <rect x="219" y="77" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="229" y="97">.false</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m80 0 h10 m20 0 h10 m0 0 h156 m-186 0 h20 m166 0 h20 m-206 0 q10 0 10 10 m186 0 q0 -10 10 -10 m-196 10 v12 m186 0 v-12 m-186 12 q0 10 10 10 m166 0 q10 0 10 -10 m-176 10 h10 m30 0 h10 m20 0 h10 m52 0 h10 m0 0 h4 m-96 0 h20 m76 0 h20 m-116 0 q10 0 10 10 m96 0 q0 -10 10 -10 m-106 10 v24 m96 0 v-24 m-96 24 q0 10 10 10 m76 0 q10 0 10 -10 m-86 10 h10 m56 0 h10 m43 -76 h-3"></path>
+         <polygon points="335 17 343 13 343 21"></polygon>
+         <polygon points="335 17 327 13 327 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#multicastSocket_loopback" title="multicastSocket_loopback">multicastSocket_loopback</a></div>
+               <div>         ::= 'loopback' ( '=' ( '.true' | '.false' ) )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="multicastSocket_networkInterface">multicastSocket_networkInterface:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="383" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="138" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="138" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">networkInterface</text>
+         <rect x="209" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="207" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="217" y="53">=</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#interface" xlink:title="interface">
+            <rect x="259" y="35" width="76" height="32"></rect>
+            <rect x="257" y="33" width="76" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="267" y="53">interface</text></a><path class="line" d="m17 17 h2 m0 0 h10 m138 0 h10 m20 0 h10 m0 0 h136 m-166 0 h20 m146 0 h20 m-186 0 q10 0 10 10 m166 0 q0 -10 10 -10 m-176 10 v12 m166 0 v-12 m-166 12 q0 10 10 10 m146 0 q10 0 10 -10 m-156 10 h10 m30 0 h10 m0 0 h10 m76 0 h10 m23 -32 h-3"></path>
+         <polygon points="373 17 381 13 381 21"></polygon>
+         <polygon points="373 17 365 13 365 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#multicastSocket_networkInterface" title="multicastSocket_networkInterface">multicastSocket_networkInterface</a></div>
+               <div>         ::= 'networkInterface' ( '=' <a href="#interface" title="interface">interface</a> )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="multicastSocket_string">multicastSocket_string:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="119" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="60" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="60" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">string</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m60 0 h10 m3 0 h-3"></path>
+         <polygon points="109 17 117 13 117 21"></polygon>
+         <polygon points="109 17 101 13 101 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#multicastSocket_string" title="multicastSocket_string">multicastSocket_string</a></div>
+               <div>         ::= 'string'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="multicastSocket_timeToLive">multicastSocket_timeToLive:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="313" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="94" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="94" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">timeToLive</text>
+         <rect x="165" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="163" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="173" y="53">=</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#hops" xlink:title="hops">
+            <rect x="215" y="35" width="50" height="32"></rect>
+            <rect x="213" y="33" width="50" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="223" y="53">hops</text></a><path class="line" d="m17 17 h2 m0 0 h10 m94 0 h10 m20 0 h10 m0 0 h110 m-140 0 h20 m120 0 h20 m-160 0 q10 0 10 10 m140 0 q0 -10 10 -10 m-150 10 v12 m140 0 v-12 m-140 12 q0 10 10 10 m120 0 q10 0 10 -10 m-130 10 h10 m30 0 h10 m0 0 h10 m50 0 h10 m23 -32 h-3"></path>
+         <polygon points="303 17 311 13 311 21"></polygon>
+         <polygon points="303 17 295 13 295 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#multicastSocket_timeToLive" title="multicastSocket_timeToLive">multicastSocket_timeToLive</a></div>
+               <div>         ::= 'timeToLive' ( '=' <a href="#hops" title="hops">hops</a> )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_new">dtlsSocket_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="773" height="101">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="56" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#host" xlink:title="host">
+            <rect x="107" y="3" width="48" height="32"></rect>
+            <rect x="105" y="1" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="115" y="21">host</text></a><rect x="175" y="3" width="24" height="32" rx="10"></rect>
+         <rect x="173" y="1" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="183" y="21">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="219" y="3" width="46" height="32"></rect>
+            <rect x="217" y="1" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="227" y="21">port</text></a><rect x="305" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="303" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="313" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#options" xlink:title="options">
+            <rect x="369" y="67" width="66" height="32"></rect>
+            <rect x="367" y="65" width="66" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="377" y="85">options</text></a><rect x="495" y="67" width="24" height="32" rx="10"></rect>
+         <rect x="493" y="65" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="503" y="85">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#connectTimeout" xlink:title="connectTimeout">
+            <rect x="539" y="67" width="120" height="32"></rect>
+            <rect x="537" y="65" width="120" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="547" y="85">connectTimeout</text></a><rect x="719" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="717" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="727" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m56 0 h10 m0 0 h10 m48 0 h10 m0 0 h10 m24 0 h10 m0 0 h10 m46 0 h10 m20 0 h10 m0 0 h384 m-414 0 h20 m394 0 h20 m-434 0 q10 0 10 10 m414 0 q0 -10 10 -10 m-424 10 v12 m414 0 v-12 m-414 12 q0 10 10 10 m394 0 q10 0 10 -10 m-404 10 h10 m24 0 h10 m20 0 h10 m0 0 h76 m-106 0 h20 m86 0 h20 m-126 0 q10 0 10 10 m106 0 q0 -10 10 -10 m-116 10 v12 m106 0 v-12 m-106 12 q0 10 10 10 m86 0 q10 0 10 -10 m-96 10 h10 m66 0 h10 m40 -32 h10 m0 0 h174 m-204 0 h20 m184 0 h20 m-224 0 q10 0 10 10 m204 0 q0 -10 10 -10 m-214 10 v12 m204 0 v-12 m-204 12 q0 10 10 10 m184 0 q10 0 10 -10 m-194 10 h10 m24 0 h10 m0 0 h10 m120 0 h10 m40 -64 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="763 17 771 13 771 21"></polygon>
+         <polygon points="763 17 755 13 755 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_new" title="dtlsSocket_new">dtlsSocket_new</a></div>
+               <div>         ::= 'new(' <a href="#host" title="host">host</a> ',' <a href="#port" title="port">port</a> ( ',' <a href="#options" title="options">options</a>? ( ',' <a href="#connectTimeout" title="connectTimeout">connectTimeout</a> )? )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_cipher">dtlsSocket_cipher:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="121" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="62" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="62" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">cipher</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m62 0 h10 m3 0 h-3"></path>
+         <polygon points="111 17 119 13 119 21"></polygon>
+         <polygon points="111 17 103 13 103 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_cipher" title="dtlsSocket_cipher">dtlsSocket_cipher</a></div>
+               <div>         ::= 'cipher'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_close">dtlsSocket_close:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="113" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="54" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="54" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">close</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m54 0 h10 m3 0 h-3"></path>
+         <polygon points="103 17 111 13 111 21"></polygon>
+         <polygon points="103 17 95 13 95 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_close" title="dtlsSocket_close">dtlsSocket_close</a></div>
+               <div>         ::= 'close'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_localAddress">dtlsSocket_localAddress:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="165" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="106" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="106" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localAddress</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m106 0 h10 m3 0 h-3"></path>
+         <polygon points="155 17 163 13 163 21"></polygon>
+         <polygon points="155 17 147 13 147 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_localAddress" title="dtlsSocket_localAddress">dtlsSocket_localAddress</a></div>
+               <div>         ::= 'localAddress'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_localPort">dtlsSocket_localPort:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="139" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="80" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="80" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localPort</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m80 0 h10 m3 0 h-3"></path>
+         <polygon points="129 17 137 13 137 21"></polygon>
+         <polygon points="129 17 121 13 121 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_localPort" title="dtlsSocket_localPort">dtlsSocket_localPort</a></div>
+               <div>         ::= 'localPort'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_protocol">dtlsSocket_protocol:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="135" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="76" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="76" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">protocol</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m76 0 h10 m3 0 h-3"></path>
+         <polygon points="125 17 133 13 133 21"></polygon>
+         <polygon points="125 17 117 13 117 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_protocol" title="dtlsSocket_protocol">dtlsSocket_protocol</a></div>
+               <div>         ::= 'protocol'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_receive">dtlsSocket_receive:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="127" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="68" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="68" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">receive</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m68 0 h10 m3 0 h-3"></path>
+         <polygon points="117 17 125 13 125 21"></polygon>
+         <polygon points="117 17 109 13 109 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_receive" title="dtlsSocket_receive">dtlsSocket_receive</a></div>
+               <div>         ::= 'receive'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_receiveTimeout">dtlsSocket_receiveTimeout:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="365" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="124" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="124" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">receiveTimeout</text>
+         <rect x="195" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="193" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="203" y="53">=</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#seconds" xlink:title="seconds">
+            <rect x="245" y="35" width="72" height="32"></rect>
+            <rect x="243" y="33" width="72" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="253" y="53">seconds</text></a><path class="line" d="m17 17 h2 m0 0 h10 m124 0 h10 m20 0 h10 m0 0 h132 m-162 0 h20 m142 0 h20 m-182 0 q10 0 10 10 m162 0 q0 -10 10 -10 m-172 10 v12 m162 0 v-12 m-162 12 q0 10 10 10 m142 0 q10 0 10 -10 m-152 10 h10 m30 0 h10 m0 0 h10 m72 0 h10 m23 -32 h-3"></path>
+         <polygon points="355 17 363 13 363 21"></polygon>
+         <polygon points="355 17 347 13 347 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_receiveTimeout" title="dtlsSocket_receiveTimeout">dtlsSocket_receiveTimeout</a></div>
+               <div>         ::= 'receiveTimeout' ( '=' <a href="#seconds" title="seconds">seconds</a> )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_remoteAddress">dtlsSocket_remoteAddress:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="181" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="122" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="122" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">remoteAddress</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m122 0 h10 m3 0 h-3"></path>
+         <polygon points="171 17 179 13 179 21"></polygon>
+         <polygon points="171 17 163 13 163 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_remoteAddress" title="dtlsSocket_remoteAddress">dtlsSocket_remoteAddress</a></div>
+               <div>         ::= 'remoteAddress'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_remotePort">dtlsSocket_remotePort:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="155" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="96" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="96" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">remotePort</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m96 0 h10 m3 0 h-3"></path>
+         <polygon points="145 17 153 13 153 21"></polygon>
+         <polygon points="145 17 137 13 137 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_remotePort" title="dtlsSocket_remotePort">dtlsSocket_remotePort</a></div>
+               <div>         ::= 'remotePort'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_secure">dtlsSocket_secure:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="123" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="64" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="64" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">secure</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m64 0 h10 m3 0 h-3"></path>
+         <polygon points="113 17 121 13 121 21"></polygon>
+         <polygon points="113 17 105 13 105 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_secure" title="dtlsSocket_secure">dtlsSocket_secure</a></div>
+               <div>         ::= 'secure'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_send">dtlsSocket_send:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="231" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="58" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="58" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">send(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#data" xlink:title="data">
+            <rect x="109" y="3" width="48" height="32"></rect>
+            <rect x="107" y="1" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="117" y="21">data</text></a><rect x="177" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="175" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="185" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m58 0 h10 m0 0 h10 m48 0 h10 m0 0 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="221 17 229 13 229 21"></polygon>
+         <polygon points="221 17 213 13 213 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_send" title="dtlsSocket_send">dtlsSocket_send</a></div>
+               <div>         ::= 'send(' <a href="#data" title="data">data</a> ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsSocket_string">dtlsSocket_string:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="119" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="60" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="60" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">string</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m60 0 h10 m3 0 h-3"></path>
+         <polygon points="109 17 117 13 117 21"></polygon>
+         <polygon points="109 17 101 13 101 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsSocket_string" title="dtlsSocket_string">dtlsSocket_string</a></div>
+               <div>         ::= 'string'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsServerSocket_new">dtlsServerSocket_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="531" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="56" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="107" y="3" width="46" height="32"></rect>
+            <rect x="105" y="1" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="115" y="21">port</text></a><rect x="173" y="3" width="24" height="32" rx="10"></rect>
+         <rect x="171" y="1" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="181" y="21">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#options" xlink:title="options">
+            <rect x="217" y="3" width="66" height="32"></rect>
+            <rect x="215" y="1" width="66" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="225" y="21">options</text></a><rect x="323" y="35" width="24" height="32" rx="10"></rect>
+         <rect x="321" y="33" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="331" y="53">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#address" xlink:title="address">
+            <rect x="367" y="35" width="70" height="32"></rect>
+            <rect x="365" y="33" width="70" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="375" y="53">address</text></a><rect x="477" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="475" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="485" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m56 0 h10 m0 0 h10 m46 0 h10 m0 0 h10 m24 0 h10 m0 0 h10 m66 0 h10 m20 0 h10 m0 0 h124 m-154 0 h20 m134 0 h20 m-174 0 q10 0 10 10 m154 0 q0 -10 10 -10 m-164 10 v12 m154 0 v-12 m-154 12 q0 10 10 10 m134 0 q10 0 10 -10 m-144 10 h10 m24 0 h10 m0 0 h10 m70 0 h10 m20 -32 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="521 17 529 13 529 21"></polygon>
+         <polygon points="521 17 513 13 513 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsServerSocket_new" title="dtlsServerSocket_new">dtlsServerSocket_new</a></div>
+               <div>         ::= 'new(' <a href="#port" title="port">port</a> ',' <a href="#options" title="options">options</a> ( ',' <a href="#address" title="address">address</a> )? ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsServerSocket_accept">dtlsServerSocket_accept:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="123" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="64" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="64" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">accept</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m64 0 h10 m3 0 h-3"></path>
+         <polygon points="113 17 121 13 121 21"></polygon>
+         <polygon points="113 17 105 13 105 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsServerSocket_accept" title="dtlsServerSocket_accept">dtlsServerSocket_accept</a></div>
+               <div>         ::= 'accept'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsServerSocket_acceptTimeout">dtlsServerSocket_acceptTimeout:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="359" height="69">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="118" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="118" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">acceptTimeout</text>
+         <rect x="189" y="35" width="30" height="32" rx="10"></rect>
+         <rect x="187" y="33" width="30" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="197" y="53">=</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#seconds" xlink:title="seconds">
+            <rect x="239" y="35" width="72" height="32"></rect>
+            <rect x="237" y="33" width="72" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="247" y="53">seconds</text></a><path class="line" d="m17 17 h2 m0 0 h10 m118 0 h10 m20 0 h10 m0 0 h132 m-162 0 h20 m142 0 h20 m-182 0 q10 0 10 10 m162 0 q0 -10 10 -10 m-172 10 v12 m162 0 v-12 m-162 12 q0 10 10 10 m142 0 q10 0 10 -10 m-152 10 h10 m30 0 h10 m0 0 h10 m72 0 h10 m23 -32 h-3"></path>
+         <polygon points="349 17 357 13 357 21"></polygon>
+         <polygon points="349 17 341 13 341 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsServerSocket_acceptTimeout" title="dtlsServerSocket_acceptTimeout">dtlsServerSocket_acceptTimeout</a></div>
+               <div>         ::= 'acceptTimeout' ( '=' <a href="#seconds" title="seconds">seconds</a> )?</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsServerSocket_close">dtlsServerSocket_close:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="113" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="54" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="54" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">close</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m54 0 h10 m3 0 h-3"></path>
+         <polygon points="103 17 111 13 111 21"></polygon>
+         <polygon points="103 17 95 13 95 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsServerSocket_close" title="dtlsServerSocket_close">dtlsServerSocket_close</a></div>
+               <div>         ::= 'close'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsServerSocket_localAddress">dtlsServerSocket_localAddress:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="165" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="106" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="106" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localAddress</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m106 0 h10 m3 0 h-3"></path>
+         <polygon points="155 17 163 13 163 21"></polygon>
+         <polygon points="155 17 147 13 147 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsServerSocket_localAddress" title="dtlsServerSocket_localAddress">dtlsServerSocket_localAddress</a></div>
+               <div>         ::= 'localAddress'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsServerSocket_localPort">dtlsServerSocket_localPort:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="139" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="80" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="80" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">localPort</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m80 0 h10 m3 0 h-3"></path>
+         <polygon points="129 17 137 13 137 21"></polygon>
+         <polygon points="129 17 121 13 121 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsServerSocket_localPort" title="dtlsServerSocket_localPort">dtlsServerSocket_localPort</a></div>
+               <div>         ::= 'localPort'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="dtlsServerSocket_string">dtlsServerSocket_string:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="119" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="60" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="60" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">string</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m60 0 h10 m3 0 h-3"></path>
+         <polygon points="109 17 117 13 117 21"></polygon>
+         <polygon points="109 17 101 13 101 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#dtlsServerSocket_string" title="dtlsServerSocket_string">dtlsServerSocket_string</a></div>
+               <div>         ::= 'string'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="datagram_new">datagram_new:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="473" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="56" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="56" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">new(</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#data" xlink:title="data">
+            <rect x="107" y="3" width="48" height="32"></rect>
+            <rect x="105" y="1" width="48" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="115" y="21">data</text></a><rect x="175" y="3" width="24" height="32" rx="10"></rect>
+         <rect x="173" y="1" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="183" y="21">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#address" xlink:title="address">
+            <rect x="219" y="3" width="70" height="32"></rect>
+            <rect x="217" y="1" width="70" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="227" y="21">address</text></a><rect x="309" y="3" width="24" height="32" rx="10"></rect>
+         <rect x="307" y="1" width="24" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="317" y="21">,</text><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#port" xlink:title="port">
+            <rect x="353" y="3" width="46" height="32"></rect>
+            <rect x="351" y="1" width="46" height="32" class="nonterminal"></rect>
+            <text class="nonterminal" x="361" y="21">port</text></a><rect x="419" y="3" width="26" height="32" rx="10"></rect>
+         <rect x="417" y="1" width="26" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="427" y="21">)</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m56 0 h10 m0 0 h10 m48 0 h10 m0 0 h10 m24 0 h10 m0 0 h10 m70 0 h10 m0 0 h10 m24 0 h10 m0 0 h10 m46 0 h10 m0 0 h10 m26 0 h10 m3 0 h-3"></path>
+         <polygon points="463 17 471 13 471 21"></polygon>
+         <polygon points="463 17 455 13 455 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#datagram_new" title="datagram_new">datagram_new</a></div>
+               <div>         ::= 'new(' <a href="#data" title="data">data</a> ',' <a href="#address" title="address">address</a> ',' <a href="#port" title="port">port</a> ')'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="datagram_address">datagram_address:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="131" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="72" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="72" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">address</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m72 0 h10 m3 0 h-3"></path>
+         <polygon points="121 17 129 13 129 21"></polygon>
+         <polygon points="121 17 113 13 113 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#datagram_address" title="datagram_address">datagram_address</a></div>
+               <div>         ::= 'address'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="datagram_data">datagram_data:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="109" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="50" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="50" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">data</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m50 0 h10 m3 0 h-3"></path>
+         <polygon points="99 17 107 13 107 21"></polygon>
+         <polygon points="99 17 91 13 91 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#datagram_data" title="datagram_data">datagram_data</a></div>
+               <div>         ::= 'data'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="datagram_makeString">datagram_makeString:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="157" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="98" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="98" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">makeString</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m98 0 h10 m3 0 h-3"></path>
+         <polygon points="147 17 155 13 155 21"></polygon>
+         <polygon points="147 17 139 13 139 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#datagram_makeString" title="datagram_makeString">datagram_makeString</a></div>
+               <div>         ::= 'makeString'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="datagram_port">datagram_port:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="107" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="48" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="48" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">port</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m48 0 h10 m3 0 h-3"></path>
+         <polygon points="97 17 105 13 105 21"></polygon>
+         <polygon points="97 17 89 13 89 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#datagram_port" title="datagram_port">datagram_port</a></div>
+               <div>         ::= 'port'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml" style="font-size: 14px; font-weight:bold"><xhtml:a name="datagram_string">datagram_string:</xhtml:a></xhtml:p><svg xmlns="http://www.w3.org/2000/svg" width="119" height="37">
+         <polygon points="9 17 1 13 1 21"></polygon>
+         <polygon points="17 17 9 13 9 21"></polygon>
+         <rect x="31" y="3" width="60" height="32" rx="10"></rect>
+         <rect x="29" y="1" width="60" height="32" class="terminal" rx="10"></rect>
+         <text class="terminal" x="39" y="21">string</text>
+         <path class="line" d="m17 17 h2 m0 0 h10 m60 0 h10 m3 0 h-3"></path>
+         <polygon points="109 17 117 13 117 21"></polygon>
+         <polygon points="109 17 101 13 101 21"></polygon></svg><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:div class="ebnf"><xhtml:code>
+               <div><a href="#datagram_string" title="datagram_string">datagram_string</a></div>
+               <div>         ::= 'string'</div></xhtml:code></xhtml:div>
+      </xhtml:p>
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">no references</xhtml:p><xhtml:br xmlns:xhtml="http://www.w3.org/1999/xhtml" /><xhtml:hr xmlns:xhtml="http://www.w3.org/1999/xhtml" />
+      <xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">
+         <xhtml:table border="0" class="signature">
+            <xhtml:tr>
+               <xhtml:td style="width: 100%"> </xhtml:td>
+               <xhtml:td valign="top">
+                  <xhtml:nobr class="signature">... generated by <xhtml:a name="Railroad-Diagram-Generator" class="signature" title="https://bottlecaps.de/rr" href="https://bottlecaps.de/rr" target="_blank">RR - Railroad Diagram Generator</xhtml:a></xhtml:nobr>
+               </xhtml:td>
+               <xhtml:td><xhtml:a name="Railroad-Diagram-Generator" title="https://bottlecaps.de/rr" href="https://bottlecaps.de/rr" target="_blank"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                        <g transform="scale(0.178)">
+                           <circle cx="45" cy="45" r="45" style="stroke:none; fill:#FFCC00"></circle>
+                           <circle cx="45" cy="45" r="42" style="stroke:#332900; stroke-width:2px; fill:#FFCC00"></circle>
+                           <line x1="15" y1="15" x2="75" y2="75" stroke="#332900" style="stroke-width:9px;"></line>
+                           <line x1="15" y1="75" x2="75" y2="15" stroke="#332900" style="stroke-width:9px;"></line>
+                           <text x="7" y="54" style="font-size:26px; font-family:Arial, Sans-serif; font-weight:bold; fill: #332900">R</text>
+                           <text x="64" y="54" style="font-size:26px; font-family:Arial, Sans-serif; font-weight:bold; fill: #332900">R</text>
+                        </g></svg></xhtml:a></xhtml:td>
+            </xhtml:tr>
+         </xhtml:table>
+      </xhtml:p>
+   </body>
+</html>

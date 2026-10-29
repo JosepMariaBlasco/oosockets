@@ -1,0 +1,351 @@
+/*----------------------------------------------------------------------------*/
+/*                                                                            */
+/* Copyright (c) 2010-2026, Rexx Language Association. All rights reserved.    */
+/*                                                                            */
+/* This program and the accompanying materials are made available under       */
+/* the terms of the Common Public License v1.0 which accompanies this         */
+/* distribution. A copy is also available at the following address:           */
+/* https://www.oorexx.org/license.html                                        */
+/*                                                                            */
+/* Redistribution and use in source and binary forms, with or                 */
+/* without modification, are permitted provided that the following            */
+/* conditions are met:                                                        */
+/*                                                                            */
+/* Redistributions of source code must retain the above copyright             */
+/* notice, this list of conditions and the following disclaimer.              */
+/* Redistributions in binary form must reproduce the above copyright          */
+/* notice, this list of conditions and the following disclaimer in            */
+/* the documentation and/or other materials provided with the distribution.   */
+/*                                                                            */
+/* Neither the name of Rexx Language Association nor the names                */
+/* of its contributors may be used to endorse or promote products             */
+/* derived from this software without specific prior written permission.      */
+/*                                                                            */
+/* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS        */
+/* "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT          */
+/* LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS          */
+/* FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT   */
+/* OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,      */
+/* SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED   */
+/* TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,        */
+/* OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY     */
+/* OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING    */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS         */
+/* SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.               */
+/*                                                                            */
+/*----------------------------------------------------------------------------*/
+
+/* sockets.cls — Railroad diagram EBNF grammars */
+/* Feed to the Railroad Diagram Generator at https://www.bottlecaps.de/rr/ui */
+
+/* ======================================================================== */
+/* Socket class                                                             */
+/* ======================================================================== */
+
+socket_new
+         ::= 'new(' host ',' port ( ',' connectTimeout )? ')'
+
+socket_resolve
+         ::= 'resolve(' host ')'
+
+socket_bufferOutput
+         ::= 'bufferOutput' ( '=' ( '.true' | '.false' | size ) )?
+
+socket_charIn
+         ::= 'charIn' ( '(' ( ',' length )? ')' )?
+
+socket_charOut
+         ::= 'charOut(' string? ')'
+
+socket_chars
+         ::= 'chars'
+
+socket_cipher
+         ::= 'cipher'
+
+socket_close
+         ::= 'close'
+
+socket_description
+         ::= 'description'
+
+socket_flush
+         ::= 'flush'
+
+socket_lineEnd
+         ::= 'lineEnd' ( '=' string )?
+
+socket_lineIn
+         ::= 'lineIn' ( '(' ( ',' count )? ')' )?
+
+socket_lineOut
+         ::= 'lineOut(' string? ')'
+
+socket_lines
+         ::= 'lines' ( '(' option ')' )?
+
+socket_localAddress
+         ::= 'localAddress'
+
+socket_localPort
+         ::= 'localPort'
+
+socket_noDelay
+         ::= 'noDelay' ( '=' ( '.true' | '.false' ) )?
+
+socket_protocol
+         ::= 'protocol'
+
+socket_read
+         ::= 'read' ( '(' max ')' )?
+
+socket_readTimeout
+         ::= 'readTimeout' ( '=' seconds )?
+
+socket_remoteAddress
+         ::= 'remoteAddress'
+
+socket_remotePort
+         ::= 'remotePort'
+
+socket_say
+         ::= 'say' ( '(' string ')' )?
+
+socket_secure
+         ::= 'secure'
+
+socket_shutdownOutput
+         ::= 'shutdownOutput'
+
+socket_startTLS
+         ::= 'startTLS' ( '(' host? ( ',' options )? ')' )?
+
+socket_startTLSServer
+         ::= 'startTLSServer(' options ')'
+
+socket_state
+         ::= 'state'
+
+socket_string
+         ::= 'string'
+
+socket_writeTimeout
+         ::= 'writeTimeout' ( '=' seconds )?
+
+/* ======================================================================== */
+/* ServerSocket class                                                       */
+/* ======================================================================== */
+
+serverSocket_new
+         ::= 'new(' port ( ',' address? ( ',' backlog )? )? ')'
+
+serverSocket_accept
+         ::= 'accept'
+
+serverSocket_acceptTimeout
+         ::= 'acceptTimeout' ( '=' seconds )?
+
+serverSocket_close
+         ::= 'close'
+
+serverSocket_localAddress
+         ::= 'localAddress'
+
+serverSocket_localPort
+         ::= 'localPort'
+
+serverSocket_string
+         ::= 'string'
+
+/* ======================================================================== */
+/* TLSSocket and TLSServerSocket classes                                    */
+/* ======================================================================== */
+
+tlsSocket_new
+         ::= 'new(' host ',' port ( ',' options? ( ',' connectTimeout )? )? ')'
+
+tlsServerSocket_new
+         ::= 'new(' port ',' options ( ',' address? ( ',' backlog )? )? ')'
+
+tlsServerSocket_string
+         ::= 'string'
+
+/* ======================================================================== */
+/* TLSOptions class                                                         */
+/* ======================================================================== */
+
+tlsOptions_new
+         ::= 'new'
+
+tlsOptions_certificate
+         ::= 'certificate(' file ( ',' password )? ')'
+
+tlsOptions_identity
+         ::= 'identity'
+
+tlsOptions_minVersion
+         ::= 'minVersion' ( '=' ( '"1.2"' | '"1.3"' ) )?
+
+tlsOptions_trust
+         ::= 'trust(' file ( ',' password )? ')'
+
+tlsOptions_trusted
+         ::= 'trusted'
+
+/* ======================================================================== */
+/* UDPSocket class                                                          */
+/* ======================================================================== */
+
+udpSocket_new
+         ::= 'new' ( '(' port? ( ',' address )? ')' )?
+
+udpSocket_broadcast
+         ::= 'broadcast' ( '=' ( '.true' | '.false' ) )?
+
+udpSocket_close
+         ::= 'close'
+
+udpSocket_connect
+         ::= 'connect(' host ',' port ')'
+
+udpSocket_connected
+         ::= 'connected'
+
+udpSocket_localAddress
+         ::= 'localAddress'
+
+udpSocket_localPort
+         ::= 'localPort'
+
+udpSocket_receive
+         ::= 'receive'
+
+udpSocket_receiveTimeout
+         ::= 'receiveTimeout' ( '=' seconds )?
+
+udpSocket_remoteAddress
+         ::= 'remoteAddress'
+
+udpSocket_remotePort
+         ::= 'remotePort'
+
+udpSocket_send
+         ::= 'send(' data ( ',' host ',' port )? ')'
+
+udpSocket_string
+         ::= 'string'
+
+/* ======================================================================== */
+/* MulticastSocket class                                                    */
+/* ======================================================================== */
+
+multicastSocket_new
+         ::= 'new' ( '(' port? ( ',' address )? ')' )?
+
+multicastSocket_joinGroup
+         ::= 'joinGroup(' group ( ',' interface )? ')'
+
+multicastSocket_leaveGroup
+         ::= 'leaveGroup(' group ( ',' interface )? ')'
+
+multicastSocket_loopback
+         ::= 'loopback' ( '=' ( '.true' | '.false' ) )?
+
+multicastSocket_networkInterface
+         ::= 'networkInterface' ( '=' interface )?
+
+multicastSocket_string
+         ::= 'string'
+
+multicastSocket_timeToLive
+         ::= 'timeToLive' ( '=' hops )?
+
+/* ======================================================================== */
+/* DTLSSocket class                                                         */
+/* ======================================================================== */
+
+dtlsSocket_new
+         ::= 'new(' host ',' port ( ',' options? ( ',' connectTimeout )? )? ')'
+
+dtlsSocket_cipher
+         ::= 'cipher'
+
+dtlsSocket_close
+         ::= 'close'
+
+dtlsSocket_localAddress
+         ::= 'localAddress'
+
+dtlsSocket_localPort
+         ::= 'localPort'
+
+dtlsSocket_protocol
+         ::= 'protocol'
+
+dtlsSocket_receive
+         ::= 'receive'
+
+dtlsSocket_receiveTimeout
+         ::= 'receiveTimeout' ( '=' seconds )?
+
+dtlsSocket_remoteAddress
+         ::= 'remoteAddress'
+
+dtlsSocket_remotePort
+         ::= 'remotePort'
+
+dtlsSocket_secure
+         ::= 'secure'
+
+dtlsSocket_send
+         ::= 'send(' data ')'
+
+dtlsSocket_string
+         ::= 'string'
+
+/* ======================================================================== */
+/* DTLSServerSocket class                                                   */
+/* ======================================================================== */
+
+dtlsServerSocket_new
+         ::= 'new(' port ',' options ( ',' address )? ')'
+
+dtlsServerSocket_accept
+         ::= 'accept'
+
+dtlsServerSocket_acceptTimeout
+         ::= 'acceptTimeout' ( '=' seconds )?
+
+dtlsServerSocket_close
+         ::= 'close'
+
+dtlsServerSocket_localAddress
+         ::= 'localAddress'
+
+dtlsServerSocket_localPort
+         ::= 'localPort'
+
+dtlsServerSocket_string
+         ::= 'string'
+
+/* ======================================================================== */
+/* Datagram class                                                           */
+/* ======================================================================== */
+
+datagram_new
+         ::= 'new(' data ',' address ',' port ')'
+
+datagram_address
+         ::= 'address'
+
+datagram_data
+         ::= 'data'
+
+datagram_makeString
+         ::= 'makeString'
+
+datagram_port
+         ::= 'port'
+
+datagram_string
+         ::= 'string'
