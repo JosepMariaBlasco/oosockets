@@ -66,11 +66,12 @@ A program uses it with the directive</para>
 </programlisting>
 
 <para>TLS and DTLS are provided by the system&apos;s own TLS or by OpenSSL 3,
-kept up to date by the system.  On Windows, the TLS client
-(<classname>TLSSocket</classname> and <methodname>startTLS</methodname>)
-uses Schannel, Windows&apos; own TLS; setting the environment variable
-<envar>OOSOCKETS_TLS</envar> to <literal>openssl</literal> makes it use
-OpenSSL instead.  The rest uses OpenSSL.  On Linux the library uses the system&apos;s OpenSSL.  On macOS,
+kept up to date by the system.  On Windows, everything but the DTLS
+server (<classname>DTLSServerSocket</classname>) uses Schannel, Windows&apos;
+own TLS; setting the environment variable <envar>OOSOCKETS_TLS</envar> to
+<literal>openssl</literal> makes it use OpenSSL instead.  Schannel&apos;s
+DTLS client cannot send DTLS&apos;s closing message, so a server is not told
+when a <classname>DTLSSocket</classname> on Windows closes.  On Linux the library uses the system&apos;s OpenSSL.  On macOS,
 which has none that fits, it uses the OpenSSL 3 of Homebrew
 (<command>brew install openssl@3</command>) or MacPorts
 (<command>sudo port install openssl3</command>); without it, the plain
@@ -428,8 +429,8 @@ the system trusts (a test server, a classroom one), is reached by trusting
 that certificate explicitly, with <xref linkend="mthTLSOptionsTrust"
 xrefstyle="select:title"/>.  Then only the certificates trusted so count:
 the system&apos;s roots do not: OpenSSL checks the certificate, with the
-host name, or, for Schannel&apos;s client on Windows, Windows does, with
-those certificates as its only anchors.</para>
+host name, or, with Schannel on Windows, Windows does, with those
+certificates as its only anchors.</para>
 
 <programlisting language="rexx">
 opts = .TLSOptions~new~trust("mySrvKeystore.p12", "123456")

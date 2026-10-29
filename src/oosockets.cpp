@@ -1580,16 +1580,19 @@ static RexxArrayObject handshakeStep(RexxMethodContext *context, Sock *s, double
 /* Schannel                                                                   */
 /*                                                                            */
 /* Windows' own TLS, which Windows Update keeps current (Rony, 27 and         */
-/* 29/10/2026). Measured in probes/schannel/. OOSOCKETS_TLS=openssl makes     */
-/* Windows use OpenSSL instead (Rony, 29/10/2026), Windows still deciding     */
-/* trust.                                                                     */
+/* 29/10/2026), for TLS's client and server and DTLS's client (DTLS's server  */
+/* stays OpenSSL's). Measured in probes/schannel/. OOSOCKETS_TLS=openssl      */
+/* makes Windows use OpenSSL instead (Rony, 29/10/2026), Windows still        */
+/* deciding trust.                                                            */
 /*                                                                            */
 /* The server's certificate is validated by hand (SCH_CRED_MANUAL_CRED_       */
-/* VALIDATION), as soon as Schannel has it and before our next flight goes    */
-/* out: with Windows' roots and its SSL policy (as OpenSSL's handshake does   */
-/* on Windows), or, when certificates are trusted explicitly, with a chain    */
-/* engine whose only anchors are those. A refused certificate ends the        */
-/* handshake with an alert, as OpenSSL's does.                                */
+/* VALIDATION) as soon as Schannel shows it, before our next flight goes if   */
+/* it can (TLS 1.3: before our Finished): with Windows' roots and SSL policy  */
+/* (as OpenSSL's handshake does on Windows), or, when certificates are        */
+/* trusted explicitly, with a chain engine whose only anchors are those. A    */
+/* refused certificate ends the handshake with an alert, as OpenSSL's does.   */
+/* DTLS: Schannel shows it only at the end (measured), so it is read from     */
+/* the server's flight in clear (see "the client by Schannel" under DTLS).    */
 /*                                                                            */
 /* The model is OpenSSL's in tlsRun: each step is made under the Sock's       */
 /* lock, on a non-blocking socket, and says whether it must wait to read or   */
@@ -1879,21 +1882,6 @@ static DWORD alertFor(const TrustError &t)
 }
 
 // What Schannel makes after ApplyControlToken (an alert, close_notify).
-// TEMPORARY (measuring): OOSOCKETS_TRACE=1 says what Schannel does.
-static void schTrace(const char *what, SECURITY_STATUS st, const std::string *in, const std::string &out)
-{
-    char buf[8] = "";
-    if (GetEnvironmentVariableA("OOSOCKETS_TRACE", buf, sizeof(buf)) == 0)
-    {
-        return;
-    }
-    fprintf(stderr, "  [schannel] %s: 0x%08lX in %d bytes (type %d) out %d bytes (type %d)\n", what,
-            (unsigned long)st, in != nullptr ? (int)in->size() : -1,
-            in != nullptr && !in->empty() ? (unsigned char)(*in)[0] : -1, (int)out.size(),
-            !out.empty() ? (unsigned char)out[0] : -1);
-    fflush(stderr);
-}
-
 static std::string schControl(Sch *c, void *token, unsigned long size)
 {
     SecBuffer b = { size, SECBUFFER_TOKEN, token };
@@ -5273,7 +5261,6 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
         {
             FreeContextBuffer(outb[1].pvBuffer);
         }
-        schTrace("ISC", st, d, tok);
         if (st != SEC_I_CONTINUE_NEEDED && st != SEC_E_OK && st != SEC_I_MESSAGE_FRAGMENT &&
             st != SEC_E_INCOMPLETE_MESSAGE)
         {
@@ -5296,9 +5283,8 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
         {
             // (not read from the flight: Schannel's, now that it is over)
             PCCERT_CONTEXT leaf = nullptr;
-            SECURITY_STATUS q = QueryContextAttributesW(&x->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &leaf);
-            schTrace("REMOTE_CERT_CONTEXT", q, nullptr, "");
-            if (q == SEC_E_OK && leaf != nullptr)
+            if (QueryContextAttributesW(&x->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &leaf) == SEC_E_OK
+                && leaf != nullptr)
             {
                 x->checked = true;
                 bool ok = schTrust(c, x, leaf);
@@ -5367,7 +5353,6 @@ static void schDtlsDrive(DtlsEndpoint *ep, DtlsConn *c)
         SecBufferDesc desc = { SECBUFFER_VERSION, 4, b };
         std::string copy = d;
         SECURITY_STATUS st = DecryptMessage(&x->ctx, &desc, 0, nullptr);
-        schTrace("Decrypt", st, &copy, "");
         if (st == SEC_E_OK)
         {
             for (int i = 0; i < 4; i++)

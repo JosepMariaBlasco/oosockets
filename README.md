@@ -140,12 +140,15 @@ s~close
   ...`. To use another OpenSSL 3, name its directory (the one with
   `libssl`) in the environment variable **`OOSOCKETS_OPENSSL`**; ooSockets
   then uses that one and no other.
-- **On Windows**, the TLS client (`TLSSocket`, `startTLS`) is Windows' own
-  TLS, **Schannel**, kept up to date by Windows Update. To use OpenSSL
-  instead, set the environment variable **`OOSOCKETS_TLS`** to `openssl`
-  (Windows still decides trust). The TLS server and DTLS still use
-  OpenSSL, linked statically for now; they move to Schannel next
-  (`probes/schannel/`), except the DTLS server, which Schannel cannot do.
+- **On Windows**, TLS is Windows' own, **Schannel**, kept up to date by
+  Windows Update: `TLSSocket`, `TLSServerSocket`, `startTLS`,
+  `startTLSServer` and the DTLS client, `DTLSSocket`. Only the DTLS server
+  (`DTLSServerSocket`) uses OpenSSL, since Schannel's cannot be made to
+  work (`probes/schannel/`); OpenSSL is linked statically for now. To use
+  OpenSSL for everything, set the environment variable **`OOSOCKETS_TLS`**
+  to `openssl` (Windows still decides trust). One difference: Schannel's
+  DTLS client cannot send DTLS's closing message (`close_notify`), so a
+  server is not told when a Windows `DTLSSocket` closes.
 
 ### A TLS server
 
