@@ -1357,12 +1357,29 @@ halted:
 ::method uninit
   self~nFree
 
-/** send(data): data as one datagram, encrypted, to the peer. */
+/** send(data): data as one datagram, encrypted, to the peer. On a client
+    a DTLSServerSocket accepted, the first send (or receive) waits for its
+    handshake to end, at most receiveTimeout; a failed handshake is a
+    SYNTAX condition, 48.900, there. */
 ::method send unguarded
+  expose receiveTimeout
+  signal on halt name halted
   use strict arg data
   self~checkOpen
-  r = self~nSend(data~string)
-  if r[1] \== "OK" then self~raiseError(r)
+  timeout = receiveTimeout
+  if timeout == .nil then timeout = -1
+  data = data~string
+  r = self~nSend(data, timeout)
+  loop while r[1] == "AGAIN"                 -- see "HALT" in oosockets.cpp
+    r = self~nSend(data, r[2])
+  end
+  if r[1] == "OK" then return
+  if r[1] == "TIMEOUT" then
+    self~raiseError(.array~of("ERROR", "handshake failed: timed out", "ETIMEDOUT", 0))
+  self~raiseError(r)
+  return
+halted:
+  raise propagate
 
 /** receive: waits for the next datagram and returns it as a .Datagram.
     With a receiveTimeout that expires, returns .nil. */
@@ -1459,12 +1476,15 @@ halted:
 
 /* new(port, options [, address]): a DTLS server on a UDP port. options: a
    TLSOptions with the server's certificate (certificate(file
-   [, password])). accept waits for a client whose handshake has finished
-   and returns its DTLSSocket; one socket (one port) serves every client,
-   each told apart by its address and port. A client is first sent a
-   cookie it must send back, so that a forged address costs the server
-   nothing; a client that fails the handshake (or never finishes it) is
-   dropped, and the server goes on.
+   [, password])). accept waits for a client and returns its DTLSSocket;
+   one socket (one port) serves every client, each told apart by its
+   address and port. A client is first sent a cookie it must send back, so
+   that a forged address costs the server nothing; accept returns it then,
+   and its handshake ends on its first receive or send, in the activity
+   that serves it, as TLSServerSocket's (Rony, 29/10/2026). A client that
+   fails the handshake (or never finishes it) makes that receive or send
+   raise a SYNTAX condition, 48.900 ("TLS error: handshake failed: ...");
+   the server goes on.
 
    srv = .DTLSServerSocket~new(4433, .TLSOptions~new~certificate("server.p12", "secret"))
    c = srv~accept                           -- a .DTLSSocket
@@ -1503,8 +1523,9 @@ halted:
 ::method uninit
   self~nFree
 
-/** accept: waits for a client whose handshake has finished and returns its
-    .DTLSSocket. With an acceptTimeout that expires, returns .nil. */
+/** accept: waits for a client (one that has sent the cookie back) and
+    returns its .DTLSSocket; its handshake ends on its first receive or
+    send. With an acceptTimeout that expires, returns .nil. */
 ::method accept
   expose port closed acceptTimeout
   signal on halt name halted

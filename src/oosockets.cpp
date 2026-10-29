@@ -3279,7 +3279,7 @@ struct DtlsEndpoint
     bool closeAfterRead = false;         // close was asked while one polled
     SSL_CTX *ctx = nullptr;
     std::map<std::string, DtlsConn *> conns;   // server: by peer
-    std::deque<DtlsConn *> ready;              // server: handshaken, not accepted
+    std::deque<DtlsConn *> ready;              // server: past the cookie, not accepted
     DtlsConn *client = nullptr;                // client: its connection
     unsigned char secret[32];                  // server: for the cookies
     ~DtlsEndpoint();
@@ -3546,27 +3546,43 @@ static TlsOutcome dtlsOutcome(DtlsConn *c, int rc)
     return o;
 }
 
-// A connection that cannot go on. A server's, never accepted, is dropped
-// (its client hears of it, the server goes on).
+// A server's connection leaves the table of peers (a new ClientHello from
+// the same address and port then starts a new one).
+static void unlistConn(DtlsEndpoint *ep, DtlsConn *c)
+{
+    auto it = ep->conns.find(c->key);
+    if (it != ep->conns.end() && it->second == c)
+    {
+        ep->conns.erase(it);
+    }
+}
+
+// A server's connection that nobody will ever see: out of the table and
+// of accept's queue, and freed.
+static void dropConn(DtlsEndpoint *ep, DtlsConn *c)
+{
+    unlistConn(ep, c);
+    for (auto r = ep->ready.begin(); r != ep->ready.end(); ++r)
+    {
+        if (*r == c)
+        {
+            ep->ready.erase(r);
+            break;
+        }
+    }
+    freeConn(c);
+}
+
+// A connection that cannot go on. It keeps why, for its DTLSSocket's
+// first receive or send: a server's client that fails its handshake
+// before accept has returned it is still returned (Rony, 29/10/2026: the
+// handshake on first use, as TLSServerSocket; the failure reaches the
+// program there).
 static void failConn(DtlsEndpoint *ep, DtlsConn *c, const TlsOutcome &o)
 {
-    if (ep->server && !c->accepted)
+    if (ep->server)
     {
-        auto it = ep->conns.find(c->key);
-        if (it != ep->conns.end() && it->second == c)
-        {
-            ep->conns.erase(it);
-        }
-        for (auto r = ep->ready.begin(); r != ep->ready.end(); ++r)
-        {
-            if (*r == c)
-            {
-                ep->ready.erase(r);
-                break;
-            }
-        }
-        freeConn(c);
-        return;
+        unlistConn(ep, c);
     }
     c->state = DtlsConn::FAILED;
     c->failure = o;
@@ -3584,10 +3600,6 @@ static void driveConn(DtlsEndpoint *ep, DtlsConn *c)
         if (rc == 1)
         {
             c->state = DtlsConn::OPEN;
-            if (ep->server)
-            {
-                ep->ready.push_back(c);
-            }
         }
         else
         {
@@ -3654,7 +3666,7 @@ static DtlsConn *listenFor(DtlsEndpoint *ep, const char *d, size_t n, const stru
     {
         pending += kv.second->state == DtlsConn::HANDSHAKING ? 1 : 0;
     }
-    if (pending >= DTLS_MAX_PENDING)
+    if (pending >= DTLS_MAX_PENDING || ep->ready.size() >= DTLS_MAX_PENDING)
     {
         return nullptr;
     }
@@ -3704,7 +3716,7 @@ static void dispatch(DtlsEndpoint *ep, const char *d, size_t n, const struct soc
             ep->conns.erase(it);
             if (c->accepted)
             {
-                if (c->state == DtlsConn::OPEN)
+                if (c->state <= DtlsConn::OPEN)
                 {
                     c->state = DtlsConn::PEER_CLOSED;
                     c->restarted = true;
@@ -3712,9 +3724,10 @@ static void dispatch(DtlsEndpoint *ep, const char *d, size_t n, const struct soc
             }
             else
             {
-                failConn(ep, c, TlsOutcome());
+                dropConn(ep, c);         // superseded before anyone saw it
             }
             ep->conns[key] = fresh;
+            ep->ready.push_back(fresh);
             driveConn(ep, fresh);
             return;
         }
@@ -3729,6 +3742,7 @@ static void dispatch(DtlsEndpoint *ep, const char *d, size_t n, const struct soc
     if (fresh != nullptr)
     {
         ep->conns[key] = fresh;
+        ep->ready.push_back(fresh);      // accept returns it now; the handshake goes on
         driveConn(ep, fresh);
     }
 }
@@ -3972,7 +3986,8 @@ static RexxArrayObject connResult(RexxMethodContext *context, DtlsConn *c)
     }
     if (o.status == TLS_TIMEOUT)
     {
-        return errorArray(context, "the peer no longer answers", "ETIMEDOUT", 0);
+        return errorArray(context, o.handshaking ? "handshake failed: the peer no longer answers"
+                                                 : "the peer no longer answers", "ETIMEDOUT", 0);
     }
     return tlsIoResult(context, o);
 }
@@ -4159,9 +4174,10 @@ RexxMethod5(RexxArrayObject, dtls_listen, CSTRING, port, CSTRING, address, CSTRI
     return statusResult(context, "OK");
 }
 
-// nAccept(timeout): "OK" and a pointer for DTLSSocket~new (a client whose
-// handshake has finished); "TIMEOUT"; "AGAIN" and the seconds left; or an
-// error. Clients that fail their handshake are dropped: the server goes on.
+// nAccept(timeout): "OK" and a pointer for DTLSSocket~new (a client that
+// has sent the cookie back: its handshake goes on, and ends, or fails, by
+// its first receive or send); "TIMEOUT"; "AGAIN" and the seconds left; or
+// an error.
 RexxMethod2(RexxArrayObject, dtls_accept, CSELF, cself, double, timeout)
 {
     DtlsHandle *h = handleOf(cself);
@@ -4204,8 +4220,11 @@ RexxMethod1(RexxObjectPtr, dtls_adopt, POINTER, p)
 
 /* ---- either side's connection ------------------------------------------------ */
 
-// nSend(data): one datagram (one DTLS record). "OK" or an error.
-RexxMethod2(RexxArrayObject, dtls_send, CSELF, cself, RexxStringObject, data)
+// nSend(data, timeout): one datagram (one DTLS record). "OK"; while an
+// accepted client's handshake goes on, "AGAIN" and the seconds left (it
+// waits for it, timeout < 0: as long as it takes), or "TIMEOUT"; or an
+// error.
+RexxMethod3(RexxArrayObject, dtls_send, CSELF, cself, RexxStringObject, data, double, timeout)
 {
     DtlsHandle *h = handleOf(cself);
     if (h == nullptr || h->conn == nullptr)
@@ -4223,10 +4242,28 @@ RexxMethod2(RexxArrayObject, dtls_send, CSELF, cself, RexxStringObject, data)
         return errorResult(context, EMSGSIZE);
 #endif
     }
-    std::lock_guard<std::mutex> guard(ep->mu);
+    std::unique_lock<std::mutex> lk(ep->mu);
     if (ep->closing || ep->fd == BAD_SOCKET)
     {
         return closedResult(context);
+    }
+    if (c->state == DtlsConn::HANDSHAKING)
+    {
+        bool hasDeadline = timeout >= 0;
+        Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+        int w = dtlsWait(ep, lk, hasDeadline, deadline, [&]() { return c->state != DtlsConn::HANDSHAKING; });
+        if (w == 0)
+        {
+            return statusResult(context, "TIMEOUT");
+        }
+        if (w == 2)
+        {
+            return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+        }
+        if (w < 0)
+        {
+            return closedResult(context);
+        }
     }
     if (c->state != DtlsConn::OPEN)
     {
@@ -4267,7 +4304,7 @@ RexxMethod2(RexxArrayObject, dtls_receive, CSELF, cself, double, timeout)
         return closedResult(context);
     }
     int w = dtlsWait(ep, lk, hasDeadline, deadline,
-                     [&]() { return !c->app.empty() || c->state != DtlsConn::OPEN; });
+                     [&]() { return !c->app.empty() || c->state > DtlsConn::OPEN; });
     if (!c->app.empty())
     {
         std::string d = c->app.front();

@@ -2824,7 +2824,12 @@ expired (localhost, port 4433)</literal>).</para>
 <methodname>receiveTimeout</methodname>, and decrypts it.  Once the peer
 has closed the connection, it raises a <literal>SYNTAX</literal> condition
 (<literal>48.900</literal>, <literal>TLS error: the peer closed the
-connection (localhost, port 4433)</literal>).</para>
+connection (localhost, port 4433)</literal>).  On a socket a
+<classname>DTLSServerSocket</classname> accepted, the first
+<methodname>receive</methodname> (or <methodname>send</methodname>) also
+ends the handshake; if it fails, it raises a <literal>SYNTAX</literal>
+condition (<literal>48.900</literal>, <literal>TLS error: handshake failed:
+...</literal>).</para>
 
 <para><emphasis role="bold">Returns:</emphasis> a
 <xref linkend="clsDatagram" xrefstyle="select:title"/>, or
@@ -2917,7 +2922,13 @@ is always secure.</para>
 <para>Encrypts <emphasis role="italic">data</emphasis> and sends it to the
 peer as one datagram.  Up to 16,384 bytes can be sent at a time; more
 raises a <literal>SYNTAX</literal> condition (<literal>Socket error:
-message too long</literal>).</para>
+message too long</literal>).  On a socket a
+<classname>DTLSServerSocket</classname> accepted, the first
+<methodname>send</methodname> (or <methodname>receive</methodname>) waits
+for the handshake to end, at most <methodname>receiveTimeout</methodname>;
+if it fails or the time runs out, it raises a <literal>SYNTAX</literal>
+condition (<literal>48.900</literal>, <literal>TLS error: handshake failed:
+...</literal>).</para>
 
 <para><emphasis role="bold">Arguments:</emphasis></para>
 <variablelist>
@@ -2969,21 +2980,29 @@ message too long</literal>).</para>
 <para>A DTLS server: one UDP socket, on one port, that serves any number of
 clients, each with its own handshake.  Its <methodname>accept</methodname>
 method returns a <xref linkend="clsDTLSSocket" xrefstyle="select:title"/>
-for each client whose handshake has finished.  A client is first sent a
-cookie that it must send back, so that a client with a forged address costs
-the server nothing.  A client that fails the handshake, or never finishes
-it, is dropped, and the server goes on.</para>
+for each client.  A client is first sent a cookie that it must send back,
+so that a client with a forged address costs the server nothing;
+<methodname>accept</methodname> returns it then, and its handshake ends on
+its first <methodname>receive</methodname> or
+<methodname>send</methodname>, in the activity that serves it, as for a
+<classname>TLSServerSocket</classname>.  A client that fails the
+handshake, or never finishes it, makes that <methodname>receive</methodname>
+or <methodname>send</methodname> raise a <literal>SYNTAX</literal>
+condition (<literal>48.900</literal>, <literal>TLS error: handshake
+failed: tlsv1 alert unknown ca (127.0.0.1, port 50123)</literal>), and the
+server goes on.</para>
 
 <para>The server answers the messages of the handshakes while something
 waits on it: an <methodname>accept</methodname>, or a
-<methodname>receive</methodname> on one of the sockets it accepted.  Closing
-the server ends the connections it accepted.</para>
+<methodname>receive</methodname> or <methodname>send</methodname> on one
+of the sockets it accepted.  Closing the server ends the connections it
+accepted.</para>
 
 <programlisting language="rexx">
 opts = .TLSOptions~new~certificate("server.p12", "secret")
 srv = .DTLSServerSocket~new(4433, opts)
 loop
-  c = srv~accept                      -- a client, its handshake made
+  c = srv~accept                      -- a client: its handshake ends on first use
   d = c~receive
   c~send(d~data~upper)
   c~close                             -- tells the client
@@ -3030,7 +3049,9 @@ end
 </mediaobject>
 
 <para>Waits, at most <methodname>acceptTimeout</methodname>, for a client
-whose handshake has finished.</para>
+that has sent the cookie back.  Its handshake ends on the first
+<methodname>receive</methodname> or <methodname>send</methodname> of the
+socket returned.</para>
 
 <para><emphasis role="bold">Returns:</emphasis> a
 <classname>DTLSSocket</classname> for the client, or

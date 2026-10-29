@@ -304,7 +304,7 @@ serves any number of clients on one UDP port.
 opts = .TLSOptions~new~certificate("server.p12", "secret")
 srv = .DTLSServerSocket~new(4433, opts)
 loop
-  c = srv~accept                          -- a client, its handshake made
+  c = srv~accept                          -- a client; the handshake ends on first use
   d = c~receive
   c~send(d~data~upper)
   c~close                                 -- tells the client (close_notify)
@@ -331,12 +331,15 @@ s~close
   or arrive in another order, as with UDP; DTLS protects them, it does not
   deliver them.
 - `.DTLSServerSocket~new(port, options [, address])`: `options` with the
-  server's certificate. `accept` returns a client whose handshake has
-  finished (`.nil` after `acceptTimeout`); a client that fails it is
-  dropped, and the server goes on. Each new client is first sent a cookie
-  to send back, so that a forged address costs the server nothing. The
-  server answers handshakes while something waits on it: `accept`, or a
-  `receive` on one of its clients.
+  server's certificate. Each new client is first sent a cookie to send
+  back, so that a forged address costs the server nothing; `accept`
+  returns it then (`.nil` after `acceptTimeout`), and **its handshake ends
+  on its first `receive` or `send`**, in the activity that serves it, as
+  with `TLSServerSocket`. A client that fails the handshake makes that
+  `receive` or `send` raise a SYNTAX condition, 48.900 (`TLS error:
+  handshake failed: tlsv1 alert unknown ca (127.0.0.1, port 50123)`), and
+  the server goes on. The server answers handshakes while something waits
+  on it: `accept`, or a `receive` or `send` on one of its clients.
 - `protocol` (`DTLSv1.2`), `cipher`; DTLS 1.2 (OpenSSL has no DTLS 1.3 yet).
 - Every error is a SYNTAX condition, 48.900: `TLS error: certificate has
   expired (localhost, port 4433)`; once the peer has closed, `receive`

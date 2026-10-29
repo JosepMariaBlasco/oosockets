@@ -25,11 +25,11 @@ return testResult
   c = srv~accept
   self~assertTrue(c~isA(.DTLSSocket))
   self~assertTrue(c~secure)
-  self~assertSame("DTLSv1.2", c~protocol)
-  self~assertTrue(c~cipher \== "")
   self~assertSame("127.0.0.1", c~remoteAddress)
   c~receiveTimeout = 10
-  d = c~receive
+  d = c~receive                              -- the handshake ends here
+  self~assertSame("DTLSv1.2", c~protocol)
+  self~assertTrue(c~cipher \== "")
   self~assertTrue(d~isA(.Datagram))
   self~assertSame("Hello, DTLS", d~data)
   self~assertSame(c~remotePort, d~port)
@@ -95,22 +95,46 @@ return testResult
   c~close
   srv~close
 
--- A client that fails its handshake is dropped; the next one is served.
--- (The server answers handshakes while something waits on it: accept
--- here, or a receive on one of its connections.)
-::method test_a_failing_client_does_not_stop_the_server
+-- accept returns a client once it has sent the cookie back; its handshake
+-- ends on its first receive or send, and a failure is a SYNTAX condition
+-- there (Rony, 29/10/2026: as TLSServerSocket). The server goes on.
+::method test_a_failing_client_is_told_on_first_use
   srv = newServer()
-  bad = .Client~new~start("connectOnly", srv~localPort, .nil)  -- the system's trust: not the test CA
-  good = .Client~new~start("echoOnce", srv~localPort, "good", trustCA(), 3)  -- starts later
-  c = srv~accept
+  port = srv~localPort
+  bad = .Client~new~start("connectOnly", port, .nil)  -- the system's trust: not the test CA
+  good = .Client~new~start("echoOnce", port, "good", trustCA(), 3)  -- starts later
+  c = srv~accept                             -- the bad one, its handshake not over
   c~receiveTimeout = 10
-  c~send(c~receive~data)
-  self~assertSame("good DTLSv1.2", good~result)
+  signal on syntax name failed
+  c~receive
+  self~fail("the bad client's receive should have failed")
+failed:
+  co = condition("o")
+  self~assertSame(48.900, co~code)
+  self~assertTrue(co~additional[1]~startsWith("TLS error: handshake failed: "), co~additional[1])
+  self~assertSame("TLS", co~additional[2])
   -- "certificate is not trusted"; macOS may first say "is valid for
   -- longer than the system allows" (the test CA's hundred years)
   r = bad~result
   self~assertTrue(r~startsWith("TLS error: certificate "), r)
-  self~assertTrue(r~endsWith("(localhost, port" srv~localPort")"), r)
+  self~assertTrue(r~endsWith("(localhost, port" port")"), r)
+  c~close
+  c = srv~accept                             -- the next one is served
+  c~receiveTimeout = 10
+  c~send(c~receive~data)
+  self~assertSame("good DTLSv1.2", good~result)
+  c~close
+  srv~close
+
+-- A client accepted whose handshake has not ended: send waits for it too.
+::method test_send_waits_for_the_handshake
+  srv = newServer()
+  msg = .Client~new~start("receiveOnce", srv~localPort)
+  c = srv~accept
+  c~receiveTimeout = 10
+  c~send("first")                            -- the handshake ends here
+  self~assertSame("DTLSv1.2", c~protocol)
+  self~assertSame("first DTLSv1.2", msg~result)
   c~close
   srv~close
 
@@ -148,15 +172,15 @@ return testResult
   srv = newServer()
   msg = .Client~new~start("connectOnly", srv~localPort)
   c = srv~accept
-  self~assertSame("connected", msg~result)    -- and it closed
   c~receiveTimeout = 10
   signal on syntax
-  c~receive
+  c~receive                                  -- the handshake, then the client's close
   self~fail("receive should have failed")
 syntax:
   co = condition("o")
   self~assertSame(48.900, co~code)
   self~assertSame("TLS error: the peer closed the connection (127.0.0.1, port" c~remotePort")", co~additional[1])
+  self~assertSame("connected", msg~result)
   srv~close
 
 ::method test_receive_timeout
@@ -232,16 +256,18 @@ syntax:
 
 ::method test_the_wrong_host
   srv = .DTLSServerSocket~new(0, serverOptions("wronghost.pem"), "127.0.0.1")
+  port = srv~localPort
   .Waiter~new~start("acceptFor", srv, 15)    -- the server, answering
-  c = connectFails("localhost", srv~localPort, trustCA(), 10)
-  self~assertSame("TLS error: certificate does not match the host name (localhost, port" srv~localPort")", c~additional[1])
+  c = connectFails("localhost", port, trustCA(), 10)
+  self~assertSame("TLS error: certificate does not match the host name (localhost, port" port")", c~additional[1])
   srv~close
 
 ::method test_an_expired_certificate
   srv = .DTLSServerSocket~new(0, serverOptions("expired.pem"), "127.0.0.1")
+  port = srv~localPort
   .Waiter~new~start("acceptFor", srv, 15)
-  c = connectFails("localhost", srv~localPort, trustCA(), 10)
-  self~assertSame("TLS error: certificate has expired (localhost, port" srv~localPort")", c~additional[1])
+  c = connectFails("localhost", port, trustCA(), 10)
+  self~assertSame("TLS error: certificate has expired (localhost, port" port")", c~additional[1])
   srv~close
 
 ::method test_unknown_host
@@ -288,6 +314,13 @@ syntax:
   reply = s~receive~data s~protocol
   s~close
   return reply
+::method receiveOnce
+  use arg port, options = (trustCA())
+  s = .DTLSSocket~new("localhost", port, options, 10)
+  s~receiveTimeout = 10
+  reply = s~receive~data s~protocol
+  s~close
+  return reply
 ::method connectOnly
   use arg port, options = (trustCA())
   signal on syntax
@@ -324,6 +357,8 @@ syntax:
 ::method acceptAndClose
   use arg srv
   c = srv~accept
+  c~receiveTimeout = 1
+  c~receive                                  -- lets the handshake end (.nil after 1 s)
   c~close
   return "closed"
 ::method acceptAndWait

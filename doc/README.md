@@ -61,7 +61,6 @@ mv socket_*.svg serverSocket_*.svg tlsSocket_*.svg tlsServerSocket_*.svg tlsOpti
 
 ## Keeping it current
 
-The chapter describes the classes as they are. Multicast is approved; two
-points of DTLS are still open with Rony G. Flatscher (what `accept`
-returns and when the handshake happens), and its sections change if they
-do.
+The chapter describes the classes as they are. One point is still open
+with Rony G. Flatscher: whether every error of the TLS and DTLS classes
+says `TLS error:`, also when the socket underneath failed.
