@@ -5026,6 +5026,21 @@ static void failConn(DtlsEndpoint *ep, DtlsConn *c, const TlsOutcome &o)
 /* flight again (the retransmission timer is ours); after the handshake the MTU  */
 /* is raised so that a record takes the 16,384 bytes a datagram may carry.       */
 
+// TEMPORARY (measuring): OOSOCKETS_TRACE=1 says what Schannel does.
+static void schTrace(const char *what, SECURITY_STATUS st, const std::string *in, const std::string &out)
+{
+    char buf[8] = "";
+    if (GetEnvironmentVariableA("OOSOCKETS_TRACE", buf, sizeof(buf)) == 0)
+    {
+        return;
+    }
+    fprintf(stderr, "  [schannel] %s: 0x%08lX in %d bytes (type %d) out %d bytes (type %d)\n", what,
+            (unsigned long)st, in != nullptr ? (int)in->size() : -1,
+            in != nullptr && !in->empty() ? (unsigned char)(*in)[0] : -1, (int)out.size(),
+            !out.empty() ? (unsigned char)out[0] : -1);
+    fflush(stderr);
+}
+
 static const int SCH_DTLS_FIRST_RESEND_MS = 1000;
 static const int SCH_DTLS_MAX_RESEND_MS = 8000;
 static const int SCH_DTLS_MAX_RESENDS = 6;
@@ -5084,6 +5099,7 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
         {
             FreeContextBuffer(outb[1].pvBuffer);
         }
+        schTrace("ISC", st, d, tok);
         if (st != SEC_I_CONTINUE_NEEDED && st != SEC_E_OK && st != SEC_I_MESSAGE_FRAGMENT &&
             st != SEC_E_INCOMPLETE_MESSAGE)
         {
@@ -5095,15 +5111,18 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
         {
             // Before our next flight: is the server's certificate good?
             PCCERT_CONTEXT leaf = nullptr;
-            if (QueryContextAttributesW(&x->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &leaf) == SEC_E_OK
-                && leaf != nullptr)
+            SECURITY_STATUS q = QueryContextAttributesW(&x->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &leaf);
+            schTrace("REMOTE_CERT_CONTEXT", q, nullptr, "");
+            if (q == SEC_E_OK && leaf != nullptr)
             {
                 x->checked = true;
                 bool ok = schTrust(c, x, leaf);
                 CertFreeCertificateContext(leaf);
                 if (!ok)
                 {
-                    schDtlsSend(ep, schAlert(x, alertFor(c->trust)));
+                    std::string alert = schAlert(x, alertFor(c->trust));
+                    schTrace("alert", 0, nullptr, alert);
+                    schDtlsSend(ep, alert);
                     schDtlsFail(ep, c, SEC_E_CERT_UNKNOWN);
                     return;
                 }
@@ -5165,6 +5184,7 @@ static void schDtlsDrive(DtlsEndpoint *ep, DtlsConn *c)
         SecBufferDesc desc = { SECBUFFER_VERSION, 4, b };
         std::string copy = d;
         SECURITY_STATUS st = DecryptMessage(&x->ctx, &desc, 0, nullptr);
+        schTrace("Decrypt", st, &copy, "");
         if (st == SEC_E_OK)
         {
             for (int i = 0; i < 4; i++)
@@ -6186,7 +6206,9 @@ static void closeHandle(DtlsHandle *h)
 #ifdef _WIN32
             if (c->sch != nullptr)
             {
-                schDtlsSend(ep, schCloseNotify(c->sch));   // close_notify
+                std::string bye = schCloseNotify(c->sch);
+                schTrace("close_notify", 0, nullptr, bye);
+                schDtlsSend(ep, bye);    // close_notify
             }
             else
 #endif
