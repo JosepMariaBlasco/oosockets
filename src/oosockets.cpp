@@ -636,8 +636,9 @@ static void closeSock(Sock *s)
 /*----------------------------------------------------------------------------*/
 /* TLS                                                                        */
 /*                                                                            */
-/* OpenSSL does the TLS on the three systems (linked statically on macOS and  */
-/* Windows). Who decides whether the server's certificate is good:            */
+/* OpenSSL does the TLS (loaded when first used on Linux and macOS; linked   */
+/* on Windows, whose TLS client is Schannel's: see "Schannel" below). Who     */
+/* decides whether the server's certificate is good:                          */
 /*   - when the program trusts certificates explicitly (TLSOptions~trust),    */
 /*     OpenSSL, with those as its only anchors, and the host name;            */
 /*   - otherwise the system: Linux, OpenSSL with the system's store; macOS,   */

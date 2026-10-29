@@ -104,8 +104,9 @@ s~close
   name and number follow in `condition("A")`.
 - **A server with its own certificate** (a test server, a classroom
   one): trust that certificate explicitly. Then only the certificates
-  trusted so count, the system's roots do not, and OpenSSL checks them
-  (with the host name) the same way on every system:
+  trusted so count, the system's roots do not; OpenSSL checks them (with
+  the host name), or on Windows Windows itself, with those as its only
+  anchors:
 
   ```rexx
   opts = .TLSOptions~new~trust("mySrvKeystore.p12", "123456")
@@ -120,7 +121,10 @@ s~close
   IMAP, FTP). Bytes that arrived in clear before the handshake are
   refused (they would be taken as if they had come over TLS).
 - `secure` (`.true` once TLS has started), `protocol` (`"TLSv1.3"`),
-  `cipher` (both `""` until the handshake has been made).
+  `cipher` (both `""` until the handshake has been made). Cipher names
+  are the TLS library's: for TLS 1.2, OpenSSL's `ECDHE-RSA-AES256-GCM-SHA384`
+  is Windows' `TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384`; TLS 1.3's are the
+  same on both (`TLS_AES_256_GCM_SHA384`).
 - A peer that closes the connection without TLS's own closing message
   (`close_notify`), as many HTTP servers do, is taken as the end of the
   stream.
@@ -135,8 +139,13 @@ s~close
   work, and TLS raises `TLS error: OpenSSL 3 not found; install it with
   ...`. To use another OpenSSL 3, name its directory (the one with
   `libssl`) in the environment variable **`OOSOCKETS_OPENSSL`**; ooSockets
-  then uses that one and no other. On Windows it is linked statically for
-  now; it will be Windows' own TLS, Schannel (`probes/schannel/`).
+  then uses that one and no other.
+- **On Windows**, the TLS client (`TLSSocket`, `startTLS`) is Windows' own
+  TLS, **Schannel**, kept up to date by Windows Update. To use OpenSSL
+  instead, set the environment variable **`OOSOCKETS_TLS`** to `openssl`
+  (Windows still decides trust). The TLS server and DTLS still use
+  OpenSSL, linked statically for now; they move to Schannel next
+  (`probes/schannel/`), except the DTLS server, which Schannel cannot do.
 
 ### A TLS server
 

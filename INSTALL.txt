@@ -22,7 +22,9 @@ DYLD_LIBRARY_PATH on macOS, LD_LIBRARY_PATH on Linux) for the library.
 
 What each zip needs:
 
-  Windows: 64-bit. OpenSSL is inside oosockets.dll.
+  Windows: 64-bit. The TLS client is Windows' own (Schannel); OpenSSL,
+           for the rest for now, is inside oosockets.dll. Environment
+           variable OOSOCKETS_TLS=openssl: OpenSSL for the client too.
   macOS:   macOS 11 or later on Apple Silicon, 10.14 or later on Intel.
            For TLS and DTLS, OpenSSL 3 from Homebrew or MacPorts, which
            keep it up to date:
