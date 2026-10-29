@@ -1,0 +1,24 @@
+name: macOS OpenSSL probe
+
+# Can liboosockets use Homebrew's or MacPorts' OpenSSL (weak linking to
+# @rpath/libssl.3.dylib), and load without it? probes/macos-openssl/.
+# Run by hand, or when the probe changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - probes/macos-openssl/**
+      - .github/workflows/macos-openssl-probe.yml
+
+jobs:
+  probe:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v4
+      - run: probes/macos-openssl/run.sh
