@@ -48,10 +48,10 @@ jobs:
       - name: ooRexx version
         run: rexx -v
 
-      # OpenSSL: Linux, the system's; macOS, Homebrew's, linked weakly by
-      # @rpath (as the release, which links against OpenSSL 3.0; at run
-      # time Homebrew's or MacPorts'); Windows, vcpkg's x64-windows-static-md
-      # (static libraries, the DLL C runtime), cached: building it takes ~7
+      # OpenSSL: Linux, the system's; macOS, Homebrew's (only its headers to
+      # build: on both, the library loads OpenSSL when TLS is first used,
+      # src/ossl.h); Windows, vcpkg's x64-windows-static-md (static
+      # libraries, the DLL C runtime), linked, cached: building it takes ~7
       # minutes.
       - name: OpenSSL (Linux)
         if: runner.os == 'Linux'
@@ -90,14 +90,14 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME" ${CMAKE_EXTRA:-}
           cmake --build build --config Release
 
-      # What the library loads: on macOS OpenSSL weakly, by @rpath; on
-      # Windows none (linked statically).
+      # What the library loads: on Linux and macOS no OpenSSL (it loads it
+      # itself, and nothing of it may be left undefined); on Windows none
+      # (linked statically).
       - name: Dependencies
         run: |
           case "$RUNNER_OS" in
-            Linux) ldd build/liboosockets.so ;;
-            macOS) otool -L build/liboosockets.dylib
-                   otool -l build/liboosockets.dylib | grep -A2 -E 'LC_LOAD_WEAK_DYLIB|LC_RPATH' | grep -E 'name|path' ;;
+            Linux) scripts/check-unlinked.sh build/liboosockets.so ;;
+            macOS) scripts/check-unlinked.sh build/liboosockets.dylib ;;
             Windows)
               dumpbin=$(ls "/c/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/"*/bin/Hostx64/x64/dumpbin.exe | head -1)
               "$dumpbin" //dependents build/Release/oosockets.dll | grep -i "\.dll" ;;
@@ -117,17 +117,37 @@ jobs:
             scripts/test.sh "$PWD/build"
           fi
 
+      # OOSOCKETS_OPENSSL (Linux): a directory without OpenSSL 3 is an error
+      # that names it; the system's directory, named so, works as always.
+      - name: OOSOCKETS_OPENSSL (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: |
+          export REXX_PATH="$PWD/build:$PWD/tests:$PWD/tests/framework" LD_LIBRARY_PATH="$PWD/build"
+          mkdir -p "$RUNNER_TEMP/none"
+          rc=0
+          OOSOCKETS_OPENSSL="$RUNNER_TEMP/none" rexx scripts/no-openssl.rex "$PWD/tests/certs/" \
+            "\"OpenSSL 3 not found in $RUNNER_TEMP/none (OOSOCKETS_OPENSSL)\"" || rc=1
+          dir="$(dirname "$(ldconfig -p | grep -m1 'libssl.so.3 .*x86-64' | sed 's/.*=> //')")"
+          echo "the system's OpenSSL: $dir"
+          (cd tests && OOSOCKETS_OPENSSL="$dir" rexx run.rex TLSSocket DTLSSocket) || rc=1
+          exit $rc
+
       # macOS without OpenSSL 3 (Homebrew's hidden): the library still loads,
-      # the plain sockets work, and TLS says what to install.
+      # the plain sockets work, and TLS says what to install; and
+      # OOSOCKETS_OPENSSL, naming a copy of Homebrew's somewhere else, finds it.
       - name: Without OpenSSL (macOS)
         if: runner.os == 'macOS'
         timeout-minutes: 10
         run: |
           o="$(brew --prefix)/opt/openssl@3"
+          mkdir -p "$RUNNER_TEMP/ossl"
+          cp "$o/lib/libssl.3.dylib" "$o/lib/libcrypto.3.dylib" "$RUNNER_TEMP/ossl/"
           sudo mv "$o" "$o.hidden"
           export REXX_PATH="$PWD/build:$PWD/tests:$PWD/tests/framework" DYLD_LIBRARY_PATH="$PWD/build"
           rc=0
           rexx scripts/no-openssl.rex "$PWD/tests/certs/" || rc=1
           (cd tests && rexx run.rex Socket ServerSocket UDPSocket MulticastSocket) || rc=1   # Halt has TLS tests
+          (cd tests && OOSOCKETS_OPENSSL="$RUNNER_TEMP/ossl" rexx run.rex TLSSocket) || rc=1
           sudo mv "$o.hidden" "$o"
           exit $rc

@@ -124,6 +124,7 @@
 #include <openssl/pkcs12.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
+#include "ossl.h"                           // OpenSSL loaded when first used (not Windows)
 
 #ifdef __APPLE__
   #include <Security/Security.h>
@@ -816,30 +817,30 @@ static RexxArrayObject errorArray(RexxMethodContext *context, const std::string 
 
 /* ---- is OpenSSL there? -------------------------------------------------- */
 
-// On macOS the library is weakly linked to the OpenSSL 3 of Homebrew or
-// MacPorts (@rpath/libssl.3.dylib; Rony, 29/10/2026: the system's package
-// manager keeps it current, ooSockets ships none). Without it the library
-// still loads, so that the plain sockets work; OpenSSL's functions are then
-// null, and every way into TLS or DTLS asks this first. Elsewhere OpenSSL is
-// always there (a normal dependency).
+// On Linux and macOS, OpenSSL is loaded the first time TLS is used (ossl.h):
+// from OOSOCKETS_OPENSSL's directory if it is set; else the system's (Linux)
+// or the OpenSSL 3 of Homebrew or MacPorts (macOS; Rony, 29/10/2026: the
+// package manager keeps it current, ooSockets ships none). Without it the
+// plain sockets work, and every way into TLS or DTLS asks this first.
+// Windows links it (to be replaced by Schannel).
 static bool opensslHere()
 {
-#ifdef __APPLE__
-    // through volatiles: the headers do not declare the functions weak, and
-    // a compiler may take a function's address for non-null
-    void *volatile a = (void *)&OpenSSL_version_num;
-    void *volatile b = (void *)&SSL_CTX_new;
-    return a != nullptr && b != nullptr && OpenSSL_version_num() >= 0x30000000UL;
+#ifdef OOSOCKETS_DYNAMIC_OPENSSL
+    std::string why;
+    return osslLoad(why);
 #else
     return true;
 #endif
 }
 
-// The error for a way into TLS when OpenSSL is not there (macOS).
+// The error for a way into TLS when OpenSSL is not there.
 static RexxArrayObject opensslMissing(RexxMethodContext *context)
 {
-    return errorArray(context, "OpenSSL 3 not found; install it with \"brew install openssl@3\""
-                               " or \"sudo port install openssl3\"", "OPENSSL", 0);
+    std::string why;
+#ifdef OOSOCKETS_DYNAMIC_OPENSSL
+    osslLoad(why);
+#endif
+    return errorArray(context, why, "OPENSSL", 0);
 }
 
 // OpenSSL's reason for an error, without its library prefix.

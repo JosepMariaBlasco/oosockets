@@ -124,11 +124,13 @@ s~close
 - Underneath, OpenSSL does the TLS, kept up to date by the system: on
   Linux, the system's; on macOS, the OpenSSL 3 of **Homebrew** (`brew
   install openssl@3`) or **MacPorts** (`sudo port install openssl3`),
-  since macOS has none that fits and ooSockets ships none (without it the
-  plain sockets work, and TLS raises `TLS error: OpenSSL 3 not found;
-  install it with ...`; another OpenSSL 3: its directory on
-  `DYLD_LIBRARY_PATH`). On Windows it is linked statically for now; it
-  will be Windows' own TLS, Schannel (`probes/schannel/`).
+  since macOS has none that fits and ooSockets ships none. The library
+  loads OpenSSL the first time TLS is used: without it the plain sockets
+  work, and TLS raises `TLS error: OpenSSL 3 not found; install it with
+  ...`. To use another OpenSSL 3, name its directory (the one with
+  `libssl`) in the environment variable **`OOSOCKETS_OPENSSL`**; ooSockets
+  then uses that one and no other. On Windows it is linked statically for
+  now; it will be Windows' own TLS, Schannel (`probes/schannel/`).
 
 ### A TLS server
 
@@ -356,7 +358,9 @@ s~close
 Needs CMake, a C++11 compiler, an installed ooRexx 5.x (the family of
 projects this belongs to uses trunk r13329, see `scripts/oorexx-version.sh`)
 and OpenSSL 3: on Linux the system's development package (`libssl-dev`);
-on macOS Homebrew's `openssl@3`; on Windows vcpkg's
+on macOS Homebrew's `openssl@3` (on both, only its headers: the library
+does not link OpenSSL, it loads it when TLS is first used, `src/ossl.h`);
+on Windows vcpkg's
 `openssl:x64-windows-static-md` (`.github/workflows/ci.yml` has the
 details).
 

@@ -29,11 +29,13 @@ What each zip needs:
              brew install openssl@3       (Homebrew)
              sudo port install openssl3   (MacPorts)
            ooSockets brings no OpenSSL of its own. Without it, the plain
-           sockets work, and TLS says what to install. An OpenSSL 3
-           elsewhere: its directory on DYLD_LIBRARY_PATH.
+           sockets work, and TLS says what to install. Another
+           OpenSSL 3: its directory (the one with libssl.3.dylib) in the
+           environment variable OOSOCKETS_OPENSSL.
   Linux:   x86_64; glibc 2.35 or later and OpenSSL 3
            (libssl.so.3), as in Ubuntu 22.04 and later, Debian 12,
-           Fedora, and others.
+           Fedora, and others. Another OpenSSL 3: its directory in
+           OOSOCKETS_OPENSSL.
 
 ooRexx: 5.3.0 beta, trunk r13329 or later (tested with r13329 and the
 newest beta build). ooSockets is a beta, as ooRexx 5.3.0 is, and leaves

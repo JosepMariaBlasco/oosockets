@@ -1,14 +1,24 @@
 #!/usr/bin/env rexx
-/* macOS, with no OpenSSL 3 to be found (the CI hides Homebrew's): every way
-   into TLS and DTLS must raise SYNTAX 48.900 saying what to install, and
-   nothing else may break (the plain sockets' tests run after this). Needs
-   sockets.cls and its library on REXX_PATH and DYLD_LIBRARY_PATH.       */
+/* With no OpenSSL 3 to be found (the CI hides Homebrew's on macOS, or
+   points OOSOCKETS_OPENSSL at a directory without one): every way into TLS
+   and DTLS must raise SYNTAX 48.900 saying what to do, and nothing else may
+   break (the plain sockets' tests run after this). Needs sockets.cls and
+   its library on REXX_PATH and the library path.
+     rexx no-openssl.rex <tests/certs/> [<the text expected>]
+   Without a text: what each system says when it finds none by itself.   */
 
-  want = "OpenSSL 3 not found; install it with ""brew install openssl@3"" or ""sudo port install openssl3"""
+  parse arg certs '"' want '"'
+  certs = certs~strip
+  if want == "" then do
+    parse source os .
+    if os~upper~pos("DARWIN") > 0 | os~upper~pos("MAC") > 0 then
+      want = "OpenSSL 3 not found; install it with ""brew install openssl@3"" or ""sudo port install openssl3"""
+    else
+      want = "OpenSSL 3 not found; install it with the system's package manager"
+  end
   failures = 0
   srv = .ServerSocket~new(0, "127.0.0.1")
   port = srv~localPort
-  certs = arg(1)                               -- tests/certs/
   call try "TLSSocket~new", 'x = .TLSSocket~new("127.0.0.1",' port', , 5)'
   call try "TLSOptions~trust", 'x = .TLSOptions~new~trust("'certs'ca.pem")'
   call try "TLSOptions~certificate", 'x = .TLSOptions~new~certificate("'certs'server.p12", "test")'
