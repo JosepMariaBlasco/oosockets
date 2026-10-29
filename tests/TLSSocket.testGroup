@@ -2,7 +2,9 @@
 /* TLSSocket, TLSOptions and Socket~startTLS. The server's side runs in
    another activity (peer.cls), with the certificates in tests/certs/
    (scripts/make-test-certs.sh): a test CA, which the client trusts
-   explicitly, so OpenSSL decides on every system.
+   explicitly: OpenSSL decides, or on Windows Schannel's client with a chain
+   engine whose only anchors are the certificates trusted (the names of the
+   errors are then Windows', the texts the same).
 
    The system's own decision (macOS, Windows, Linux's store) can only be
    tested against real servers: the online tests, run when the environment
@@ -107,13 +109,13 @@ return testResult
 /* ---- refused ------------------------------------------------------------ */
 
 ::method test_expired
-  self~refused("expired.pem", "certificate has expired", "X509_V_ERR_CERT_HAS_EXPIRED")
+  self~refused("expired.pem", "certificate has expired", "X509_V_ERR_CERT_HAS_EXPIRED CERT_E_EXPIRED")
 
 ::method test_wrong_host
-  self~refused("wronghost.pem", "certificate does not match the host name", "X509_V_ERR_HOSTNAME_MISMATCH")
+  self~refused("wronghost.pem", "certificate does not match the host name", "X509_V_ERR_HOSTNAME_MISMATCH CERT_E_CN_NO_MATCH")
 
 ::method test_self_signed
-  self~refused("selfsigned.pem", "certificate is not trusted", "X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT")
+  self~refused("selfsigned.pem", "certificate is not trusted", "X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT CERT_E_UNTRUSTEDROOT")
 
 -- Without TLSOptions the system decides; it has never heard of our CA.
 ::method test_the_system_does_not_trust_the_test_ca
@@ -169,16 +171,18 @@ return testResult
   self~assertSame("TLS error: unknown host (no-such-host.invalid, port 443)", c~additional[1])
   self~assertSame("SOCKET", c~additional[5])
 
--- connection, refusal, and the peer's side: all in one.
+-- connection, refusal, and the peer's side: all in one. names: OpenSSL's
+-- and Windows' name for the error (one of them).
 ::method refused private
-  use arg file, text, name
+  use arg file, text, names
   peer = .Peer~new
   msg = peer~start("tlsEcho", file)
   c = connectFails("localhost", peer~port, trustCA())
   self~assertSame(48.900, c~code)
   self~assertTrustError(c, text, "(localhost, port" peer~port")")
-  self~assertSame(name, c~additional[2])
-  self~assertTrue(msg~result~startsWith("TLS error: handshake failed:"))  -- the server got an alert
+  self~assertTrue(wordpos(c~additional[2], names) > 0, c~additional[2])
+  got = msg~result
+  self~assertTrue(got~startsWith("TLS error: handshake failed:"), got)   -- the server got an alert
   peer~close
 
 -- A refused certificate's message: ours, then the system's own reason when it

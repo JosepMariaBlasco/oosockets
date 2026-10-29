@@ -81,6 +81,12 @@
   #include <ws2tcpip.h>
   #include <windows.h>
   #include <wincrypt.h>                    // before OpenSSL, which undoes its X509_NAME
+  #define SECURITY_WIN32
+  #define SCHANNEL_USE_BLACKLISTS          // SCH_CREDENTIALS, TLS_PARAMETERS
+  #include <subauth.h>                     // UNICODE_STRING, for schannel.h
+  #include <schannel.h>                    // Schannel, Windows' own TLS
+  #include <security.h>
+  #include <sspi.h>
   #include <mstcpip.h>
   #ifndef SIO_UDP_CONNRESET
     #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
@@ -152,6 +158,10 @@ struct PeerCheck
     TrustError trust;            // why the system refused the certificate
 };
 
+#ifdef _WIN32
+struct Sch;                      // a Schannel connection (see "Schannel")
+#endif
+
 struct Sock : PeerCheck
 {
     sock_t fd;
@@ -161,6 +171,9 @@ struct Sock : PeerCheck
     // made under mu, and mu is never held while waiting for the network.
     SSL_CTX *ctx = nullptr;
     SSL *ssl = nullptr;
+#ifdef _WIN32
+    Sch *sch = nullptr;          // Windows: TLS by Schannel instead (also under mu)
+#endif
     std::mutex mu;
     int ioError = 0;             // the last socket error the BIO met
     std::atomic<bool> closing{false};  // close has started (UDP: a recv it
@@ -552,6 +565,13 @@ static void setCself(RexxMethodContext *context, Sock *s)
     context->SetObjectVariable("CSELF", context->NewPointer(s));
 }
 
+#ifdef _WIN32
+static void schSayGoodbye(Sock *s, Sch *c);
+  #define TLS_BY_SCHANNEL(s) ((s)->sch != nullptr)
+#else
+  #define TLS_BY_SCHANNEL(s) false
+#endif
+
 static void closeSock(Sock *s)
 {
     if (s == nullptr)
@@ -573,11 +593,20 @@ static void closeSock(Sock *s)
     if (s->fd != BAD_SOCKET)
     {
         // TLS: tell the peer (close_notify), if the socket takes it now.
-        if (s->ssl != nullptr)
+#ifdef _WIN32
+        if (s->sch != nullptr)
         {
-            ERR_clear_error();
-            SSL_shutdown(s->ssl);
-            ERR_clear_error();
+            schSayGoodbye(s, s->sch);
+        }
+#endif
+        if (s->ssl != nullptr || TLS_BY_SCHANNEL(s))
+        {
+            if (s->ssl != nullptr)
+            {
+                ERR_clear_error();
+                SSL_shutdown(s->ssl);
+                ERR_clear_error();
+            }
             // What has arrived and was not read (TLS 1.3 session tickets,
             // typically) would make the close a reset (RST), and the peer
             // could lose what it has not read yet: drop it first.
@@ -1138,8 +1167,119 @@ static void windowsTrustError(DWORD code, TrustError &why)
     }
 }
 
-// Windows decides: the chain it builds (with the server's certificates as
-// extra ones), and its SSL policy for the host name.
+static bool isAddress(const std::string &host);
+
+// Whether the certificate names the IP address host among its alternative
+// names (Windows' SSL policy only matches DNS names).
+static bool certHasAddress(PCCERT_CONTEXT leaf, const std::string &host)
+{
+    std::string h = host.substr(0, host.find('%'));
+    unsigned char want[16];
+    DWORD wantLen = 0;
+    if (inet_pton(AF_INET, h.c_str(), want) == 1)
+    {
+        wantLen = 4;
+    }
+    else if (inet_pton(AF_INET6, h.c_str(), want) == 1)
+    {
+        wantLen = 16;
+    }
+    PCERT_EXTENSION ext = CertFindExtension(szOID_SUBJECT_ALT_NAME2, leaf->pCertInfo->cExtension,
+                                            leaf->pCertInfo->rgExtension);
+    if (wantLen == 0 || ext == nullptr)
+    {
+        return false;
+    }
+    CERT_ALT_NAME_INFO *info = nullptr;
+    DWORD size = 0;
+    if (!CryptDecodeObjectEx(X509_ASN_ENCODING, X509_ALTERNATE_NAME, ext->Value.pbData, ext->Value.cbData,
+                             CRYPT_DECODE_ALLOC_FLAG, nullptr, &info, &size))
+    {
+        return false;
+    }
+    bool found = false;
+    for (DWORD i = 0; i < info->cAltEntry; i++)
+    {
+        CERT_ALT_NAME_ENTRY &e = info->rgAltEntry[i];
+        if (e.dwAltNameChoice == CERT_ALT_NAME_IP_ADDRESS && e.IPAddress.cbData == wantLen
+            && memcmp(e.IPAddress.pbData, want, wantLen) == 0)
+        {
+            found = true;
+        }
+    }
+    LocalFree(info);
+    return found;
+}
+
+#ifndef SECURITY_FLAG_IGNORE_CERT_CN_INVALID
+  #define SECURITY_FLAG_IGNORE_CERT_CN_INVALID 0x00001000
+#endif
+
+// Windows decides: the chain it builds for the server's certificate (with
+// the others the server sent, in extra), and its SSL policy for the host
+// name. engine: nullptr, the system's roots; or one whose only anchors are
+// the certificates trusted explicitly (Schannel's explicit trust).
+static bool windowsTrust(PCCERT_CONTEXT leaf, HCERTSTORE extra, HCERTCHAINENGINE engine,
+                         const std::string &host, TrustError &why)
+{
+    char serverAuth[] = szOID_PKIX_KP_SERVER_AUTH;
+    char *usage[] = { serverAuth };
+    CERT_CHAIN_PARA para;
+    memset(&para, 0, sizeof(para));
+    para.cbSize = sizeof(para);
+    para.RequestedUsage.dwType = USAGE_MATCH_TYPE_AND;
+    para.RequestedUsage.Usage.cUsageIdentifier = 1;
+    para.RequestedUsage.Usage.rgpszUsageIdentifier = usage;
+    PCCERT_CHAIN_CONTEXT ctx = nullptr;
+    bool ok = false;
+    bool address = isAddress(host);
+    if (!CertGetCertificateChain(engine, leaf, nullptr, extra, &para, 0, nullptr, &ctx))
+    {
+        windowsTrustError(GetLastError(), why);
+    }
+    else
+    {
+        std::wstring whost(host.size() + 1, L'\0');
+        int n = MultiByteToWideChar(CP_UTF8, 0, host.c_str(), -1, &whost[0], (int)whost.size());
+        whost.resize(n > 0 ? (size_t)n - 1 : 0);
+        SSL_EXTRA_CERT_CHAIN_POLICY_PARA sslPara;
+        memset(&sslPara, 0, sizeof(sslPara));
+        sslPara.cbSize = sizeof(sslPara);
+        sslPara.dwAuthType = AUTHTYPE_SERVER;
+        sslPara.pwszServerName = &whost[0];
+        if (address)
+        {
+            sslPara.fdwChecks = SECURITY_FLAG_IGNORE_CERT_CN_INVALID;   // checked below
+        }
+        CERT_CHAIN_POLICY_PARA policy;
+        memset(&policy, 0, sizeof(policy));
+        policy.cbSize = sizeof(policy);
+        policy.pvExtraPolicyPara = &sslPara;
+        CERT_CHAIN_POLICY_STATUS status;
+        memset(&status, 0, sizeof(status));
+        status.cbSize = sizeof(status);
+        if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, ctx, &policy, &status))
+        {
+            windowsTrustError(GetLastError(), why);
+        }
+        else if (status.dwError != 0)
+        {
+            windowsTrustError(status.dwError, why);
+        }
+        else if (address && !certHasAddress(leaf, host))
+        {
+            windowsTrustError((DWORD)CERT_E_CN_NO_MATCH, why);
+        }
+        else
+        {
+            ok = true;
+        }
+        CertFreeCertificateChain(ctx);
+    }
+    return ok;
+}
+
+// OpenSSL's handshake, Windows deciding: its chain, as Windows' certificates.
 static bool systemTrust(const std::vector<X509 *> &chain, const std::string &host, TrustError &why)
 {
     PCCERT_CONTEXT leaf = toWindows(chain[0]);
@@ -1158,51 +1298,7 @@ static bool systemTrust(const std::vector<X509 *> &chain, const std::string &hos
             CertFreeCertificateContext(c);
         }
     }
-    char serverAuth[] = szOID_PKIX_KP_SERVER_AUTH;
-    char *usage[] = { serverAuth };
-    CERT_CHAIN_PARA para;
-    memset(&para, 0, sizeof(para));
-    para.cbSize = sizeof(para);
-    para.RequestedUsage.dwType = USAGE_MATCH_TYPE_AND;
-    para.RequestedUsage.Usage.cUsageIdentifier = 1;
-    para.RequestedUsage.Usage.rgpszUsageIdentifier = usage;
-    PCCERT_CHAIN_CONTEXT ctx = nullptr;
-    bool ok = false;
-    if (!CertGetCertificateChain(nullptr, leaf, nullptr, extra, &para, 0, nullptr, &ctx))
-    {
-        windowsTrustError(GetLastError(), why);
-    }
-    else
-    {
-        std::wstring whost(host.size() + 1, L'\0');
-        int n = MultiByteToWideChar(CP_UTF8, 0, host.c_str(), -1, &whost[0], (int)whost.size());
-        whost.resize(n > 0 ? (size_t)n - 1 : 0);
-        SSL_EXTRA_CERT_CHAIN_POLICY_PARA sslPara;
-        memset(&sslPara, 0, sizeof(sslPara));
-        sslPara.cbSize = sizeof(sslPara);
-        sslPara.dwAuthType = AUTHTYPE_SERVER;
-        sslPara.pwszServerName = &whost[0];
-        CERT_CHAIN_POLICY_PARA policy;
-        memset(&policy, 0, sizeof(policy));
-        policy.cbSize = sizeof(policy);
-        policy.pvExtraPolicyPara = &sslPara;
-        CERT_CHAIN_POLICY_STATUS status;
-        memset(&status, 0, sizeof(status));
-        status.cbSize = sizeof(status);
-        if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, ctx, &policy, &status))
-        {
-            windowsTrustError(GetLastError(), why);
-        }
-        else if (status.dwError != 0)
-        {
-            windowsTrustError(status.dwError, why);
-        }
-        else
-        {
-            ok = true;
-        }
-        CertFreeCertificateChain(ctx);
-    }
+    bool ok = windowsTrust(leaf, extra, nullptr, host, why);
     CertCloseStore(extra, 0);
     CertFreeCertificateContext(leaf);
     return ok;
@@ -1457,6 +1553,901 @@ static RexxArrayObject handshakeStep(RexxMethodContext *context, Sock *s, double
     return handshakeFailure(context, s, o);
 }
 
+#ifdef _WIN32
+
+/*----------------------------------------------------------------------------*/
+/* Schannel                                                                   */
+/*                                                                            */
+/* Windows' own TLS, which Windows Update keeps current (Rony, 27 and         */
+/* 29/10/2026). Measured in probes/schannel/. OOSOCKETS_TLS=openssl makes     */
+/* Windows use OpenSSL instead (Rony, 29/10/2026), Windows still deciding     */
+/* trust.                                                                     */
+/*                                                                            */
+/* The server's certificate is validated by hand (SCH_CRED_MANUAL_CRED_       */
+/* VALIDATION), as soon as Schannel has it and before our next flight goes    */
+/* out: with Windows' roots and its SSL policy (as OpenSSL's handshake does   */
+/* on Windows), or, when certificates are trusted explicitly, with a chain    */
+/* engine whose only anchors are those. A refused certificate ends the        */
+/* handshake with an alert, as OpenSSL's does.                                */
+/*                                                                            */
+/* The model is OpenSSL's in tlsRun: each step is made under the Sock's       */
+/* lock, on a non-blocking socket, and says whether it must wait to read or   */
+/* to write; the waiting is done outside the lock, a slice at a time.         */
+/*----------------------------------------------------------------------------*/
+
+// Whether Windows does TLS with Schannel: yes, unless OOSOCKETS_TLS is
+// "openssl". Read each time a connection starts TLS.
+static bool useSchannel()
+{
+    char buf[32] = "";
+    DWORD n = GetEnvironmentVariableA("OOSOCKETS_TLS", buf, sizeof(buf));
+    return !(n > 0 && n < sizeof(buf) && _stricmp(buf, "openssl") == 0);
+}
+
+struct Sch
+{
+    CredHandle cred;
+    CtxtHandle ctx;
+    bool haveCred = false;
+    bool haveCtx = false;
+    std::wstring target;               // the server's name (SNI); empty for an address
+    std::vector<std::string> trusted;  // DER; empty: the system decides
+    bool checked = false;              // the server's certificate has been checked
+    bool done = false;                 // the handshake has finished
+    bool needMore = false;             // in holds part of a record: read more
+    bool postHandshake = false;        // TLS 1.3: a message after the handshake goes to ISC
+    bool peerClosed = false;           // close_notify arrived
+    bool sentClose = false;            // close_notify has been made
+    SECURITY_STATUS failed = SEC_E_OK; // the handshake failed (its alert may be in out)
+    std::string in;                    // received, not yet used
+    std::string out;                   // to send
+    std::string plain;                 // decrypted, not yet read
+    SecPkgContext_StreamSizes sizes;
+    Sch() { memset(&sizes, 0, sizeof(sizes)); }
+};
+
+static void schFree(Sch *c)
+{
+    if (c == nullptr)
+    {
+        return;
+    }
+    if (c->haveCtx)
+    {
+        DeleteSecurityContext(&c->ctx);
+    }
+    if (c->haveCred)
+    {
+        FreeCredentialsHandle(&c->cred);
+    }
+    delete c;
+}
+
+static const DWORD SCH_CLIENT_FLAGS = ISC_REQ_SEQUENCE_DETECT | ISC_REQ_REPLAY_DETECT | ISC_REQ_CONFIDENTIALITY |
+    ISC_REQ_EXTENDED_ERROR | ISC_REQ_ALLOCATE_MEMORY | ISC_REQ_STREAM | ISC_REQ_USE_SUPPLIED_CREDS |
+    ISC_REQ_MANUAL_CRED_VALIDATION;
+
+// Schannel's names for the statuses a program may meet.
+static const char *secName(SECURITY_STATUS st)
+{
+    switch (st)
+    {
+        case SEC_E_ILLEGAL_MESSAGE:       return "SEC_E_ILLEGAL_MESSAGE";
+        case SEC_E_ALGORITHM_MISMATCH:    return "SEC_E_ALGORITHM_MISMATCH";
+        case SEC_E_UNSUPPORTED_FUNCTION:  return "SEC_E_UNSUPPORTED_FUNCTION";
+        case SEC_E_INTERNAL_ERROR:        return "SEC_E_INTERNAL_ERROR";
+        case SEC_E_INVALID_TOKEN:         return "SEC_E_INVALID_TOKEN";
+        case SEC_E_MESSAGE_ALTERED:       return "SEC_E_MESSAGE_ALTERED";
+        case SEC_E_DECRYPT_FAILURE:       return "SEC_E_DECRYPT_FAILURE";
+        case SEC_E_CERT_UNKNOWN:          return "SEC_E_CERT_UNKNOWN";
+        case SEC_E_CERT_EXPIRED:          return "SEC_E_CERT_EXPIRED";
+        case SEC_E_UNTRUSTED_ROOT:        return "SEC_E_UNTRUSTED_ROOT";
+        case SEC_E_WRONG_PRINCIPAL:       return "SEC_E_WRONG_PRINCIPAL";
+        case SEC_E_NO_CREDENTIALS:        return "SEC_E_NO_CREDENTIALS";
+        case SEC_E_UNKNOWN_CREDENTIALS:   return "SEC_E_UNKNOWN_CREDENTIALS";
+        case SEC_E_INVALID_HANDLE:        return "SEC_E_INVALID_HANDLE";
+        case SEC_E_INVALID_PARAMETER:     return "SEC_E_INVALID_PARAMETER";
+        case SEC_E_INSUFFICIENT_MEMORY:   return "SEC_E_INSUFFICIENT_MEMORY";
+        case SEC_E_CONTEXT_EXPIRED:       return "SEC_E_CONTEXT_EXPIRED";
+        case SEC_E_INCOMPLETE_MESSAGE:    return "SEC_E_INCOMPLETE_MESSAGE";
+        case SEC_E_OUT_OF_SEQUENCE:       return "SEC_E_OUT_OF_SEQUENCE";
+    }
+    return "SECURITY_STATUS";
+}
+
+// The system's text for a status, in English, without a final period.
+static std::string secText(SECURITY_STATUS st)
+{
+    char buf[512] = "";
+    if (FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, (DWORD)st,
+                       MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), buf, sizeof(buf), nullptr) == 0)
+    {
+        FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, (DWORD)st,
+                       0, buf, sizeof(buf), nullptr);
+    }
+    std::string text = buf;
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' ' || text.back() == '.'))
+    {
+        text.pop_back();
+    }
+    if (text.empty())
+    {
+        char hex[32];
+        snprintf(hex, sizeof(hex), "0x%08lX", (unsigned long)st);
+        text = std::string("Schannel status ") + hex;
+    }
+    return text;
+}
+
+// A Schannel failure as an error result; prefix: "handshake failed: " or "".
+static RexxArrayObject secResult(RexxMethodContext *context, SECURITY_STATUS st, const char *prefix)
+{
+    std::string sys = secText(st);
+    std::string text = sys;
+    text[0] = (char)tolower((unsigned char)text[0]);
+    return errorArray(context, prefix + text, secName(st), (long long)(DWORD)st, sys, "TLS");
+}
+
+static std::wstring wide(const std::string &s)
+{
+    std::wstring w(s.size() + 1, L'\0');
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], (int)w.size());
+    w.resize(n > 0 ? (size_t)n - 1 : 0);
+    return w;
+}
+
+static std::string narrow(const wchar_t *w)
+{
+    char buf[256] = "";
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, buf, sizeof(buf), nullptr, nullptr);
+    return buf;
+}
+
+// The client's credentials: TLS 1.2 and 1.3 (or only 1.3), no certificate
+// of our own, the server's validated by hand. SCH_CREDENTIALS (Windows 10
+// 1809 and later); before that, SCHANNEL_CRED.
+static SECURITY_STATUS schClientCredentials(Sch *c, bool only13)
+{
+    DWORD enabled = SP_PROT_TLS1_3_CLIENT | (only13 ? 0 : SP_PROT_TLS1_2_CLIENT);
+    DWORD every = SP_PROT_TLS1_0 | SP_PROT_TLS1_1 | SP_PROT_TLS1_2 | SP_PROT_TLS1_3 | SP_PROT_SSL3 | SP_PROT_SSL2 |
+                  SP_PROT_DTLS1_0 | SP_PROT_DTLS1_2;
+    DWORD flags = SCH_USE_STRONG_CRYPTO | SCH_CRED_NO_DEFAULT_CREDS | SCH_CRED_MANUAL_CRED_VALIDATION;
+    TimeStamp expiry;
+    SCH_CREDENTIALS sc;
+    TLS_PARAMETERS tp;
+    memset(&sc, 0, sizeof(sc));
+    memset(&tp, 0, sizeof(tp));
+    sc.dwVersion = SCH_CREDENTIALS_VERSION;
+    sc.dwFlags = flags;
+    tp.grbitDisabledProtocols = every & ~enabled;
+    sc.cTlsParameters = 1;
+    sc.pTlsParameters = &tp;
+    SECURITY_STATUS st = AcquireCredentialsHandleW(nullptr, (LPWSTR)UNISP_NAME_W, SECPKG_CRED_OUTBOUND, nullptr,
+                                                   &sc, nullptr, nullptr, &c->cred, &expiry);
+    if (st != SEC_E_OK)
+    {
+        SCHANNEL_CRED lc;
+        memset(&lc, 0, sizeof(lc));
+        lc.dwVersion = SCHANNEL_CRED_VERSION;
+        lc.dwFlags = flags;
+        lc.grbitEnabledProtocols = enabled;
+        st = AcquireCredentialsHandleW(nullptr, (LPWSTR)UNISP_NAME_W, SECPKG_CRED_OUTBOUND, nullptr,
+                                       &lc, nullptr, nullptr, &c->cred, &expiry);
+    }
+    c->haveCred = st == SEC_E_OK;
+    return st;
+}
+
+// What the server's certificate is to be checked with: the system, or the
+// certificates trusted explicitly (only those, as anchors and as the
+// server's own certificate itself, and the host name).
+static bool schTrust(Sock *s, Sch *c, PCCERT_CONTEXT leaf)
+{
+    if (c->trusted.empty())
+    {
+        return windowsTrust(leaf, leaf->hCertStore, nullptr, s->host, s->trust);
+    }
+    HCERTSTORE anchors = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr);
+    HCERTSTORE extra = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr);
+    for (const std::string &der : c->trusted)
+    {
+        PCCERT_CONTEXT t = nullptr;
+        if (CertAddEncodedCertificateToStore(anchors, X509_ASN_ENCODING, (const BYTE *)der.data(), (DWORD)der.size(),
+                                             CERT_STORE_ADD_ALWAYS, &t))
+        {
+            CertAddCertificateContextToStore(extra, t, CERT_STORE_ADD_ALWAYS, nullptr);
+            CertFreeCertificateContext(t);
+        }
+    }
+    PCCERT_CONTEXT x = nullptr;
+    while ((x = CertEnumCertificatesInStore(leaf->hCertStore, x)) != nullptr)
+    {
+        CertAddCertificateContextToStore(extra, x, CERT_STORE_ADD_ALWAYS, nullptr);
+    }
+    CERT_CHAIN_ENGINE_CONFIG config;
+    memset(&config, 0, sizeof(config));
+    config.cbSize = sizeof(config);
+    config.hExclusiveRoot = anchors;
+    config.hExclusiveTrustedPeople = anchors;          // a server's own certificate, trusted as it is
+    config.dwExclusiveFlags = CERT_CHAIN_EXCLUSIVE_ENABLE_CA_FLAG;   // a CA that is not a root
+    HCERTCHAINENGINE engine = nullptr;
+    bool ok;
+    if (!CertCreateCertificateChainEngine(&config, &engine))
+    {
+        windowsTrustError(GetLastError(), s->trust);
+        ok = false;
+    }
+    else
+    {
+        ok = windowsTrust(leaf, extra, engine, s->host, s->trust);
+        CertFreeCertificateChainEngine(engine);
+    }
+    CertCloseStore(extra, 0);
+    CertCloseStore(anchors, 0);
+    return ok;
+}
+
+// The TLS alert that tells the server why its certificate was refused.
+static DWORD alertFor(const TrustError &t)
+{
+    if (t.text == CERT_EXPIRED || t.text == CERT_NOT_YET)
+    {
+        return TLS1_ALERT_CERTIFICATE_EXPIRED;
+    }
+    if (t.text == CERT_UNTRUSTED)
+    {
+        return TLS1_ALERT_UNKNOWN_CA;
+    }
+    if (t.text == CERT_REVOKED)
+    {
+        return TLS1_ALERT_CERTIFICATE_REVOKED;
+    }
+    return TLS1_ALERT_BAD_CERTIFICATE;
+}
+
+// What Schannel makes after ApplyControlToken (an alert, close_notify).
+static std::string schControl(Sch *c, void *token, unsigned long size)
+{
+    SecBuffer b = { size, SECBUFFER_TOKEN, token };
+    SecBufferDesc d = { SECBUFFER_VERSION, 1, &b };
+    if (ApplyControlToken(&c->ctx, &d) != SEC_E_OK)
+    {
+        return "";
+    }
+    SecBuffer ob = { 0, SECBUFFER_TOKEN, nullptr };
+    SecBufferDesc od = { SECBUFFER_VERSION, 1, &ob };
+    ULONG attrs = 0;
+    TimeStamp expiry;
+    InitializeSecurityContextW(&c->cred, &c->ctx, nullptr, SCH_CLIENT_FLAGS, 0, 0, nullptr, 0, nullptr,
+                               &od, &attrs, &expiry);
+    std::string made;
+    if (ob.pvBuffer != nullptr)
+    {
+        made.assign((const char *)ob.pvBuffer, ob.cbBuffer);
+        FreeContextBuffer(ob.pvBuffer);
+    }
+    return made;
+}
+
+static std::string schAlert(Sch *c, DWORD number)
+{
+    SCHANNEL_ALERT_TOKEN t;
+    t.dwTokenType = SCHANNEL_ALERT;
+    t.dwAlertType = TLS1_ALERT_FATAL;
+    t.dwAlertNumber = number;
+    return schControl(c, &t, sizeof(t));
+}
+
+static std::string schCloseNotify(Sch *c)
+{
+    DWORD t = SCHANNEL_SHUTDOWN;
+    return schControl(c, &t, sizeof(t));
+}
+
+// Sends what is waiting in out (non-blocking): 1 all of it, 0 the socket
+// takes no more now, -1 an error (in err).
+static int schFlush(Sock *s, Sch *c, int &err)
+{
+    while (!c->out.empty())
+    {
+        int chunk = c->out.size() > 0x40000000 ? 0x40000000 : (int)c->out.size();
+        int n = send(s->fd, c->out.data(), chunk, SEND_FLAGS);
+        if (n >= 0)
+        {
+            c->out.erase(0, (size_t)n);
+            continue;
+        }
+        int e = lastError();
+        if (wouldBlock(e))
+        {
+            return 0;
+        }
+        err = e;
+        return -1;
+    }
+    return 1;
+}
+
+// Reads what has arrived into in (non-blocking): 1 something, 0 nothing yet,
+// 2 the end (the peer closed), -1 an error (in err).
+static int schFill(Sock *s, Sch *c, int &err)
+{
+    char buf[32768];
+    int n = recv(s->fd, buf, sizeof(buf), 0);
+    if (n > 0)
+    {
+        c->in.append(buf, (size_t)n);
+        c->needMore = false;
+        return 1;
+    }
+    if (n == 0)
+    {
+        return 2;
+    }
+    int e = lastError();
+    if (wouldBlock(e))
+    {
+        return 0;
+    }
+    err = e;
+    return -1;
+}
+
+// What a step came to: done (status in the outcome), or wait to read or write.
+enum SchWant { SCH_DONE, SCH_READ, SCH_WRITE };
+
+struct SchOutcome
+{
+    TlsStatus status = TLS_OK;
+    int socketError = 0;               // TLS_SOCKET_ERROR
+    SECURITY_STATUS sec = SEC_E_OK;    // TLS_SSL_ERROR
+    bool handshaking = false;
+};
+
+static SchWant schSocketError(SchOutcome &o, int err)
+{
+    o.status = TLS_SOCKET_ERROR;
+    o.socketError = err;
+    return SCH_DONE;
+}
+
+static SchWant schFail(SchOutcome &o, SECURITY_STATUS st)
+{
+    o.status = TLS_SSL_ERROR;
+    o.sec = st;
+    return SCH_DONE;
+}
+
+// One call of InitializeSecurityContext with what is in in (none for the
+// first): its output goes to tok, what it did not use stays in in.
+static SECURITY_STATUS schInitialize(Sch *c, std::string &tok)
+{
+    bool first = !c->haveCtx;
+    SecBuffer inb[2] = { { (unsigned long)c->in.size(), SECBUFFER_TOKEN, c->in.empty() ? nullptr : &c->in[0] },
+                         { 0, SECBUFFER_EMPTY, nullptr } };
+    SecBufferDesc ind = { SECBUFFER_VERSION, 2, inb };
+    SecBuffer outb[2] = { { 0, SECBUFFER_TOKEN, nullptr }, { 0, SECBUFFER_ALERT, nullptr } };
+    SecBufferDesc outd = { SECBUFFER_VERSION, 2, outb };
+    ULONG attrs = 0;
+    TimeStamp expiry;
+    SEC_WCHAR *target = c->target.empty() ? nullptr : &c->target[0];
+    SECURITY_STATUS st = InitializeSecurityContextW(&c->cred, first ? nullptr : &c->ctx, target, SCH_CLIENT_FLAGS,
+                                                    0, 0, first ? nullptr : &ind, 0, &c->ctx, &outd, &attrs, &expiry);
+    if (first && (st == SEC_I_CONTINUE_NEEDED || st == SEC_E_OK))
+    {
+        c->haveCtx = true;
+    }
+    if (outb[0].pvBuffer != nullptr)
+    {
+        tok.append((const char *)outb[0].pvBuffer, outb[0].cbBuffer);
+        FreeContextBuffer(outb[0].pvBuffer);
+    }
+    if (outb[1].pvBuffer != nullptr)
+    {
+        FreeContextBuffer(outb[1].pvBuffer);
+    }
+    if (st == SEC_E_INCOMPLETE_MESSAGE)
+    {
+        c->needMore = true;                  // in kept as it is
+    }
+    else if (!first && st != SEC_I_INCOMPLETE_CREDENTIALS)
+    {
+        if (inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer > 0 && inb[1].cbBuffer <= c->in.size())
+        {
+            c->in.erase(0, c->in.size() - inb[1].cbBuffer);
+        }
+        else
+        {
+            c->in.clear();
+        }
+    }
+    return st;
+}
+
+// One step of the client's handshake.
+static SchWant schHandshake(Sock *s, Sch *c, SchOutcome &o)
+{
+    o.handshaking = true;
+    for (int rounds = 0; ; rounds++)
+    {
+        int err = 0;
+        int f = schFlush(s, c, err);
+        if (c->failed != SEC_E_OK)
+        {
+            // the alert goes first, if the socket takes it
+            if (f == 0)
+            {
+                return SCH_WRITE;
+            }
+            return schFail(o, c->failed);
+        }
+        if (f < 0)
+        {
+            return schSocketError(o, err);
+        }
+        if (f == 0)
+        {
+            return SCH_WRITE;
+        }
+        if (c->done)
+        {
+            o.handshaking = false;
+            o.status = TLS_OK;
+            return SCH_DONE;
+        }
+        if (c->haveCtx && (c->in.empty() || c->needMore))
+        {
+            int r = schFill(s, c, err);
+            if (r == 0)
+            {
+                return SCH_READ;
+            }
+            if (r < 0)
+            {
+                return schSocketError(o, err);
+            }
+            if (r == 2)
+            {
+                o.status = TLS_EOF;
+                return SCH_DONE;
+            }
+        }
+        std::string tok;
+        SECURITY_STATUS st = schInitialize(c, tok);
+        if (st == SEC_E_INCOMPLETE_MESSAGE)
+        {
+            continue;
+        }
+        if (st == SEC_I_INCOMPLETE_CREDENTIALS && rounds < 16)
+        {
+            // the server asks for a certificate of ours: there is none
+            c->out += tok;
+            continue;
+        }
+        if (st != SEC_I_CONTINUE_NEEDED && st != SEC_E_OK)
+        {
+            c->out += tok;                    // an alert, if Schannel made one
+            c->failed = st;
+            continue;
+        }
+        if (!c->checked)
+        {
+            // Before our next flight: is the server's certificate good?
+            PCCERT_CONTEXT leaf = nullptr;
+            if (QueryContextAttributesW(&c->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &leaf) == SEC_E_OK
+                && leaf != nullptr)
+            {
+                c->checked = true;
+                bool ok = schTrust(s, c, leaf);
+                CertFreeCertificateContext(leaf);
+                if (!ok)
+                {
+                    c->out += schAlert(c, alertFor(s->trust));
+                    c->failed = SEC_E_CERT_UNKNOWN;
+                    continue;
+                }
+            }
+            else if (st == SEC_E_OK)
+            {
+                s->trust.set = true;
+                s->trust.name = "SEC_E_CERT_UNKNOWN";
+                s->trust.text = "the server sent no certificate";
+                c->out += schAlert(c, TLS1_ALERT_BAD_CERTIFICATE);
+                c->failed = SEC_E_CERT_UNKNOWN;
+                continue;
+            }
+        }
+        c->out += tok;
+        if (st == SEC_E_OK)
+        {
+            QueryContextAttributesW(&c->ctx, SECPKG_ATTR_STREAM_SIZES, &c->sizes);
+            c->done = true;                   // what is left in in is the server's data
+        }
+    }
+}
+
+// One step of a read: up to max bytes into got.
+static SchWant schRecv(Sock *s, Sch *c, size_t max, std::string &got, SchOutcome &o)
+{
+    for (;;)
+    {
+        if (!c->plain.empty())
+        {
+            size_t n = c->plain.size() < max ? c->plain.size() : max;
+            got.assign(c->plain, 0, n);
+            c->plain.erase(0, n);
+            o.status = TLS_OK;
+            return SCH_DONE;
+        }
+        if (c->peerClosed)
+        {
+            o.status = TLS_EOF;
+            return SCH_DONE;
+        }
+        int err = 0;
+        int f = schFlush(s, c, err);         // an answer after the handshake, say
+        if (f < 0)
+        {
+            return schSocketError(o, err);
+        }
+        if (f == 0)
+        {
+            return SCH_WRITE;
+        }
+        if (!c->in.empty() && !c->needMore)
+        {
+            if (c->postHandshake)
+            {
+                // TLS 1.3: a message after the handshake (a session ticket, a
+                // key update) goes to the handshake's function (probes/schannel)
+                std::string tok;
+                SECURITY_STATUS st = schInitialize(c, tok);
+                c->out += tok;
+                if (st == SEC_E_OK)
+                {
+                    c->postHandshake = false;
+                }
+                else if (st != SEC_E_INCOMPLETE_MESSAGE && st != SEC_I_CONTINUE_NEEDED)
+                {
+                    return schFail(o, st);
+                }
+                continue;
+            }
+            SecBuffer b[4] = { { (unsigned long)c->in.size(), SECBUFFER_DATA, &c->in[0] },
+                               { 0, SECBUFFER_EMPTY, nullptr }, { 0, SECBUFFER_EMPTY, nullptr },
+                               { 0, SECBUFFER_EMPTY, nullptr } };
+            SecBufferDesc d = { SECBUFFER_VERSION, 4, b };
+            SECURITY_STATUS st = DecryptMessage(&c->ctx, &d, 0, nullptr);
+            if (st == SEC_E_INCOMPLETE_MESSAGE)
+            {
+                c->needMore = true;
+                continue;
+            }
+            if (st != SEC_E_OK && st != SEC_I_RENEGOTIATE && st != SEC_I_CONTEXT_EXPIRED)
+            {
+                return schFail(o, st);
+            }
+            std::string extra;
+            for (int i = 0; i < 4; i++)
+            {
+                if (b[i].BufferType == SECBUFFER_DATA && b[i].cbBuffer > 0)
+                {
+                    c->plain.append((const char *)b[i].pvBuffer, b[i].cbBuffer);
+                }
+                else if (b[i].BufferType == SECBUFFER_EXTRA && b[i].cbBuffer > 0)
+                {
+                    extra.assign((const char *)b[i].pvBuffer, b[i].cbBuffer);
+                }
+            }
+            c->in = extra;
+            if (st == SEC_I_CONTEXT_EXPIRED)
+            {
+                c->peerClosed = true;
+            }
+            else if (st == SEC_I_RENEGOTIATE)
+            {
+                c->postHandshake = true;
+            }
+            continue;
+        }
+        int r = schFill(s, c, err);
+        if (r == 0)
+        {
+            return SCH_READ;
+        }
+        if (r < 0)
+        {
+            return schSocketError(o, err);
+        }
+        if (r == 2)
+        {
+            o.status = TLS_EOF;               // closed without close_notify: the end too
+            return SCH_DONE;
+        }
+    }
+}
+
+// One step of a write: encrypts up to one record of p (n: how much), once
+// what was waiting has gone; with left 0, only sends what is waiting.
+static SchWant schSend(Sock *s, Sch *c, const char *p, size_t left, size_t &n, SchOutcome &o)
+{
+    n = 0;
+    int err = 0;
+    int f = schFlush(s, c, err);
+    if (f < 0)
+    {
+        return schSocketError(o, err);
+    }
+    if (f == 0)
+    {
+        return SCH_WRITE;
+    }
+    o.status = TLS_OK;
+    if (left == 0)
+    {
+        return SCH_DONE;
+    }
+    if (c->sentClose || c->sizes.cbMaximumMessage == 0)
+    {
+        return schSocketError(o, WSAESHUTDOWN);
+    }
+    size_t chunk = left < c->sizes.cbMaximumMessage ? left : c->sizes.cbMaximumMessage;
+    std::string rec(c->sizes.cbHeader + chunk + c->sizes.cbTrailer, '\0');
+    memcpy(&rec[c->sizes.cbHeader], p, chunk);
+    SecBuffer b[4] = { { c->sizes.cbHeader, SECBUFFER_STREAM_HEADER, &rec[0] },
+                       { (unsigned long)chunk, SECBUFFER_DATA, &rec[c->sizes.cbHeader] },
+                       { c->sizes.cbTrailer, SECBUFFER_STREAM_TRAILER, &rec[c->sizes.cbHeader + chunk] },
+                       { 0, SECBUFFER_EMPTY, nullptr } };
+    SecBufferDesc d = { SECBUFFER_VERSION, 4, b };
+    SECURITY_STATUS st = EncryptMessage(&c->ctx, 0, &d, 0);
+    if (st != SEC_E_OK)
+    {
+        return schFail(o, st);
+    }
+    c->out.append(rec.data(), b[0].cbBuffer + b[1].cbBuffer + b[2].cbBuffer);
+    n = chunk;
+    schFlush(s, c, err);                     // what does not go now, goes next
+    return SCH_DONE;
+}
+
+// Runs step until it is done, waiting outside the lock (until the deadline,
+// if there is one; TLS_AGAIN after SLICE_MS of waiting), as tlsRun.
+template <class Step>
+static SchOutcome schRun(Sock *s, bool hasDeadline, Clock::time_point deadline, Step step)
+{
+    for (;;)
+    {
+        SchOutcome out;
+        SchWant want;
+        sock_t fd;
+        {
+            std::lock_guard<std::mutex> guard(s->mu);
+            if (s->fd == BAD_SOCKET || s->sch == nullptr)
+            {
+                out.status = TLS_CLOSED;
+                return out;
+            }
+            fd = s->fd;
+            want = step(s, s->sch, out);
+        }
+        if (want == SCH_DONE)
+        {
+            return out;
+        }
+        int err = 0;
+        int w = waitSlice(fd, want == SCH_READ ? POLLIN : POLLOUT, hasDeadline, deadline, &err);
+        if (w == 0)
+        {
+            out.status = TLS_TIMEOUT;
+            return out;
+        }
+        if (w == 2)
+        {
+            out.status = TLS_AGAIN;
+            return out;
+        }
+        if (w < 0)
+        {
+            out.status = TLS_SOCKET_ERROR;
+            out.socketError = err;
+            return out;
+        }
+    }
+}
+
+// The result of a read or write that failed on an established connection.
+static RexxArrayObject schIoResult(RexxMethodContext *context, const SchOutcome &o)
+{
+    switch (o.status)
+    {
+        case TLS_EOF:          return statusResult(context, "EOF");
+        case TLS_TIMEOUT:      return statusResult(context, "TIMEOUT");
+        case TLS_CLOSED:       return closedResult(context);
+        case TLS_SOCKET_ERROR: return errorResult(context, o.socketError);
+        default:               return secResult(context, o.sec, o.handshaking ? "handshake failed: " : "");
+    }
+}
+
+// The client's handshake, for SLICE_MS at most: "OK", "AGAIN" and the
+// seconds left, "TIMEOUT", or the failure.
+static RexxArrayObject schHandshakeStep(RexxMethodContext *context, Sock *s, double timeout)
+{
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    SchOutcome o = schRun(s, hasDeadline, deadline,
+                          [](Sock *k, Sch *c, SchOutcome &oc) { return schHandshake(k, c, oc); });
+    switch (o.status)
+    {
+        case TLS_OK:           return statusResult(context, "OK");
+        case TLS_AGAIN:        return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+        case TLS_TIMEOUT:      return statusResult(context, "TIMEOUT");
+        case TLS_CLOSED:       return closedResult(context);
+        case TLS_SOCKET_ERROR: return errorResult(context, o.socketError);
+        case TLS_EOF:          return errorArray(context, "the peer closed the connection during the handshake", "EOF", 0);
+        default:
+            if (s->trust.set)
+            {
+                return trustResult(context, s->trust);
+            }
+            return secResult(context, o.sec, "handshake failed: ");
+    }
+}
+
+// Socket~startTLS and TLSSocket with Schannel: the client's handshake.
+static RexxArrayObject schStartClient(RexxMethodContext *context, Sock *s, const char *host,
+                                      RexxArrayObject trusted, const char *minVersion, double timeout)
+{
+    Sch *c = new Sch();
+    SECURITY_STATUS st = schClientCredentials(c, strcmp(minVersion, "1.3") == 0);
+    if (st != SEC_E_OK)
+    {
+        schFree(c);
+        return secResult(context, st, "cannot start TLS: ");
+    }
+    if (!isAddress(host))
+    {
+        c->target = wide(host);                 // SNI, for a name
+    }
+    size_t count = context->ArrayItems(trusted);
+    for (size_t i = 1; i <= count; i++)
+    {
+        RexxObjectPtr item = context->ArrayAt(trusted, i);
+        if (item != NULLOBJECT)
+        {
+            RexxStringObject der = context->ObjectToString(item);
+            c->trusted.push_back(std::string(context->StringData(der), context->StringLength(der)));
+        }
+    }
+    s->host = host;
+    s->trust = TrustError();
+    {
+        std::lock_guard<std::mutex> guard(s->mu);
+        s->sch = c;
+        setBlocking(s->fd, false);
+    }
+    return schHandshakeStep(context, s, timeout);
+}
+
+static RexxArrayObject schRecvResult(RexxMethodContext *context, Sock *s, size_t max, double timeout)
+{
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    std::string got;
+    SchOutcome o = schRun(s, hasDeadline, deadline,
+                          [&](Sock *k, Sch *c, SchOutcome &oc) { return schRecv(k, c, max, got, oc); });
+    if (o.status == TLS_OK)
+    {
+        return statusResult(context, "OK", context->NewString(got.data(), got.size()));
+    }
+    if (o.status == TLS_AGAIN)
+    {
+        return statusResult(context, "AGAIN", context->DoubleToObject(secondsLeft(hasDeadline, deadline)));
+    }
+    return schIoResult(context, o);
+}
+
+static RexxArrayObject schSendResult(RexxMethodContext *context, Sock *s, const char *p, size_t left, double timeout)
+{
+    size_t sent = 0;
+    bool hasDeadline = timeout >= 0;
+    Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
+    for (;;)
+    {
+        size_t n = 0;
+        SchOutcome o = schRun(s, hasDeadline, deadline,
+                              [&](Sock *k, Sch *c, SchOutcome &oc) { return schSend(k, c, p + sent, left, n, oc); });
+        if (o.status == TLS_TIMEOUT)
+        {
+            return statusResult(context, "TIMEOUT", context->StringSize(sent));
+        }
+        if (o.status == TLS_AGAIN)
+        {
+            return againSent(context, sent, secondsLeft(hasDeadline, deadline));
+        }
+        if (o.status != TLS_OK)
+        {
+            return schIoResult(context, o);
+        }
+        if (left == 0)
+        {
+            return statusResult(context, "OK", context->StringSize(sent));   // all of it gone
+        }
+        sent += n;
+        left -= n;
+    }
+}
+
+// close_notify, sent if the socket takes it within a moment (under the lock).
+static void schSayGoodbye(Sock *s, Sch *c)
+{
+    if (!c->done || c->sentClose || c->failed != SEC_E_OK)
+    {
+        return;
+    }
+    c->sentClose = true;
+    c->out += schCloseNotify(c);
+    Clock::time_point until = deadlineFrom(1);
+    for (;;)
+    {
+        int err = 0;
+        int f = schFlush(s, c, err);
+        if (f != 0)
+        {
+            return;
+        }
+        if (waitFor(s->fd, POLLOUT, true, until, &err) != 1)
+        {
+            return;
+        }
+    }
+}
+
+// nTLSInfo for Schannel: the protocol ("TLSv1.3") and the cipher suite.
+static void schInfo(Sch *c, std::string &protocol, std::string &cipher)
+{
+    if (!c->done)
+    {
+        return;
+    }
+    SecPkgContext_ConnectionInfo ci;
+    if (QueryContextAttributesW(&c->ctx, SECPKG_ATTR_CONNECTION_INFO, &ci) == SEC_E_OK)
+    {
+        if (ci.dwProtocol & SP_PROT_TLS1_3)
+        {
+            protocol = "TLSv1.3";
+        }
+        else if (ci.dwProtocol & SP_PROT_TLS1_2)
+        {
+            protocol = "TLSv1.2";
+        }
+        else
+        {
+            protocol = "TLS";
+        }
+    }
+    SecPkgContext_CipherInfo info;
+    memset(&info, 0, sizeof(info));
+    if (QueryContextAttributesW(&c->ctx, SECPKG_ATTR_CIPHER_INFO, &info) == SEC_E_OK)
+    {
+        cipher = narrow(info.szCipherSuite);
+    }
+}
+
+#endif
+
+// Whether TLS has started on the Sock (OpenSSL's or Schannel's).
+static bool isTls(Sock *s)
+{
+    std::lock_guard<std::mutex> guard(s->mu);
+#ifdef _WIN32
+    if (s->sch != nullptr)
+    {
+        return true;
+    }
+#endif
+    return s->ssl != nullptr;
+}
+
 // Puts the Sock in TLS: a new SSL over our BIO.
 static void attachSsl(Sock *s, SSL_CTX *ctx)
 {
@@ -1538,18 +2529,24 @@ static void setPeerName(SSL *ssl, const std::string &h)
 RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxArrayObject, trusted,
             CSTRING, minVersion, double, timeout)
 {
-    if (!opensslHere())
-    {
-        return opensslMissing(context);
-    }
     Sock *s = (Sock *)cself;
     if (s == nullptr || s->fd == BAD_SOCKET)
     {
         return closedResult(context);
     }
-    if (s->ssl != nullptr)
+    if (isTls(s))
     {
         return errorArray(context, "TLS has already started on this connection", "", 0);
+    }
+#ifdef _WIN32
+    if (useSchannel())
+    {
+        return schStartClient(context, s, host, trusted, minVersion, timeout);
+    }
+#endif
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
     }
     SSL_CTX *ctx = clientContext(context, TLS_client_method(), minVersionOf(minVersion), trusted);
     s->host = host;
@@ -1567,6 +2564,12 @@ RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxA
 RexxMethod2(RexxArrayObject, socket_tls_more, CSELF, cself, double, timeout)
 {
     Sock *s = (Sock *)cself;
+#ifdef _WIN32
+    if (s != nullptr && s->fd != BAD_SOCKET && s->sch != nullptr)
+    {
+        return schHandshakeStep(context, s, timeout);
+    }
+#endif
     if (s == nullptr || s->fd == BAD_SOCKET || s->ssl == nullptr)
     {
         return closedResult(context);
@@ -1666,7 +2669,7 @@ RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
     {
         return closedResult(context);
     }
-    if (s->ssl != nullptr)
+    if (isTls(s))
     {
         return errorArray(context, "TLS has already started on this connection", "", 0);
     }
@@ -1720,8 +2723,15 @@ RexxMethod1(RexxArrayObject, socket_tlsinfo, CSELF, cself)
     if (s != nullptr)
     {
         std::lock_guard<std::mutex> guard(s->mu);
-        on = s->ssl != nullptr;
-        if (on && SSL_is_init_finished(s->ssl))
+#ifdef _WIN32
+        if (s->sch != nullptr)
+        {
+            on = true;
+            schInfo(s->sch, protocol, cipher);
+        }
+#endif
+        on = on || s->ssl != nullptr;
+        if (s->ssl != nullptr && SSL_is_init_finished(s->ssl))
         {
             protocol = SSL_get_version(s->ssl);
             const char *c = SSL_get_cipher_name(s->ssl);
@@ -1736,14 +2746,15 @@ RexxMethod1(RexxArrayObject, socket_tlsinfo, CSELF, cself)
     return r;
 }
 
-static bool isTls(Sock *s)
-{
-    std::lock_guard<std::mutex> guard(s->mu);
-    return s->ssl != nullptr;
-}
 
 static RexxArrayObject tlsRecv(RexxMethodContext *context, Sock *s, size_t max, double timeout)
 {
+#ifdef _WIN32
+    if (s->sch != nullptr)
+    {
+        return schRecvResult(context, s, max, timeout);
+    }
+#endif
     std::vector<char> buf(max);
     size_t got = 0;
     bool hasDeadline = timeout >= 0;
@@ -1763,6 +2774,12 @@ static RexxArrayObject tlsRecv(RexxMethodContext *context, Sock *s, size_t max, 
 
 static RexxArrayObject tlsSend(RexxMethodContext *context, Sock *s, const char *p, size_t left, double timeout)
 {
+#ifdef _WIN32
+    if (s->sch != nullptr)
+    {
+        return schSendResult(context, s, p, left, timeout);
+    }
+#endif
     size_t sent = 0;
     bool hasDeadline = timeout >= 0;
     Clock::time_point deadline = deadlineFrom(hasDeadline ? timeout : 0);
@@ -2099,9 +3116,18 @@ RexxMethod1(RexxArrayObject, socket_shutdown, CSELF, cself)
     {
         // close_notify first: the peer reads the end of the stream from TLS.
         std::lock_guard<std::mutex> guard(s->mu);
-        ERR_clear_error();
-        SSL_shutdown(s->ssl);
-        ERR_clear_error();
+#ifdef _WIN32
+        if (s->sch != nullptr)
+        {
+            schSayGoodbye(s, s->sch);
+        }
+        else
+#endif
+        {
+            ERR_clear_error();
+            SSL_shutdown(s->ssl);
+            ERR_clear_error();
+        }
     }
 #ifdef _WIN32
     int rc = shutdown(s->fd, SD_SEND);
@@ -2138,6 +3164,9 @@ RexxMethod1(RexxObjectPtr, sock_free, CSELF, cself)
         {
             SSL_CTX_free(s->ctx);
         }
+#ifdef _WIN32
+        schFree(s->sch);
+#endif
         delete s;
         context->SetObjectVariable("CSELF", context->NewPointer(nullptr));
     }

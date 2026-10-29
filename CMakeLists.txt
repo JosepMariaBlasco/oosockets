@@ -54,8 +54,9 @@ if(APPLE)
 endif()
 
 if(WIN32)
-  # Windows decides trust (CertGetCertificateChain); OpenSSL's own needs
-  target_link_libraries(oosockets PRIVATE ws2_32 iphlpapi crypt32 user32 advapi32)
+  # Schannel does the TLS (secur32), Windows decides trust (crypt32);
+  # OpenSSL's own needs
+  target_link_libraries(oosockets PRIVATE ws2_32 iphlpapi crypt32 secur32 user32 advapi32)
   target_compile_definitions(oosockets PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
 

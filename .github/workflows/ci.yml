@@ -117,6 +117,16 @@ jobs:
             scripts/test.sh "$PWD/build"
           fi
 
+      # Windows: Schannel does TLS by default; OOSOCKETS_TLS=openssl makes it
+      # OpenSSL (Rony, 29/10/2026). Every test again, that way.
+      - name: Test with OOSOCKETS_TLS=openssl (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        env:
+          OOSOCKETS_ONLINE: 1
+          OOSOCKETS_TLS: openssl
+        run: scripts/test.sh "$PWD/build/Release"
+
       # OOSOCKETS_OPENSSL (Linux): a directory without OpenSSL 3 is an error
       # that names it; the system's directory, named so, works as always.
       - name: OOSOCKETS_OPENSSL (Linux)
