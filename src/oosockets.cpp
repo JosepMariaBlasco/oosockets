@@ -1650,6 +1650,7 @@ struct Sch
     int certSeq = -1;
     std::vector<std::string> peerChain;
     unsigned long long sentSeq0 = 0;
+    std::string checkedDer;            // the server's certificate as checked
     Sch() { memset(&sizes, 0, sizeof(sizes)); }
 };
 
@@ -2043,6 +2044,10 @@ static SECURITY_STATUS schInitialize(Sch *c, std::string &tok)
     {
         if (inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer > 0 && inb[1].cbBuffer <= c->in.size())
         {
+            if (inb[1].cbBuffer == c->in.size() && st == SEC_I_CONTINUE_NEEDED)
+            {
+                c->needMore = true;              // nothing used: read more first, no spinning
+            }
             c->in.erase(0, c->in.size() - inb[1].cbBuffer);
         }
         else
@@ -2051,6 +2056,26 @@ static SECURITY_STATUS schInitialize(Sch *c, std::string &tok)
         }
     }
     return st;
+}
+
+// After a handshake message once connected (TLS 1.3's tickets, a
+// renegotiation): the server's certificate must still be the one checked,
+// since Schannel, validating nothing by itself here, would take another.
+static bool schSameCertificate(Sch *c, const std::string &checked)
+{
+    if (c->server || checked.empty())
+    {
+        return true;
+    }
+    PCCERT_CONTEXT now = nullptr;
+    bool same = QueryContextAttributesW(&c->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &now) == SEC_E_OK
+                && now != nullptr && now->cbCertEncoded == checked.size()
+                && memcmp(now->pbCertEncoded, checked.data(), checked.size()) == 0;
+    if (now != nullptr)
+    {
+        CertFreeCertificateContext(now);
+    }
+    return same;
 }
 
 // One step of the client's handshake.
@@ -2132,6 +2157,7 @@ static SchWant schHandshake(Sock *s, Sch *c, SchOutcome &o)
                 && leaf != nullptr)
             {
                 c->checked = true;
+                c->checkedDer.assign((const char *)leaf->pbCertEncoded, leaf->cbCertEncoded);
                 bool ok = schTrust(s, c, leaf);
                 CertFreeCertificateContext(leaf);
                 if (!ok)
@@ -2218,6 +2244,10 @@ static SchWant schRecv(Sock *s, Sch *c, size_t max, std::string &got, SchOutcome
                 if (st == SEC_E_OK)
                 {
                     c->postHandshake = false;
+                    if (!schSameCertificate(c, c->checkedDer))
+                    {
+                        return schFail(o, SEC_E_CERT_UNKNOWN);   // another certificate: refused
+                    }
                 }
                 else if (st != SEC_E_INCOMPLETE_MESSAGE && st != SEC_I_CONTINUE_NEEDED)
                 {
@@ -3432,6 +3462,13 @@ RexxMethod1(RexxArrayObject, socket_shutdown, CSELF, cself)
     }
 #ifdef _WIN32
     int rc = shutdown(s->fd, SD_SEND);
+    {
+        std::lock_guard<std::mutex> guard(s->mu);
+        if (s->sch != nullptr)
+        {
+            s->sch->out.clear();         // nothing more can go: reading must not try
+        }
+    }
 #else
     int rc = shutdown(s->fd, SHUT_WR);
 #endif
@@ -5089,6 +5126,10 @@ static void schDtlsGather(Sch *x, const std::string &d)
                     x->certMsg.assign(total, '\0');
                     x->certHave.assign(total, false);
                 }
+                if (total != x->certMsg.size())
+                {
+                    break;                      // not a fragment of the same message: dropped
+                }
                 memcpy(&x->certMsg[off], h + 12, flen);
                 for (size_t i = off; i < off + flen; i++)
                 {
@@ -5107,7 +5148,7 @@ static void schDtlsGather(Sch *x, const std::string &d)
                     while (at + 3 <= 3 + listLen && at + 3 <= total)
                     {
                         size_t clen = getN(c + at, 3);
-                        if (at + 3 + clen > total)
+                        if (at + 3 + clen > total || at + 3 + clen > 3 + listLen)
                         {
                             break;
                         }
@@ -5326,6 +5367,10 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
             {
                 CertFreeCertificateContext(used);
             }
+            if (same)
+            {
+                x->checkedDer = x->peerChain[0];
+            }
             if (!same)
             {
                 c->trust = TrustError();
@@ -5402,7 +5447,8 @@ static void schDtlsDrive(DtlsEndpoint *ep, DtlsConn *c)
             SecBufferDesc outd = { SECBUFFER_VERSION, 2, outb };
             ULONG attrs = 0;
             TimeStamp expiry;
-            InitializeSecurityContextW(&x->cred->h, &x->ctx, x->target.empty() ? nullptr : &x->target[0],
+            SECURITY_STATUS r = InitializeSecurityContextW(&x->cred->h, &x->ctx,
+                                       x->target.empty() ? nullptr : &x->target[0],
                                        SCH_DTLS_FLAGS, 0, 0, &ind, 0, &x->ctx, &outd, &attrs, &expiry);
             if (outb[0].pvBuffer != nullptr)
             {
@@ -5412,6 +5458,11 @@ static void schDtlsDrive(DtlsEndpoint *ep, DtlsConn *c)
             if (outb[1].pvBuffer != nullptr)
             {
                 FreeContextBuffer(outb[1].pvBuffer);
+            }
+            if (r == SEC_E_OK && !schSameCertificate(x, x->checkedDer))
+            {
+                schDtlsFail(ep, c, SEC_E_CERT_UNKNOWN);  // another certificate: refused
+                return;
             }
             schDtlsSend(ep, tok);
         }
@@ -6026,14 +6077,16 @@ RexxMethod5(RexxArrayObject, dtls_connect, CSTRING, host, CSTRING, port, RexxArr
         c->peerLen = peerLen;
         c->host = host;
         c->accepted = true;              // it belongs to its DTLSSocket
-        ep->client = c;
-        h->conn = c;
-        context->SetObjectVariable("CSELF", context->NewPointer(h));
         SECURITY_STATUS st = schDtlsClient(c, context, trusted);
         if (st != SEC_E_OK)
         {
+            freeConn(c);
+            delete h;                    // and the endpoint, and its socket
             return secResult(context, st, "cannot start DTLS: ");
         }
+        ep->client = c;
+        h->conn = c;
+        context->SetObjectVariable("CSELF", context->NewPointer(h));
         {
             std::lock_guard<std::mutex> guard(ep->mu);
             driveConn(ep, c);            // the ClientHello goes out
