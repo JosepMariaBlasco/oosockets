@@ -2128,6 +2128,14 @@ static SchWant schRecv(Sock *s, Sch *c, size_t max, std::string &got, SchOutcome
             {
                 return schFail(o, st);
             }
+            if (st == SEC_I_CONTEXT_EXPIRED)
+            {
+                // close_notify: the buffers are left as they came (the
+                // record itself as DATA, measured), and nothing follows it
+                c->peerClosed = true;
+                c->in.clear();
+                continue;
+            }
             std::string extra;
             for (int i = 0; i < 4; i++)
             {
@@ -2141,11 +2149,7 @@ static SchWant schRecv(Sock *s, Sch *c, size_t max, std::string &got, SchOutcome
                 }
             }
             c->in = extra;
-            if (st == SEC_I_CONTEXT_EXPIRED)
-            {
-                c->peerClosed = true;
-            }
-            else if (st == SEC_I_RENEGOTIATE)
+            if (st == SEC_I_RENEGOTIATE)
             {
                 c->postHandshake = true;
             }
