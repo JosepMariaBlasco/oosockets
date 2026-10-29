@@ -1630,6 +1630,7 @@ struct Sch
     bool peerClosed = false;           // close_notify arrived
     bool sentClose = false;            // close_notify has been made
     SECURITY_STATUS failed = SEC_E_OK; // the handshake failed (its alert may be in out)
+    bool notTls = false;               // ... because the peer does not speak TLS
     std::string in;                    // received, not yet used
     std::string out;                   // to send
     std::string plain;                 // decrypted, not yet read
@@ -1973,6 +1974,7 @@ struct SchOutcome
     int socketError = 0;               // TLS_SOCKET_ERROR
     SECURITY_STATUS sec = SEC_E_OK;    // TLS_SSL_ERROR
     bool handshaking = false;
+    bool notTls = false;               // the peer does not speak TLS
 };
 
 static SchWant schSocketError(SchOutcome &o, int err)
@@ -2055,6 +2057,7 @@ static SchWant schHandshake(Sock *s, Sch *c, SchOutcome &o)
             {
                 return SCH_WRITE;
             }
+            o.notTls = c->notTls;
             return schFail(o, c->failed);
         }
         if (f < 0)
@@ -2088,6 +2091,9 @@ static SchWant schHandshake(Sock *s, Sch *c, SchOutcome &o)
                 return SCH_DONE;
             }
         }
+        // What a client in clear sends (a browser on http://, telnet) is not
+        // a TLS record (22, a handshake): Schannel's text would not say so.
+        bool clear = c->server && !c->haveCtx && !c->in.empty() && (unsigned char)c->in[0] != 22;
         std::string tok;
         SECURITY_STATUS st = schInitialize(c, tok);
         if (st == SEC_E_INCOMPLETE_MESSAGE)
@@ -2104,6 +2110,7 @@ static SchWant schHandshake(Sock *s, Sch *c, SchOutcome &o)
         {
             c->out += tok;                    // an alert, if Schannel made one
             c->failed = st;
+            c->notTls = clear;
             continue;
         }
         if (!c->checked && !c->server)
@@ -2358,9 +2365,21 @@ static SchOutcome schRun(Sock *s, bool hasDeadline, Clock::time_point deadline, 
     }
 }
 
+// A handshake that failed because the peer does not speak TLS: ours, and
+// Schannel's own text as the system's.
+static RexxArrayObject notTlsResult(RexxMethodContext *context, SECURITY_STATUS st, const char *name)
+{
+    return errorArray(context, "handshake failed: the peer does not speak TLS", name, (long long)(DWORD)st,
+                      secText(st), "TLS");
+}
+
 // The result of a read or write that failed on an established connection.
 static RexxArrayObject schIoResult(RexxMethodContext *context, const SchOutcome &o)
 {
+    if (o.status == TLS_SSL_ERROR && o.notTls)
+    {
+        return notTlsResult(context, o.sec, "TLS");
+    }
     switch (o.status)
     {
         case TLS_EOF:          return statusResult(context, "EOF");
@@ -2391,6 +2410,10 @@ static RexxArrayObject schHandshakeStep(RexxMethodContext *context, Sock *s, dou
             if (s->trust.set)
             {
                 return trustResult(context, s->trust);
+            }
+            if (o.notTls)
+            {
+                return notTlsResult(context, o.sec, secName(o.sec));
             }
             return secResult(context, o.sec, "handshake failed: ");
     }
