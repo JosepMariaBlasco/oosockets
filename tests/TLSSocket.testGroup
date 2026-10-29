@@ -124,9 +124,9 @@ return testResult
   -- macOS objects first to the test certificates' hundred years (it
   -- allows 825 days, even for a root it would trust).
   if c~additional[2] == "errSecCertificateValidityPeriodTooLong" then
-    self~assertSame("TLS error: certificate is valid for longer than the system allows (localhost, port" peer~port")", c~additional[1])
+    self~assertTrustError(c, "certificate is valid for longer than the system allows", "(localhost, port" peer~port")")
   else
-    self~assertSame("TLS error: certificate is not trusted (localhost, port" peer~port")", c~additional[1])
+    self~assertTrustError(c, "certificate is not trusted", "(localhost, port" peer~port")")
   msg~result
   peer~close
 
@@ -152,6 +152,23 @@ return testResult
   msg~result
   peer~close
 
+-- Rony, 29/10/2026: a TLS class says "TLS error:" also when the socket
+-- failed; additional[4] is the system's text, [5] where it failed.
+::method test_connection_refused_is_a_tls_error
+  srv = .ServerSocket~new(0, "127.0.0.1")
+  port = srv~localPort
+  srv~close                                  -- nobody there now
+  c = connectFails("127.0.0.1", port, trustCA(), 5)
+  self~assertSame("TLS error: connection refused (127.0.0.1, port" port")", c~additional[1])
+  self~assertSame("ECONNREFUSED", c~additional[2])
+  self~assertTrue(c~additional[4] \== "", "the system's text")
+  self~assertSame("SOCKET", c~additional[5])
+
+::method test_unknown_host_is_a_tls_error
+  c = connectFails("no-such-host.invalid", 443, trustCA(), 5)
+  self~assertSame("TLS error: unknown host (no-such-host.invalid, port 443)", c~additional[1])
+  self~assertSame("SOCKET", c~additional[5])
+
 -- connection, refusal, and the peer's side: all in one.
 ::method refused private
   use arg file, text, name
@@ -159,10 +176,19 @@ return testResult
   msg = peer~start("tlsEcho", file)
   c = connectFails("localhost", peer~port, trustCA())
   self~assertSame(48.900, c~code)
-  self~assertSame("TLS error:" text "(localhost, port" peer~port")", c~additional[1])
+  self~assertTrustError(c, text, "(localhost, port" peer~port")")
   self~assertSame(name, c~additional[2])
   self~assertTrue(msg~result~startsWith("TLS error: handshake failed:"))  -- the server got an alert
   peer~close
+
+-- A refused certificate's message: ours, then the system's own reason when it
+-- says more (additional[4]); then where. additional[5] is "TLS".
+::method assertTrustError private
+  use arg c, text, where
+  sys = c~additional[4]
+  self~assertTrue(c~additional[1] == "TLS error:" text where | c~additional[1] == "TLS error:" text":" sys where, -
+                  "the message:" c~additional[1])
+  self~assertSame("TLS", c~additional[5])
 
 /* ---- the stream --------------------------------------------------------- */
 

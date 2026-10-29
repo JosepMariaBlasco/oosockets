@@ -104,7 +104,9 @@
   use strict arg host
   r = self~nResolve(host~string)
   if r[1] == "OK" then return r[2]
-  raise syntax 48.900 array("Socket error:" r[2] "("host")", r[3], r[4])
+  prefix = "Socket error:"
+  if self == .TLSSocket | self~isSubclassOf(.TLSSocket) then prefix = "TLS error:"
+  raise syntax 48.900 array(prefix r[2] "("host")", r[3], r[4], r[5], r[6])
 
 /* ---- making one --------------------------------------------------------- */
 
@@ -150,9 +152,9 @@
   select
     when r[1] == "OK" then nop
     when r[1] == "TIMEOUT" then
-      raise syntax 48.900 array("Socket error: timed out (" || host || ", port" port")", "ETIMEDOUT", 0)
+      raise syntax 48.900 array(errorPrefix(self) "timed out (" || host || ", port" port")", "ETIMEDOUT", 0, "", "SOCKET")
     otherwise
-      raise syntax 48.900 array("Socket error:" r[2] "(" || host || ", port" port")", r[3], r[4])
+      raise syntax 48.900 array(errorPrefix(self) r[2] "(" || host || ", port" port")", r[3], r[4], r[5], r[6])
   end
   return
 halted:
@@ -504,8 +506,8 @@ halted:
   end
   self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
   if r[1] == "TIMEOUT" then
-    raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
-  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
+    raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0, "", "TLS")
+  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4], r[5], r[6])
 halted:
   raise propagate
 
@@ -542,8 +544,8 @@ halted:
   end
   self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
   if r[1] == "TIMEOUT" then
-    raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
-  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
+    raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0, "", "TLS")
+  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4], r[5], r[6])
 halted:
   raise propagate
 
@@ -553,16 +555,16 @@ halted:
   signal on halt name halted
   use arg where
   if tls then
-    raise syntax 48.900 array("TLS error: TLS has already started on this connection" where, "", 0)
+    raise syntax 48.900 array("TLS error: TLS has already started on this connection" where, "", 0, "", "TLS")
   if closed then
-    raise syntax 48.900 array("TLS error: the socket is closed" where, "EBADF", 0)
+    raise syntax 48.900 array("TLS error: the socket is closed" where, "EBADF", 0, "", "SOCKET")
   if \self~sendKept then
-    raise syntax 48.900 array("TLS error: what was kept to send could not be sent" where, "", 0)
+    raise syntax 48.900 array("TLS error: what was kept to send could not be sent" where, "", 0, "", "SOCKET")
   if buffer \== "" then do
     -- Bytes that came before the handshake, in clear, would be taken as
     -- if they had come over TLS (the STARTTLS injection attacks).
     self~nClose; closed = .true; st = "UNKNOWN"; desc = "UNKNOWN:"
-    raise syntax 48.900 array("TLS error: data arrived before the TLS handshake" where, "", 0)
+    raise syntax 48.900 array("TLS error: data arrived before the TLS handshake" where, "", 0, "", "TLS")
   end
   return
 halted:
@@ -823,7 +825,7 @@ halted:
   use strict arg file, password = ""
   r = self~nLoad(file~string, password~string)
   if r[1] \== "OK" then
-    raise syntax 48.900 array("TLS error: cannot use" file~string":" r[2], r[3], r[4])
+    raise syntax 48.900 array("TLS error: cannot use" file~string":" r[2], r[3], r[4], r[5], r[6])
   trusted~appendAll(r[2])
   return self
 
@@ -838,7 +840,7 @@ halted:
   file = file~string; password = password~string
   r = self~nCheckIdentity(file, password)
   if r[1] \== "OK" then
-    raise syntax 48.900 array("TLS error: cannot use" file":" r[2], r[3], r[4])
+    raise syntax 48.900 array("TLS error: cannot use" file":" r[2], r[3], r[4], r[5], r[6])
   identity = .array~of(file, password)
   return self
 
@@ -896,7 +898,7 @@ halted:
   if r[1] \== "OK" then do
     where = "port" port
     if address \== "" then where = address || "," where
-    raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4])
+    raise syntax 48.900 array(errorPrefix(self) r[2] "(" || where || ")", r[3], r[4], r[5], r[6])
   end
   if port == 0 then port = self~localPort
 
@@ -909,7 +911,7 @@ halted:
   expose port closed acceptTimeout
   signal on halt name halted
   if closed then
-    raise syntax 48.900 array("Socket error: the server socket is closed (port" port")", "EBADF", 0)
+    raise syntax 48.900 array(errorPrefix(self) "the server socket is closed (port" port")", "EBADF", 0, "", "SOCKET")
   timeout = acceptTimeout
   if timeout == .nil then timeout = -1
   r = self~nAccept(timeout)
@@ -920,7 +922,7 @@ halted:
     when r[1] == "OK" then return self~accepted(r[2])
     when r[1] == "TIMEOUT" then return .nil
     otherwise
-      raise syntax 48.900 array("Socket error:" r[2] "(accepting on port" port")", r[3], r[4])
+      raise syntax 48.900 array(errorPrefix(self) r[2] "(accepting on port" port")", r[3], r[4], r[5], r[6])
   end
   return
 halted:
@@ -984,7 +986,7 @@ halted:
   r = self~nTLS(identity[1], identity[2], options~minVersion)
   if r[1] \== "OK" then do
     self~close
-    raise syntax 48.900 array("TLS error:" r[2], r[3], r[4])
+    raise syntax 48.900 array("TLS error:" r[2], r[3], r[4], r[5], r[6])
   end
 
 ::method accepted private
@@ -1037,7 +1039,7 @@ halted:
   if r[1] \== "OK" then do
     where = "port" port
     if address \== "" then where = address || "," where
-    raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4])
+    raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4], r[5], r[6])
   end
   if port == 0 then port = self~localPort
 
@@ -1161,7 +1163,7 @@ halted:
 ::method checkOpen private unguarded
   expose closed port
   if closed then
-    raise syntax 48.900 array("Socket error: the UDP socket is closed (port" port")", "EBADF", 0)
+    raise syntax 48.900 array("Socket error: the UDP socket is closed (port" port")", "EBADF", 0, "", "SOCKET")
 
 -- .true when other sockets may take the same port (MulticastSocket).
 ::method sharesPort private unguarded
@@ -1173,13 +1175,13 @@ halted:
   expose closed port peer
   use arg r, host, port2
   if closed then
-    raise syntax 48.900 array("Socket error: the UDP socket is closed (port" port")", "EBADF", 0)
+    raise syntax 48.900 array("Socket error: the UDP socket is closed (port" port")", "EBADF", 0, "", "SOCKET")
   select
     when host \== "" then where = host || ", port" port2
     when peer \== .nil then where = peer[1] || ", port" peer[2]
     otherwise where = "port" port
   end
-  raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4])
+  raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4], r[5], r[6])
 
 
 /*============================================================================*/
@@ -1346,11 +1348,9 @@ halted:
   end
   if r[1] == "OK" then return
   self~nClose; closed = .true
-  if r[1] == "SOCKET" then
-    raise syntax 48.900 array("Socket error:" r[2] where, r[3], r[4])
   if r[1] == "TIMEOUT" then
-    raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0)
-  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
+    raise syntax 48.900 array("TLS error: timed out" where, "ETIMEDOUT", 0, "", "TLS")
+  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4], r[5], r[6])
 halted:
   raise propagate
 
@@ -1456,18 +1456,16 @@ halted:
 ::method checkOpen private unguarded
   expose closed host port
   if closed then
-    raise syntax 48.900 array("Socket error: the DTLS socket is closed (" || host || ", port" port")", "EBADF", 0)
+    raise syntax 48.900 array("TLS error: the DTLS socket is closed (" || host || ", port" port")", "EBADF", 0, "", "SOCKET")
 
--- 48.900 for a failure: "TLS error:" for TLS's own (the name is "TLS", or
--- "EOF" once the peer closed), "Socket error:" for the socket's.
+-- 48.900 for a failure: "TLS error:", also when the socket failed (Rony,
+-- 29/10/2026); additional[5] says which, "SOCKET" or "TLS".
 ::method raiseError private unguarded
   expose host port
   use arg r
   self~checkOpen
   where = "(" || host || ", port" port")"
-  if r[3] == "TLS" | r[3] == "EOF" | r[3] == "ETIMEDOUT" then
-    raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4])
-  raise syntax 48.900 array("Socket error:" r[2] where, r[3], r[4])
+  raise syntax 48.900 array("TLS error:" r[2] where, r[3], r[4], r[5], r[6])
 
 
 /*============================================================================*/
@@ -1514,9 +1512,7 @@ halted:
   if r[1] \== "OK" then do
     where = "port" port
     if address \== "" then where = address || "," where
-    if r[1] == "SOCKET" then
-      raise syntax 48.900 array("Socket error:" r[2] "(" || where || ")", r[3], r[4])
-    raise syntax 48.900 array("TLS error:" r[2] "(" || where || ")", r[3], r[4])
+    raise syntax 48.900 array("TLS error:" r[2] "(" || where || ")", r[3], r[4], r[5], r[6])
   end
   if port == 0 then port = self~localPort
 
@@ -1530,7 +1526,7 @@ halted:
   expose port closed acceptTimeout
   signal on halt name halted
   if closed then
-    raise syntax 48.900 array("Socket error: the DTLS server socket is closed (port" port")", "EBADF", 0)
+    raise syntax 48.900 array("TLS error: the DTLS server socket is closed (port" port")", "EBADF", 0, "", "SOCKET")
   timeout = acceptTimeout
   if timeout == .nil then timeout = -1
   r = self~nAccept(timeout)
@@ -1541,9 +1537,9 @@ halted:
     when r[1] == "OK" then return .DTLSSocket~new(r[2])
     when r[1] == "TIMEOUT" then return .nil
     when closed then
-      raise syntax 48.900 array("Socket error: the DTLS server socket is closed (port" port")", "EBADF", 0)
+      raise syntax 48.900 array("TLS error: the DTLS server socket is closed (port" port")", "EBADF", 0, "", "SOCKET")
     otherwise
-      raise syntax 48.900 array("Socket error:" r[2] "(accepting on port" port")", r[3], r[4])
+      raise syntax 48.900 array("TLS error:" r[2] "(accepting on port" port")", r[3], r[4], r[5], r[6])
   end
   return
 halted:
@@ -1644,3 +1640,12 @@ halted:
   use arg host, port
   if host~pos(":") > 0 then return "[" || host || "]:" || port
   return host":"port
+
+-- How a SYNTAX 48.900 of this object begins: every error a TLS class
+-- raises says "TLS error:", also when the socket underneath failed; the
+-- plain classes "Socket error:" (Rony, 29/10/2026). additional[5] says
+-- where it failed, "SOCKET" or "TLS".
+::routine errorPrefix
+  use arg o
+  if o~isA(.TLSSocket) | o~isA(.TLSServerSocket) then return "TLS error:"
+  return "Socket error:"

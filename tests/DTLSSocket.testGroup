@@ -81,7 +81,7 @@ return testResult
   self~assertSame(16384, d~data~length)
   c~send("ok")
   self~assertSame("ok DTLSv1.2", msg~result)
-  self~expectSyntax(.array~of(48.900, "Socket error: message too long (127.0.0.1, port" c~remotePort")"))
+  self~expectSyntax(.array~of(48.900, "TLS error: message too long (127.0.0.1, port" c~remotePort")"))
   c~send("x"~copies(16385))
 
 ::method test_a_keytool_keystore_on_both_ends
@@ -155,7 +155,7 @@ failed:
     call sysSleep 0.1
   end
   self~assertTrue(msg~completed)
-  self~assertSame("48.900 Socket error: the DTLS server socket is closed (port" port").", msg~result)
+  self~assertSame("48.900 TLS error: the DTLS server socket is closed (port" port").", msg~result)
 
 /* ---- the peer goes away ------------------------------------------------- */
 
@@ -253,13 +253,14 @@ syntax:
   u~close                                    -- nobody there now
   c = connectFails("127.0.0.1", port, trustCA(), 5)
   self~assertSame("TLS error: connection refused (127.0.0.1, port" port")", c~additional[1])
+  self~assertSame("SOCKET", c~additional[5])
 
 ::method test_the_wrong_host
   srv = .DTLSServerSocket~new(0, serverOptions("wronghost.pem"), "127.0.0.1")
   port = srv~localPort
   .Waiter~new~start("acceptFor", srv, 15)    -- the server, answering
   c = connectFails("localhost", port, trustCA(), 10)
-  self~assertSame("TLS error: certificate does not match the host name (localhost, port" port")", c~additional[1])
+  self~assertTrustError(c, "certificate does not match the host name", "(localhost, port" port")")
   srv~close
 
 ::method test_an_expired_certificate
@@ -267,12 +268,13 @@ syntax:
   port = srv~localPort
   .Waiter~new~start("acceptFor", srv, 15)
   c = connectFails("localhost", port, trustCA(), 10)
-  self~assertSame("TLS error: certificate has expired (localhost, port" port")", c~additional[1])
+  self~assertTrustError(c, "certificate has expired", "(localhost, port" port")")
   srv~close
 
 ::method test_unknown_host
   c = connectFails("no-such-host.invalid", 4433, trustCA(), 5)
-  self~assertSame("Socket error: unknown host (no-such-host.invalid, port 4433)", c~additional[1])
+  self~assertSame("TLS error: unknown host (no-such-host.invalid, port 4433)", c~additional[1])
+  self~assertSame("SOCKET", c~additional[5])
 
 ::method test_dtls_1_3
   opts = trustCA()
@@ -300,9 +302,19 @@ syntax:
   self~assertSame("done", msg~result)
   s~close
   srv~close
-  self~expectSyntax(.array~of(48.900, "Socket error: the DTLS socket is closed (localhost, port" port")"))
+  self~expectSyntax(.array~of(48.900, "TLS error: the DTLS socket is closed (localhost, port" port")"))
   s~send("again")
 
+
+
+-- A refused certificate's message: ours, then the system's own reason when it
+-- says more (additional[4]); then where. additional[5] is "TLS".
+::method assertTrustError private
+  use arg c, text, where
+  sys = c~additional[4]
+  self~assertTrue(c~additional[1] == "TLS error:" text where | c~additional[1] == "TLS error:" text":" sys where, -
+                  "the message:" c~additional[1])
+  self~assertSame("TLS", c~additional[5])
 
 ::class Client
 ::method echoOnce

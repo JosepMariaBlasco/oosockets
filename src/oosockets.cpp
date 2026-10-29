@@ -50,10 +50,12 @@
  *   "TIMEOUT"
  *   "AGAIN", ...                (the call waited SLICE_MS and must be made
  *                                again: see waitSlice)
- *   "ERROR", text, name, number (text in English, the same on the three
+ *   "ERROR", text, name, number, system's text, layer
+ *                               (text in English, the same on the three
  *                                systems for the common errors; name as
- *                                POSIX's, e.g. "ECONNREFUSED"; number the
- *                                system's own)
+ *                                POSIX's, e.g. "ECONNREFUSED"; number and
+ *                                text the system's own; layer "SOCKET" or
+ *                                "TLS", where it failed: Rony, 29/10/2026)
  *
  * The OS handle lives in a heap Sock, reached through CSELF.
  */
@@ -135,9 +137,10 @@
 struct TrustError
 {
     bool set = false;
-    std::string text;
+    std::string text;            // ours, the same on the three systems
     std::string name;
     long long code = 0;
+    std::string sys;             // the system's own text for it
 };
 
 // Whom a TLS (or DTLS) connection must be with: the host name verified
@@ -238,39 +241,49 @@ static ErrInfo errInfo(int code)
     return {"", nullptr};
 }
 
+// The system's own text for an error number, without a final period.
+static std::string systemText(int code)
+{
+#ifdef _WIN32
+    char buf[512] = "";
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                   nullptr, (DWORD)code, 0, buf, sizeof(buf), nullptr);
+    std::string text = buf;
+#else
+    std::string text = strerror(code);
+#endif
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' ' || text.back() == '.'))
+    {
+        text.pop_back();
+    }
+    return text;
+}
+
+// The error result: "ERROR", text, name, number, the system's text, layer.
+static RexxArrayObject errorArray(RexxMethodContext *context, const std::string &text,
+                                  const std::string &name, long long code,
+                                  const std::string &sys = "", const char *layer = "TLS")
+{
+    RexxArrayObject r = context->NewArray(6);
+    context->ArrayAppendString(r, "ERROR", 5);
+    context->ArrayAppendString(r, text.c_str(), text.size());
+    context->ArrayAppendString(r, name.c_str(), name.size());
+    context->ArrayAppend(r, context->Int64ToObject(code));
+    context->ArrayAppendString(r, sys.c_str(), sys.size());
+    context->ArrayAppendString(r, layer, strlen(layer));
+    return r;
+}
+
 static RexxArrayObject errorResult(RexxMethodContext *context, int code)
 {
     ErrInfo e = errInfo(code);
-    std::string text;
-    if (e.text != nullptr)
+    std::string sys = systemText(code);
+    std::string text = e.text != nullptr ? std::string(e.text) : sys;
+    if (e.text == nullptr && !text.empty())
     {
-        text = e.text;
+        text[0] = (char)tolower((unsigned char)text[0]);
     }
-    else
-    {
-#ifdef _WIN32
-        char buf[512] = "";
-        FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                       nullptr, (DWORD)code, 0, buf, sizeof(buf), nullptr);
-        text = buf;
-        while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == '.'))
-        {
-            text.pop_back();
-        }
-#else
-        text = strerror(code);
-#endif
-        if (!text.empty())
-        {
-            text[0] = (char)tolower((unsigned char)text[0]);
-        }
-    }
-    RexxArrayObject r = context->NewArray(4);
-    context->ArrayAppendString(r, "ERROR", 5);
-    context->ArrayAppendString(r, text.c_str(), text.size());
-    context->ArrayAppendString(r, e.name, strlen(e.name));
-    context->ArrayAppend(r, context->WholeNumber(code));
-    return r;
+    return errorArray(context, text, e.name, code, sys, "SOCKET");
 }
 
 // getaddrinfo's own errors
@@ -297,12 +310,12 @@ static RexxArrayObject gaiErrorResult(RexxMethodContext *context, int code)
                 text[0] = (char)tolower((unsigned char)text[0]);
             }
     }
-    RexxArrayObject r = context->NewArray(4);
-    context->ArrayAppendString(r, "ERROR", 5);
-    context->ArrayAppendString(r, text.c_str(), text.size());
-    context->ArrayAppendString(r, name, strlen(name));
-    context->ArrayAppend(r, context->WholeNumber(code));
-    return r;
+#ifdef _WIN32
+    std::string sys = gai_strerrorA(code);
+#else
+    std::string sys = gai_strerror(code);
+#endif
+    return errorArray(context, text, name, code, sys, "SOCKET");
 }
 
 static RexxArrayObject statusResult(RexxMethodContext *context, const char *status, RexxObjectPtr value = NULLOBJECT)
@@ -804,16 +817,6 @@ static TlsOutcome tlsRun(Sock *s, bool hasDeadline, Clock::time_point deadline, 
     }
 }
 
-static RexxArrayObject errorArray(RexxMethodContext *context, const std::string &text,
-                                  const std::string &name, long long code)
-{
-    RexxArrayObject r = context->NewArray(4);
-    context->ArrayAppendString(r, "ERROR", 5);
-    context->ArrayAppendString(r, text.c_str(), text.size());
-    context->ArrayAppendString(r, name.c_str(), name.size());
-    context->ArrayAppend(r, context->Int64ToObject(code));
-    return r;
-}
 
 /* ---- is OpenSSL there? -------------------------------------------------- */
 
@@ -856,7 +859,21 @@ static std::string sslReason(unsigned long e)
     return buf;
 }
 
+// OpenSSL's whole text for an error ("error:0A000086:SSL routines::certificate
+// verify failed"), the system's own.
+static std::string sslText(unsigned long e)
+{
+    if (e == 0)
+    {
+        return "";
+    }
+    char buf[256];
+    ERR_error_string_n(e, buf, sizeof(buf));
+    return buf;
+}
+
 static TrustError opensslTrustError(long v);
+static RexxArrayObject trustResult(RexxMethodContext *context, const TrustError &t);
 
 // The result of a TLS read or write that failed on an established connection.
 static RexxArrayObject tlsIoResult(RexxMethodContext *context, const TlsOutcome &o)
@@ -873,11 +890,12 @@ static RexxArrayObject tlsIoResult(RexxMethodContext *context, const TlsOutcome 
             // its first read or write).
             if (o.handshaking && o.verifyResult != X509_V_OK && o.verifyResult != X509_V_ERR_APPLICATION_VERIFICATION)
             {
-                return errorArray(context, opensslTrustError(o.verifyResult).text, "TLS",
-                                  (long long)o.verifyResult);
+                TrustError t = opensslTrustError(o.verifyResult);
+                t.name = "TLS";
+                return trustResult(context, t);
             }
             return errorArray(context, (o.handshaking ? "handshake failed: " : "") + sslReason(o.sslError),
-                              "TLS", (long long)ERR_GET_REASON(o.sslError));
+                              "TLS", (long long)ERR_GET_REASON(o.sslError), sslText(o.sslError));
     }
 }
 
@@ -894,6 +912,7 @@ static const char *CERT_USAGE     = "certificate is not for a TLS server";
 static TrustError opensslTrustError(long v)
 {
     TrustError t;
+    t.sys = X509_verify_cert_error_string(v);
     t.set = true;
     t.code = v;
     switch (v)
@@ -927,6 +946,33 @@ static TrustError opensslTrustError(long v)
             t.text = X509_verify_cert_error_string(v);
     }
     return t;
+}
+
+// Ours, and the system's own reason after it when it says more ("certificate
+// is not trusted: self-signed certificate"; not "timed out" after "connection
+// timed out"): Rony, 29/10/2026.
+static std::string withReason(const std::string &ours, const std::string &sys)
+{
+    auto lower = [](std::string x)
+    {
+        for (char &ch : x)
+        {
+            ch = (char)tolower((unsigned char)ch);
+        }
+        return x;
+    };
+    std::string a = lower(ours), b = lower(sys);
+    if (b.empty() || a.find(b) != std::string::npos || b.find(a) != std::string::npos)
+    {
+        return ours;
+    }
+    return ours + ": " + sys;
+}
+
+// A certificate the system (or OpenSSL) refused, as an error result.
+static RexxArrayObject trustResult(RexxMethodContext *context, const TrustError &t)
+{
+    return errorArray(context, withReason(t.text, t.sys), t.name, t.code, t.sys, "TLS");
 }
 
 #ifdef __APPLE__
@@ -984,6 +1030,12 @@ static bool systemTrust(const std::vector<X509 *> &chain, const std::string &hos
             long code = err != nullptr ? (long)CFErrorGetCode(err) : 0;
             why.set = true;
             why.code = code;
+            CFStringRef desc = err != nullptr ? CFErrorCopyDescription(err) : nullptr;
+            why.sys = cfString(desc);
+            if (desc != nullptr)
+            {
+                CFRelease(desc);
+            }
             switch (code)
             {
                 case errSecCertificateExpired:
@@ -1003,12 +1055,7 @@ static bool systemTrust(const std::vector<X509 *> &chain, const std::string &hos
                 default:
                 {
                     why.name = "OSStatus";
-                    CFStringRef desc = err != nullptr ? CFErrorCopyDescription(err) : nullptr;
-                    why.text = cfString(desc);
-                    if (desc != nullptr)
-                    {
-                        CFRelease(desc);
-                    }
+                    why.text = why.sys;
                     if (why.text.empty())
                     {
                         why.text = CERT_UNTRUSTED;
@@ -1056,6 +1103,14 @@ static void windowsTrustError(DWORD code, TrustError &why)
 {
     why.set = true;
     why.code = (long long)code;
+    char buf[512] = "";
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, code,
+                   MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), buf, sizeof(buf), nullptr);
+    why.sys = buf;
+    while (!why.sys.empty() && (why.sys.back() == '\n' || why.sys.back() == '\r' || why.sys.back() == ' ' || why.sys.back() == '.'))
+    {
+        why.sys.pop_back();
+    }
     switch (code)
     {
         case (DWORD)CERT_E_EXPIRED:
@@ -1071,15 +1126,8 @@ static void windowsTrustError(DWORD code, TrustError &why)
         case (DWORD)CERT_E_WRONG_USAGE:
             why.name = "CERT_E_WRONG_USAGE"; why.text = CERT_USAGE; return;
     }
-    char buf[512] = "";
-    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, code,
-                   MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), buf, sizeof(buf), nullptr);
     why.name = "HRESULT";
-    why.text = buf;
-    while (!why.text.empty() && (why.text.back() == '\n' || why.text.back() == '\r' || why.text.back() == '.'))
-    {
-        why.text.pop_back();
-    }
+    why.text = why.sys;
     if (!why.text.empty())
     {
         why.text[0] = (char)tolower((unsigned char)why.text[0]);
@@ -1376,15 +1424,14 @@ static RexxArrayObject handshakeFailure(RexxMethodContext *context, PeerCheck *s
     }
     if (s->trust.set)
     {
-        return errorArray(context, s->trust.text, s->trust.name, s->trust.code);
+        return trustResult(context, s->trust);
     }
     if (o.verifyResult != X509_V_OK)
     {
-        TrustError t = opensslTrustError(o.verifyResult);
-        return errorArray(context, t.text, t.name, t.code);
+        return trustResult(context, opensslTrustError(o.verifyResult));
     }
     return errorArray(context, "handshake failed: " + sslReason(o.sslError), "SSL_ERROR_SSL",
-                      (long long)ERR_GET_REASON(o.sslError));
+                      (long long)ERR_GET_REASON(o.sslError), sslText(o.sslError));
 }
 
 static int minVersionOf(const char *v)
@@ -3150,12 +3197,12 @@ RexxMethod4(RexxArrayObject, mcast_group, CSELF, cself, CSTRING, group, CSTRING,
                      : IN6_IS_ADDR_MULTICAST(&((struct sockaddr_in6 *)&g)->sin6_addr);
     if (!multicast)
     {
-        return errorArray(context, "not a multicast address", "EINVAL", 0);
+        return errorArray(context, "not a multicast address", "EINVAL", 0, "", "SOCKET");
     }
     unsigned index = 0;
     if (!interfaceIndex(iface, index))
     {
-        return errorArray(context, std::string("no such network interface: ") + iface, "ENXIO", 0);
+        return errorArray(context, std::string("no such network interface: ") + iface, "ENXIO", 0, "", "SOCKET");
     }
     setSaLen(g);
 
@@ -3235,7 +3282,7 @@ RexxMethod3(RexxArrayObject, mcast_option, CSELF, cself, CSTRING, name, CSTRING,
         unsigned index = 0;
         if (!interfaceIndex(value, index))
         {
-            return errorArray(context, std::string("no such network interface: ") + value, "ENXIO", 0);
+            return errorArray(context, std::string("no such network interface: ") + value, "ENXIO", 0, "", "SOCKET");
         }
         e4 = setIf4(s->fd, index);
         s->mcIf = index;

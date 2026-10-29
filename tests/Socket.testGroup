@@ -289,6 +289,8 @@ refused:
   c = condition("o")
   self~assertSame(48, c~rc)
   self~assertSame("ECONNREFUSED", c~additional[2])
+  self~assertTrue(c~additional[4] \== "", "the system's text")   -- e.g. "Connection refused"
+  self~assertSame("SOCKET", c~additional[5])
 
 ::method test_unknown_host
   self~expectSyntax(.array~of(48.900, "Socket error: unknown host (no-such-host.invalid, port 80)"))

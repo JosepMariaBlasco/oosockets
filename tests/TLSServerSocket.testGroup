@@ -136,6 +136,23 @@ return testResult
   self~assertSame(.nil, srv~accept)
   srv~close
 
+-- Rony, 29/10/2026: a TLS class says "TLS error:" also when the socket
+-- failed; additional[5] says where.
+::method test_a_port_in_use_is_a_tls_error
+  first = .ServerSocket~new(0, "127.0.0.1")
+  port = first~localPort
+  signal on syntax name inUse
+  srv = .TLSServerSocket~new(port, serverOptions("server.pem"), "127.0.0.1")
+  srv~close; first~close
+  self~fail("listened on a port in use")
+inUse:
+  c = condition("o")
+  first~close
+  self~assertSame(48.900, c~code)
+  self~assertSame("TLS error: address already in use (127.0.0.1, port" port")", c~additional[1])
+  self~assertSame("EADDRINUSE", c~additional[2])
+  self~assertSame("SOCKET", c~additional[5])
+
 /* ---- the server's certificate -------------------------------------------- */
 
 ::method test_without_a_certificate
@@ -150,6 +167,7 @@ return testResult
 ::method test_a_certificate_without_its_key
   c = certificateFails(certFile("ca.pem"))
   self~assertSame(48.900, c~code)
+  self~assertSame("TLS", c~additional[5])
   self~assertTrue(c~additional[1]~endsWith(": no private key in the file"), c~additional[1])
 
 ::method test_a_key_that_is_not_the_certificates

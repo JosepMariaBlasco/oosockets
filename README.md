@@ -35,8 +35,14 @@ client~close; srv~close
   `lineEnd` says.
 - Strings are bytes, and so is the network: nothing is converted.
 - Failing to connect or to listen is a SYNTAX condition, **48.900**:
-  `Socket error: connection refused (localhost, port 8888)`; the system's
-  error name and number follow in `condition("A")`. Once connected, the
+  `Socket error: connection refused (localhost, port 8888)`. The TLS
+  classes say `TLS error:`, also when what failed was the socket
+  underneath (`TLS error: connection refused (localhost, port 4433)`),
+  and add the system's own reason when it says more than ours (`TLS
+  error: certificate is not trusted: self-signed certificate (localhost,
+  port 4433)`). `condition("A")` holds the message, the system's name for
+  the error (`ECONNREFUSED`), its number, its own text (`Connection
+  refused`), and where it failed: `SOCKET` or `TLS`. Once connected, the
   end of the connection, a timeout or an error is **NOTREADY**, as for
   any stream.
 - Timeouts, in seconds, none by default: `.Socket~new(host, port,

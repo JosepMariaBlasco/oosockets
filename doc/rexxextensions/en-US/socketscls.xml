@@ -264,13 +264,26 @@ message says what failed and where:</para>
 Socket error: connection refused (localhost, port 8888)
 Socket error: unknown host (no-such-host.invalid, port 80)
 TLS error: certificate has expired (expired.badssl.com, port 443)
+TLS error: certificate is not trusted: self-signed certificate (localhost, port 4433)
+TLS error: connection refused (localhost, port 4433)
 </programlisting>
 
-<para>The additional information of the condition is an array of three
-items: the message, the name of the system&apos;s error
+<para>Every error that a TLS or DTLS class raises
+(<classname>TLSSocket</classname>, <classname>TLSServerSocket</classname>,
+<classname>DTLSSocket</classname>, <classname>DTLSServerSocket</classname>,
+and <methodname>startTLS</methodname>) begins with <literal>TLS
+error:</literal>, also when what failed was the socket underneath; the
+other classes say <literal>Socket error:</literal>.  The message is the
+same on every system for the common errors; when the system&apos;s own
+reason says more than that, it follows after a colon
+(<literal>self-signed certificate</literal> above).</para>
+
+<para>The additional information of the condition is an array of five
+items: the message; the name of the system&apos;s error
 (<literal>ECONNREFUSED</literal>, <literal>EAI_NONAME</literal>, the name of
-a Windows or OpenSSL error), and its number.  The message is the same on
-every system for the common errors; the name and the number are the
+a Windows, macOS or OpenSSL error); its number; the system&apos;s own text
+for it; and where it failed, <literal>SOCKET</literal> or
+<literal>TLS</literal>.  The name, the number and the text are the
 system&apos;s own.</para>
 
 <programlisting language="rexx">
@@ -282,6 +295,8 @@ syntax:
   say info[1]      -- Socket error: connection refused (localhost, port 1)
   say info[2]      -- ECONNREFUSED
   say info[3]      -- 111 (on Linux)
+  say info[4]      -- Connection refused (on Linux)
+  say info[5]      -- SOCKET
 
 ::requires "sockets.cls"
 </programlisting>
@@ -2654,9 +2669,10 @@ them.  The version of DTLS is 1.2.</para>
 <methodname>new</methodname>; a server gets one for each client from
 <xref linkend="mthDTLSServerSocketAccept" xrefstyle="select:title"/>.
 Every error is a <literal>SYNTAX</literal> condition,
-<literal>48.900</literal>: <literal>TLS error:</literal> for the handshake
-and for TLS&apos;s own errors, <literal>Socket error:</literal> for those of
-the socket.</para>
+<literal>48.900</literal>, whose message begins with <literal>TLS
+error:</literal>; the fifth item of its additional information says
+whether TLS or the socket failed (see <xref linkend="socketsErrors"
+xrefstyle="select:title"/>).</para>
 
 <programlisting language="rexx">
 opts = .TLSOptions~new~trust("server.p12", "secret")
@@ -2928,7 +2944,7 @@ is always secure.</para>
 
 <para>Encrypts <emphasis role="italic">data</emphasis> and sends it to the
 peer as one datagram.  Up to 16,384 bytes can be sent at a time; more
-raises a <literal>SYNTAX</literal> condition (<literal>Socket error:
+raises a <literal>SYNTAX</literal> condition (<literal>TLS error:
 message too long</literal>).  On a socket a
 <classname>DTLSServerSocket</classname> accepted, the first
 <methodname>send</methodname> (or <methodname>receive</methodname>) waits
