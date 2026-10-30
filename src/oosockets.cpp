@@ -2512,10 +2512,17 @@ static RexxArrayObject schStartClient(RexxMethodContext *context, Sock *s, const
             c->trusted.push_back(std::string(context->StringData(der), context->StringLength(der)));
         }
     }
-    s->host = host;
-    s->trust = TrustError();
     {
+        // Checked again under the lock: two startTLS at once (which
+        // sockets.cls's guarded methods prevent) cannot both start.
         std::lock_guard<std::mutex> guard(s->mu);
+        if (s->sch != nullptr || s->ssl != nullptr)
+        {
+            schFree(c);
+            return errorArray(context, "TLS has already started on this connection", "", 0);
+        }
+        s->host = host;
+        s->trust = TrustError();
         s->sch = c;
         setBlocking(s->fd, false);
     }
@@ -2571,7 +2578,10 @@ static RexxArrayObject schSendResult(RexxMethodContext *context, Sock *s, const 
     }
 }
 
-// close_notify, sent if the socket takes it within a moment (under the lock).
+// close_notify, sent if the socket takes it now: called under the lock, so
+// it never waits (as OpenSSL's SSL_shutdown over our non-blocking BIO). A
+// peer that reads nothing, its window full, gets no close_notify (or, as
+// with OpenSSL, part of one: the end of the stream to it either way).
 static void schSayGoodbye(Sock *s, Sch *c)
 {
     if (!c->done || c->sentClose || c->failed != SEC_E_OK)
@@ -2580,20 +2590,8 @@ static void schSayGoodbye(Sock *s, Sch *c)
     }
     c->sentClose = true;
     c->out += schCloseNotify(c);
-    Clock::time_point until = deadlineFrom(1);
-    for (;;)
-    {
-        int err = 0;
-        int f = schFlush(s, c, err);
-        if (f != 0)
-        {
-            return;
-        }
-        if (waitFor(s->fd, POLLOUT, true, until, &err) != 1)
-        {
-            return;
-        }
-    }
+    int err = 0;
+    schFlush(s, c, err);
 }
 
 // nTLSInfo for Schannel: the protocol ("TLSv1.3") and the cipher suite.
@@ -2832,12 +2830,16 @@ static bool pkcs8Of(const PemBlock &k, std::string &out)
     return true;
 }
 
-// A PKCS#12 file, imported by Windows: with its keys persisted (for
-// Schannel) or not. nullptr and why if it cannot be.
-static HCERTSTORE importPkcs12(const std::string &data, const char *password, bool persist, std::string &why)
+// A PKCS#12 file, imported by Windows, its keys never persisted (in memory
+// only); exportable: CNG keys that can be exported (encrypted), for
+// Schannel, which needs the key persisted under a name of ours (see
+// WinIdentity). Persisting at the import would keep a key without a
+// certificate for good, and the import names the keys after the file's
+// friendly names (probes/schannel, "keys"). nullptr and why if it cannot be.
+static HCERTSTORE importPkcs12(const std::string &data, const char *password, bool exportable, std::string &why)
 {
     CRYPT_DATA_BLOB blob = { (DWORD)data.size(), (BYTE *)data.data() };
-    DWORD flags = persist ? CRYPT_USER_KEYSET | PKCS12_ALWAYS_CNG_KSP : PKCS12_NO_PERSIST_KEY;
+    DWORD flags = PKCS12_NO_PERSIST_KEY | (exportable ? PKCS12_ALWAYS_CNG_KSP | CRYPT_EXPORTABLE : 0);
     std::wstring pw = wide(password);
     HCERTSTORE store = PFXImportCertStore(&blob, pw.c_str(), flags);
     DWORD err = store == nullptr ? GetLastError() : 0;
@@ -2976,13 +2978,14 @@ static std::string publicBlob(PCCERT_CONTEXT cert)
 // A server's certificate and its key, as Windows holds them: the
 // certificate (in a store with the rest of the chain) with its key. For
 // Schannel the key must be persisted (it refuses an ephemeral one:
-// probes/schannel); it is deleted again when the WinIdentity goes, as the
+// probes/schannel); we persist it ourselves, under a name of ours
+// (keyName), and delete it again when the WinIdentity goes, as the
 // credentials made from it keep working without it.
 struct WinIdentity
 {
     HCERTSTORE store = nullptr;
     PCCERT_CONTEXT cert = nullptr;
-    NCRYPT_KEY_HANDLE key = 0;         // a PEM file's key, imported by us
+    NCRYPT_KEY_HANDLE key = 0;         // the key, imported by us (persisted: for Schannel)
     bool persisted = false;
     ~WinIdentity()
     {
@@ -2991,27 +2994,6 @@ struct WinIdentity
             if (!persisted || NCryptDeleteKey(key, 0) != ERROR_SUCCESS)
             {
                 NCryptFreeObject(key);
-            }
-        }
-        else if (persisted && store != nullptr)
-        {
-            // A PKCS#12 file's keys, persisted by the import.
-            PCCERT_CONTEXT x = nullptr;
-            while ((x = CertEnumCertificatesInStore(store, x)) != nullptr)
-            {
-                HCRYPTPROV_OR_NCRYPT_KEY_HANDLE k = 0;
-                DWORD spec = 0;
-                BOOL mustFree = FALSE;
-                DWORD n = 0;
-                if (CertGetCertificateContextProperty(x, CERT_KEY_PROV_INFO_PROP_ID, nullptr, &n) &&
-                    CryptAcquireCertificatePrivateKey(x, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG,
-                                                      nullptr, &k, &spec, &mustFree))
-                {
-                    if (NCryptDeleteKey((NCRYPT_KEY_HANDLE)k, 0) != ERROR_SUCCESS && mustFree)
-                    {
-                        NCryptFreeObject((NCRYPT_KEY_HANDLE)k);
-                    }
-                }
             }
         }
         if (cert != nullptr)
@@ -3024,6 +3006,237 @@ struct WinIdentity
         }
     }
 };
+
+static const wchar_t KEY_PREFIX[] = L"oosockets-";
+
+// Random bytes as hex (wide), for a key's name or a password used once.
+static std::wstring randomHex(int bytes)
+{
+    unsigned char rnd[32];
+    BCryptGenRandom(nullptr, rnd, (ULONG)bytes, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    std::wstring s;
+    for (int i = 0; i < bytes; i++)
+    {
+        wchar_t two[3];
+        swprintf(two, 3, L"%02x", rnd[i]);
+        s += two;
+    }
+    return s;
+}
+
+// The name of a key persisted for Schannel, new each time:
+// "oosockets-<process id>-<32 hex>". The process id lets a later process
+// tell the keys left by one that died before deleting them (sweepKeys).
+static std::wstring keyName()
+{
+    wchar_t pid[16];
+    swprintf(pid, 16, L"%lu", (unsigned long)GetCurrentProcessId());
+    return std::wstring(KEY_PREFIX) + pid + L"-" + randomHex(16);
+}
+
+// Whether the process id of a key's name is a process that has ended:
+// only then is the key nobody's. A process we cannot ask about is alive.
+static bool processGone(unsigned long pid)
+{
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (h == nullptr)
+    {
+        return GetLastError() == ERROR_INVALID_PARAMETER;      // no such process
+    }
+    DWORD code = 0;
+    bool gone = GetExitCodeProcess(h, &code) && code != STILL_ACTIVE;
+    CloseHandle(h);
+    return gone;
+}
+
+// Once per process, before the first key is persisted: the keys of ours
+// that a process killed between importing a key and deleting it left in
+// the user's key store, deleted. Keys of processes still running are
+// theirs (their credentials are being made now), and are left alone.
+static void sweepKeys()
+{
+    static std::once_flag once;
+    std::call_once(once, []()
+    {
+        NCRYPT_PROV_HANDLE prov = 0;
+        if (NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0) != ERROR_SUCCESS)
+        {
+            return;
+        }
+        std::vector<std::wstring> stale;
+        NCryptKeyName *k = nullptr;
+        PVOID state = nullptr;
+        size_t plen = wcslen(KEY_PREFIX);
+        while (NCryptEnumKeys(prov, nullptr, &k, &state, NCRYPT_SILENT_FLAG) == ERROR_SUCCESS)
+        {
+            const wchar_t *n = k->pszName;
+            if (n != nullptr && wcsncmp(n, KEY_PREFIX, plen) == 0)
+            {
+                const wchar_t *p = n + plen;
+                unsigned long long pid = 0;
+                int digits = 0;
+                while (*p >= L'0' && *p <= L'9' && digits < 10)
+                {
+                    pid = pid * 10 + (unsigned long long)(*p - L'0');
+                    p++;
+                    digits++;
+                }
+                if (digits > 0 && pid <= 0xFFFFFFFFull && *p == L'-' && wcslen(p + 1) == 32 &&
+                    pid != GetCurrentProcessId() && processGone((unsigned long)pid))
+                {
+                    stale.push_back(n);
+                }
+            }
+            NCryptFreeBuffer(k);
+            k = nullptr;
+        }
+        if (state != nullptr)
+        {
+            NCryptFreeBuffer(state);
+        }
+        for (const std::wstring &name : stale)
+        {
+            NCRYPT_KEY_HANDLE key = 0;
+            if (NCryptOpenKey(prov, &key, name.c_str(), 0, NCRYPT_SILENT_FLAG) == ERROR_SUCCESS &&
+                NCryptDeleteKey(key, 0) != ERROR_SUCCESS)
+            {
+                NCryptFreeObject(key);
+            }
+        }
+        NCryptFreeObject(prov);
+    });
+}
+
+// The key in pkcs8 (encrypted with secret, if not nullptr) imported into
+// the user's key store, persisted under a new name of ours if persist (for
+// Schannel: then sweepKeys first), and made id's certificate's key, once
+// it is known to be that certificate's. False and why if it cannot be.
+static bool attachKey(WinIdentity &id, const std::string &pkcs8, const wchar_t *secret, bool persist,
+                      std::string &why)
+{
+    if (persist)
+    {
+        sweepKeys();
+    }
+    NCRYPT_PROV_HANDLE prov = 0;
+    SECURITY_STATUS st = NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0);
+    if (st != ERROR_SUCCESS)
+    {
+        why = "cannot read the private key: " + secText(st);
+        return false;
+    }
+    std::wstring name = keyName();
+    std::wstring pw = secret != nullptr ? secret : L"";
+    NCryptBuffer buffers[2];
+    ULONG nb = 0;
+    if (persist)
+    {
+        buffers[nb].BufferType = NCRYPTBUFFER_PKCS_KEY_NAME;
+        buffers[nb].cbBuffer = (ULONG)((name.size() + 1) * sizeof(wchar_t));
+        buffers[nb].pvBuffer = &name[0];
+        nb++;
+    }
+    if (secret != nullptr)
+    {
+        buffers[nb].BufferType = NCRYPTBUFFER_PKCS_SECRET;
+        buffers[nb].cbBuffer = (ULONG)((pw.size() + 1) * sizeof(wchar_t));
+        buffers[nb].pvBuffer = &pw[0];
+        nb++;
+    }
+    NCryptBufferDesc desc = { NCRYPTBUFFER_VERSION, nb, buffers };
+    st = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, nb > 0 ? &desc : nullptr, &id.key,
+                         (PBYTE)pkcs8.data(), (DWORD)pkcs8.size(), persist ? NCRYPT_DO_NOT_FINALIZE_FLAG : 0);
+    if (st == ERROR_SUCCESS && persist)
+    {
+        st = NCryptFinalizeKey(id.key, 0);
+    }
+    NCryptFreeObject(prov);
+    if (st != ERROR_SUCCESS)
+    {
+        if (id.key != 0)
+        {
+            NCryptFreeObject(id.key);      // not finalized: nothing was persisted
+            id.key = 0;
+        }
+        why = "cannot read the private key: " + secText(st);
+        return false;
+    }
+    std::string mine = publicBlob(id.key);
+    if (mine.empty() || mine != publicBlob(id.cert))
+    {
+        why = "the private key is not the certificate's";
+        return false;
+    }
+    if (persist)
+    {
+        CRYPT_KEY_PROV_INFO info;
+        memset(&info, 0, sizeof(info));
+        info.pwszContainerName = &name[0];
+        info.pwszProvName = (LPWSTR)MS_KEY_STORAGE_PROVIDER;
+        if (!CertSetCertificateContextProperty(id.cert, CERT_KEY_PROV_INFO_PROP_ID, 0, &info))
+        {
+            why = "Windows cannot use the private key: " +
+                  secText((SECURITY_STATUS)HRESULT_FROM_WIN32(GetLastError()));
+            return false;
+        }
+    }
+    return true;
+}
+
+// The private key of a certificate imported from a PKCS#12 file (in memory,
+// exportable), exported as PKCS#8 encrypted with secret: Windows exports
+// such a key only encrypted (probes/schannel, "keys"). False and why if it
+// cannot be.
+static bool exportKey(PCCERT_CONTEXT c, const std::wstring &secret, std::string &out, std::string &why)
+{
+    HCRYPTPROV_OR_NCRYPT_KEY_HANDLE k = 0;
+    DWORD spec = 0;
+    BOOL mustFree = FALSE;
+    if (!CryptAcquireCertificatePrivateKey(c, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG |
+                                           CRYPT_ACQUIRE_CACHE_FLAG, nullptr, &k, &spec, &mustFree))
+    {
+        why = "cannot read the private key: " + secText((SECURITY_STATUS)HRESULT_FROM_WIN32(GetLastError()));
+        return false;
+    }
+    // PKCS#12's own password-based encryption, as Windows' PKCS#8 export takes it
+    unsigned char params[sizeof(CRYPT_PKCS12_PBE_PARAMS) + 16];
+    CRYPT_PKCS12_PBE_PARAMS *pbe = (CRYPT_PKCS12_PBE_PARAMS *)params;
+    pbe->iIterations = 2048;
+    pbe->cbSalt = 16;
+    BCryptGenRandom(nullptr, params + sizeof(CRYPT_PKCS12_PBE_PARAMS), 16, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    char oid[] = szOID_PKCS_12_pbeWithSHA1And3KeyTripleDES;
+    std::wstring pw = secret;
+    NCryptBuffer b[3];
+    b[0].BufferType = NCRYPTBUFFER_PKCS_SECRET;
+    b[0].cbBuffer = (ULONG)((pw.size() + 1) * sizeof(wchar_t));
+    b[0].pvBuffer = &pw[0];
+    b[1].BufferType = NCRYPTBUFFER_PKCS_ALG_OID;
+    b[1].cbBuffer = (ULONG)sizeof(oid);
+    b[1].pvBuffer = oid;
+    b[2].BufferType = NCRYPTBUFFER_PKCS_ALG_PARAM;
+    b[2].cbBuffer = (ULONG)sizeof(params);
+    b[2].pvBuffer = params;
+    NCryptBufferDesc desc = { NCRYPTBUFFER_VERSION, 3, b };
+    NCRYPT_KEY_HANDLE key = (NCRYPT_KEY_HANDLE)k;
+    DWORD n = 0;
+    SECURITY_STATUS st = NCryptExportKey(key, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, &desc, nullptr, 0, &n, 0);
+    if (st == ERROR_SUCCESS)
+    {
+        out.assign(n, '\0');
+        st = NCryptExportKey(key, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, &desc, (PBYTE)&out[0], n, &n, 0);
+        out.resize(st == ERROR_SUCCESS ? n : 0);
+    }
+    if (mustFree)
+    {
+        NCryptFreeObject(key);
+    }
+    if (st != ERROR_SUCCESS)
+    {
+        why = "cannot read the private key: " + secText(st);
+        return false;
+    }
+    return true;
+}
 
 // The certificate and key in a file (PKCS#12 with its password, or PEM
 // with both), read by Windows; persist: for Schannel. False and why if
@@ -3046,29 +3259,65 @@ static bool winIdentity(const std::string &data, const char *password, bool pers
             why = "not a certificate file (PEM, DER or PKCS#12)";
             return false;
         }
-        id.store = importPkcs12(data, password, persist, why);
-        if (id.store == nullptr)
+        HCERTSTORE p12 = importPkcs12(data, password, persist, why);
+        if (p12 == nullptr)
         {
             return false;
         }
         bool any = false;
+        PCCERT_CONTEXT leaf = nullptr;
         PCCERT_CONTEXT x = nullptr;
-        while ((x = CertEnumCertificatesInStore(id.store, x)) != nullptr)
+        while ((x = CertEnumCertificatesInStore(p12, x)) != nullptr)
         {
             any = true;
             if (hasKey(x))
             {
-                id.cert = CertDuplicateCertificateContext(x);
+                leaf = CertDuplicateCertificateContext(x);
                 CertFreeCertificateContext(x);
                 break;
             }
         }
-        if (id.cert == nullptr)
+        if (leaf == nullptr)
         {
+            CertCloseStore(p12, 0);
             why = any ? "no private key in the file" : "no certificate in the PKCS#12 file";
             return false;
         }
-        return true;
+        if (!persist)
+        {
+            id.store = p12;                     // the key in memory: enough to check it
+            id.cert = leaf;
+            return true;
+        }
+        // For Schannel: the key, exported (encrypted with a password used
+        // once), persisted under our name; the certificates copied to a store
+        // of ours, as for PEM. The file's own keys go with its store.
+        std::wstring secret = randomHex(16);
+        std::string pkcs8;
+        bool ok = exportKey(leaf, secret, pkcs8, why);
+        if (ok)
+        {
+            id.store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr);
+            CertAddEncodedCertificateToStore(id.store, X509_ASN_ENCODING, leaf->pbCertEncoded, leaf->cbCertEncoded,
+                                             CERT_STORE_ADD_ALWAYS, &id.cert);
+            x = nullptr;                        // (freed above: a new enumeration, from the start)
+            while ((x = CertEnumCertificatesInStore(p12, x)) != nullptr)
+            {
+                if (!CertCompareCertificate(X509_ASN_ENCODING, x->pCertInfo, leaf->pCertInfo))
+                {
+                    CertAddEncodedCertificateToStore(id.store, X509_ASN_ENCODING, x->pbCertEncoded, x->cbCertEncoded,
+                                                     CERT_STORE_ADD_ALWAYS, nullptr);
+                }
+            }
+            if (id.cert == nullptr)
+            {
+                why = "Windows cannot use the certificate";
+                ok = false;
+            }
+        }
+        CertFreeCertificateContext(leaf);
+        CertCloseStore(p12, 0);
+        return ok && attachKey(id, pkcs8, secret.c_str(), true, why);
     }
     // PEM: the first certificate is the server's, the others its chain;
     // the first key is its key.
@@ -3115,77 +3364,8 @@ static bool winIdentity(const std::string &data, const char *password, bool pers
         why = "cannot read the private key";
         return false;
     }
-    NCRYPT_PROV_HANDLE prov = 0;
-    SECURITY_STATUS st = NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0);
-    if (st != ERROR_SUCCESS)
-    {
-        why = "cannot read the private key: " + secText(st);
-        return false;
-    }
-    // A persisted key needs a name: a new one each time.
-    unsigned char rnd[16];
-    BCryptGenRandom(nullptr, rnd, sizeof(rnd), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-    wchar_t name[64];
-    swprintf(name, 64, L"oosockets-");
-    for (int i = 0; i < 16; i++)
-    {
-        swprintf(name + 10 + 2 * i, 3, L"%02x", rnd[i]);
-    }
     std::wstring pw = wide(password);
-    NCryptBuffer buffers[2];
-    ULONG nb = 0;
-    if (persist)
-    {
-        buffers[nb].BufferType = NCRYPTBUFFER_PKCS_KEY_NAME;
-        buffers[nb].cbBuffer = (ULONG)((wcslen(name) + 1) * sizeof(wchar_t));
-        buffers[nb].pvBuffer = name;
-        nb++;
-    }
-    if (keyBlock->label == "ENCRYPTED PRIVATE KEY")
-    {
-        buffers[nb].BufferType = NCRYPTBUFFER_PKCS_SECRET;
-        buffers[nb].cbBuffer = (ULONG)((pw.size() + 1) * sizeof(wchar_t));
-        buffers[nb].pvBuffer = &pw[0];
-        nb++;
-    }
-    NCryptBufferDesc desc = { NCRYPTBUFFER_VERSION, nb, buffers };
-    st = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, nb > 0 ? &desc : nullptr, &id.key,
-                         (PBYTE)pkcs8.data(), (DWORD)pkcs8.size(), persist ? NCRYPT_DO_NOT_FINALIZE_FLAG : 0);
-    if (st == ERROR_SUCCESS && persist)
-    {
-        st = NCryptFinalizeKey(id.key, 0);
-    }
-    NCryptFreeObject(prov);
-    if (st != ERROR_SUCCESS)
-    {
-        if (id.key != 0)
-        {
-            NCryptFreeObject(id.key);      // not finalized: nothing was persisted
-            id.key = 0;
-        }
-        why = "cannot read the private key: " + secText(st);
-        return false;
-    }
-    std::string mine = publicBlob(id.key);
-    if (mine.empty() || mine != publicBlob(id.cert))
-    {
-        why = "the private key is not the certificate's";
-        return false;
-    }
-    if (persist)
-    {
-        CRYPT_KEY_PROV_INFO info;
-        memset(&info, 0, sizeof(info));
-        info.pwszContainerName = name;
-        info.pwszProvName = (LPWSTR)MS_KEY_STORAGE_PROVIDER;
-        if (!CertSetCertificateContextProperty(id.cert, CERT_KEY_PROV_INFO_PROP_ID, 0, &info))
-        {
-            why = "Windows cannot use the private key: " +
-                  secText((SECURITY_STATUS)HRESULT_FROM_WIN32(GetLastError()));
-            return false;
-        }
-    }
-    return true;
+    return attachKey(id, pkcs8, keyBlock->label == "ENCRYPTED PRIVATE KEY" ? pw.c_str() : nullptr, persist, why);
 }
 
 // A server's credentials, from the certificate and key in file (PKCS#12
@@ -3247,10 +3427,24 @@ static bool isTls(Sock *s)
     return s->ssl != nullptr;
 }
 
-// Puts the Sock in TLS: a new SSL over our BIO.
-static void attachSsl(Sock *s, SSL_CTX *ctx)
+// Puts the Sock in TLS: a new SSL over our BIO. False (and ctx freed) if
+// TLS has started on it meanwhile: two startTLS at once, which sockets.cls's
+// guarded methods prevent, cannot both attach (checked under the lock).
+static bool attachSsl(Sock *s, SSL_CTX *ctx)
 {
     std::lock_guard<std::mutex> guard(s->mu);
+#ifdef _WIN32
+    if (s->sch != nullptr)
+    {
+        SSL_CTX_free(ctx);
+        return false;
+    }
+#endif
+    if (s->ssl != nullptr)
+    {
+        SSL_CTX_free(ctx);
+        return false;
+    }
     s->ctx = ctx;
     s->ssl = SSL_new(ctx);
     BIO *bio = BIO_new(sockBioMethod());
@@ -3258,6 +3452,7 @@ static void attachSsl(Sock *s, SSL_CTX *ctx)
     SSL_set_bio(s->ssl, bio, bio);
     SSL_set_app_data(s->ssl, static_cast<PeerCheck *>(s));
     setBlocking(s->fd, false);
+    return true;
 }
 
 // A client's context: trusted, an array of DER certificates (only these,
@@ -3348,11 +3543,14 @@ RexxMethod5(RexxArrayObject, socket_starttls, CSELF, cself, CSTRING, host, RexxA
         return opensslMissing(context);
     }
     SSL_CTX *ctx = clientContext(context, TLS_client_method(), minVersionOf(minVersion), trusted);
-    s->host = host;
-    s->trust = TrustError();
-    attachSsl(s, ctx);
+    if (!attachSsl(s, ctx))
+    {
+        return errorArray(context, "TLS has already started on this connection", "", 0);
+    }
     {
         std::lock_guard<std::mutex> guard(s->mu);
+        s->host = host;
+        s->trust = TrustError();
         setPeerName(s->ssl, s->host);
     }
     SSL_set_connect_state(s->ssl);
@@ -3489,9 +3687,13 @@ RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
         {
             return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
         }
-        s->trust = TrustError();
         {
             std::lock_guard<std::mutex> guard(s->mu);
+            if (s->sch != nullptr || s->ssl != nullptr)
+            {
+                return errorArray(context, "TLS has already started on this connection", "", 0);
+            }
+            s->trust = TrustError();
             s->sch = schServer(cred);
             setBlocking(s->fd, false);
         }
@@ -3507,8 +3709,11 @@ RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
     {
         return errorArray(context, "cannot use " + std::string(file) + ": " + why, "", 0);
     }
+    if (!attachSsl(s, ctx))
+    {
+        return errorArray(context, "TLS has already started on this connection", "", 0);
+    }
     s->trust = TrustError();
-    attachSsl(s, ctx);
     SSL_set_accept_state(s->ssl);
     return handshakeStep(context, s, timeout);
 }
@@ -4267,8 +4472,10 @@ RexxMethod2(RexxArrayObject, server_accept, CSELF, cself, double, timeout)
             {
                 // TLSServerSocket: the handshake happens on the first read
                 // or write, in whatever activity serves this client.
-                attachSsl(c, ctx);
-                SSL_set_accept_state(c->ssl);
+                if (attachSsl(c, ctx))
+                {
+                    SSL_set_accept_state(c->ssl);
+                }
             }
             return statusResult(context, "OK", context->NewPointer(c));
         }
@@ -5909,6 +6116,39 @@ static void schDtlsStep(DtlsEndpoint *ep, DtlsConn *c, std::string *d)
     x->resendAt = Clock::now() + std::chrono::milliseconds(x->resendMs);
 }
 
+// Once connected, the records of the datagram d one by one: DecryptMessage
+// takes only the first record of what it is given (the v9 review), and a
+// peer may put several in one datagram (RFC 6347, 4.1.1). Records of data
+// and alerts are decrypted each on its own; from a handshake record on
+// (the server's last flight again), the rest goes as it is. A record cut
+// short ends the datagram: the rest is dropped, as DTLS does.
+static void schDtlsRecord(DtlsEndpoint *ep, DtlsConn *c, std::string d);
+
+static void schDtlsRecords(DtlsEndpoint *ep, DtlsConn *c, const std::string &d)
+{
+    const unsigned char *p = (const unsigned char *)d.data();
+    size_t at = 0;
+    while (at < d.size() && c->state == DtlsConn::OPEN)
+    {
+        size_t len = at + 13 <= d.size() ? getN(p + at + 11, 2) : 0;
+        if (at + 13 > d.size() || at + 13 + len > d.size())
+        {
+            if (at == 0)
+            {
+                schDtlsRecord(ep, c, d);       // not a record: as before (dropped)
+            }
+            return;
+        }
+        if (p[at] != 23 && p[at] != 21)        // not application data, not an alert
+        {
+            schDtlsRecord(ep, c, d.substr(at));
+            return;
+        }
+        schDtlsRecord(ep, c, d.substr(at, 13 + len));
+        at += 13 + len;
+    }
+}
+
 // What arrived for the client, by Schannel: the handshake goes on, or the
 // data is kept for receive. A datagram that does not decrypt is dropped,
 // as DTLS does.
@@ -5931,6 +6171,16 @@ static void schDtlsDrive(DtlsEndpoint *ep, DtlsConn *c)
             schDtlsStep(ep, c, &d);
             continue;
         }
+        schDtlsRecords(ep, c, d);
+    }
+}
+
+// One record once connected (or, from a handshake record on, the rest of
+// the datagram).
+static void schDtlsRecord(DtlsEndpoint *ep, DtlsConn *c, std::string d)
+{
+    Sch *x = c->sch;
+    {
         bool handshake = !d.empty() && d[0] == 22;
         SecBuffer b[4] = { { (unsigned long)d.size(), SECBUFFER_DATA, d.empty() ? nullptr : &d[0] },
                            { 0, SECBUFFER_EMPTY, nullptr }, { 0, SECBUFFER_EMPTY, nullptr },

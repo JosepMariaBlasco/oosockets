@@ -113,7 +113,13 @@ jobs:
           OOSOCKETS_ONLINE: 1          # the TLS tests against real servers
         run: |
           if [ "$RUNNER_OS" = Windows ]; then
-            scripts/test.sh "$PWD/build/Release"
+            # the keys persisted for Schannel's servers: a dead process's
+            # swept, a live one's kept, none left by the tests
+            powershell -NoProfile -File scripts/windows-keys.ps1 plant
+            rc=0
+            scripts/test.sh "$PWD/build/Release" || rc=1
+            powershell -NoProfile -File scripts/windows-keys.ps1 check || rc=1
+            exit $rc
           else
             scripts/test.sh "$PWD/build"
           fi

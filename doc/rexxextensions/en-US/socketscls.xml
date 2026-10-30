@@ -77,7 +77,15 @@ are loaded only when OpenSSL is needed; they belong next to
 certificate files included (Windows reads them), and the DTLS server raises
 a <literal>SYNTAX</literal> condition saying what is missing.  Schannel&apos;s
 DTLS client cannot send DTLS&apos;s closing message, so a server is not told
-when a <classname>DTLSSocket</classname> on Windows closes.  On Linux the library uses the system&apos;s OpenSSL.  On macOS,
+when a <classname>DTLSSocket</classname> on Windows closes.  Over TLS 1.2,
+Schannel shows the server&apos;s certificate only once the handshake is over,
+so a server whose certificate is refused sees its handshake made and then
+the refusal; nothing is sent to it.  A Schannel server needs its private
+key in the user&apos;s key store while its credentials are made: it is put
+there under the name
+<literal>oosockets-</literal><replaceable>processid</replaceable><literal>-</literal><replaceable>random</replaceable>
+and deleted right after; one left by a process killed in between is deleted
+by the next ooSockets server.  On Linux the library uses the system&apos;s OpenSSL.  On macOS,
 which has none that fits, it uses the OpenSSL 3 of Homebrew
 (<command>brew install openssl@3</command>) or MacPorts
 (<command>sudo port install openssl3</command>); without it, the plain

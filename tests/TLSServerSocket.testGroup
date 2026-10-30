@@ -182,11 +182,13 @@ inUse:
 -- RSA (PKCS#1), encrypted PKCS#8; each server's certificate self-signed,
 -- trusted by the client as it is.
 ::method test_key_formats
-  do f over .array~of("ec.pem", "pkcs1.pem", "encrypted.pem")
+  do f over .array~of("ec.pem", "pkcs1.pem", "encrypted.pem", "ec.p12")
     password = ""
-    if f == "encrypted.pem" then password = "test"
+    if f == "encrypted.pem" | f == "ec.p12" then password = "test"
     srv = .TLSServerSocket~new(0, serverOptions(f, password), "127.0.0.1")
-    opts = .TLSOptions~new~trust(certFile(f))
+    trusted = f
+    if f == "ec.p12" then trusted = "ec.pem"
+    opts = .TLSOptions~new~trust(certFile(trusted))
     msg = .Client~new~start("echoOnce", srv~localPort, f, opts)
     c = srv~accept
     c~readTimeout = 10

@@ -146,5 +146,46 @@ for cs in ${DTLSS_CRED:-sch sch0 legacy}; do
   done
 done
 fi
+if on tls12; then
+echo; echo "######## TLS 1.2 client: is the server's certificate known before our second flight?"
+for v in -tls1_2 -tls1_3; do
+  $O s_server -accept 9450 $v -cert c4.pem -key k4.pem -quiet -naccept 1 > /dev/null 2>&1 &
+  sleep 2; echo "---- s_server $v"; WHEN_CERT=1 lim $P pin localhost 9450 c4.pem; wait
+done
+fi
+
+if on pha; then
+echo; echo "######## TLS 1.3 post-handshake client authentication: s_server asks for a certificate (its 'c')"
+(sleep 3; echo "line one"; sleep 1; echo c; sleep 3; echo "line two"; sleep 4) |
+  $O s_server -accept 9460 -tls1_3 -cert c4.pem -key k4.pem -naccept 1 > ss.log 2>&1 &
+sleep 2; RECV_AGAIN=1 T=20 lim $P pin localhost 9460 c4.pem; wait
+echo "  s_server said:"; grep -v -E "^-----|^Shared|^Supported|^Signature|^Peer|^[A-Za-z0-9+/=]{40,}$" ss.log | sed 's/^/    /' | head -14
+echo "---- the same, s_server asking with -verify 1 (a certificate in the handshake)"
+(sleep 3; echo "line one"; sleep 4) |
+  $O s_server -accept 9461 -tls1_3 -verify 1 -cert c4.pem -key k4.pem -naccept 1 > ss.log 2>&1 &
+sleep 2; T=20 lim $P pin localhost 9461 c4.pem; wait
+echo "  s_server said:"; grep -v -E "^-----|^Shared|^Supported|^Signature|^Peer|^[A-Za-z0-9+/=]{40,}$" ss.log | sed 's/^/    /' | head -8
+fi
+
+if on keys; then
+echo; echo "######## a PKCS#12 file's private keys (keys.c)"
+K=pb/Release/keys.exe
+$O req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout kec.pem -out cec.pem -days 30 \
+   -subj /CN=localhost -addext subjectAltName=DNS:localhost 2>/dev/null
+$O pkcs12 -export -in cec.pem -inkey kec.pem -out ksec.p12 -passout pass:secret 2>/dev/null
+$O pkcs12 -export -nocerts -inkey k2.pem -out konly.p12 -passout pass:secret 2>/dev/null
+$O pkcs12 -export -in c2.pem -inkey k2.pem -name oosockets-probe-victim \
+   -CSP "Microsoft Software Key Storage Provider" -out named.p12 -passout pass:secret 2>/dev/null
+echo "---- orphan: a key and no certificate"; lim $K orphan konly.p12 secret
+echo "---- orphan: keytool's PKCS#12 (a certificate and its key)"; lim $K orphan ks4.p12 123456
+echo "---- reuse: friendly name and CSP name are the existing key's name"; lim $K reuse named.p12 secret oosockets-probe-victim
+echo "---- reuse: the same, PKCS12_ALLOW_OVERWRITE_KEY"; OVERWRITE=1 lim $K reuse named.p12 secret oosockets-probe-victim
+echo "---- reuse: keytool's PKCS#12 (friendly name mysrv), a key called mysrv exists"; lim $K reuse ks4.p12 123456 mysrv
+for f in "ks4.p12 123456" "ks2.p12 secret" "ksec.p12 secret"; do
+  echo "---- export: $f"; lim $K export $f
+done
+echo "---- list: keys called oosockets-* left by now (then deleted)"; DELETE=1 lim $K list oosockets-
+fi
+
 echo; echo "key files in the profile at the end: $(keys)"
 kill $(jobs -p) 2>/dev/null; true

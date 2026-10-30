@@ -369,6 +369,7 @@ static SECURITY_STATUS handshake(tls *t, CredHandle *cred, const wchar_t *target
            ISC_REQ_EXTENDED_ERROR | ISC_REQ_ALLOCATE_MEMORY | ISC_REQ_STREAM |
            ISC_REQ_USE_SUPPLIED_CREDS);
     SECURITY_STATUS st = SEC_I_CONTINUE_NEEDED;
+    int asked = 0;
     for (;;) {
         if (!(first && !t->server)) {            /* the client's first call has no input */
             if (t->inlen == 0 || st == SEC_E_INCOMPLETE_MESSAGE) {
@@ -390,12 +391,27 @@ static SECURITY_STATUS handshake(tls *t, CredHandle *cred, const wchar_t *target
             st = InitializeSecurityContextW(cred, first ? NULL : &t->ctx, (SEC_WCHAR *)target, flags, 0, 0,
                                             first ? NULL : &ind, 0, &t->ctx, &outd, &attrs, &exp);
         first = 0;
+        if (getenv("WHEN_CERT") && !t->server) {
+            /* is the server's certificate known before our next flight goes? */
+            PCCERT_CONTEXT leaf = NULL;
+            SECURITY_STATUS q = QueryContextAttributesW(&t->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &leaf);
+            printf("  step 0x%08lX: %lu bytes to send; the server's certificate %s\n", (unsigned long)st,
+                   (unsigned long)(outb[0].pvBuffer ? outb[0].cbBuffer : 0),
+                   q == SEC_E_OK && leaf ? "KNOWN" : "not known yet");
+            if (leaf) CertFreeCertificateContext(leaf);
+        }
         if (outb[0].cbBuffer && outb[0].pvBuffer) {
             send_all(t->fd, outb[0].pvBuffer, outb[0].cbBuffer);
         }
         if (outb[0].pvBuffer) FreeContextBuffer(outb[0].pvBuffer);
         if (outb[1].pvBuffer) FreeContextBuffer(outb[1].pvBuffer);
         if (st == SEC_E_INCOMPLETE_MESSAGE) continue;
+        if (st == SEC_I_INCOMPLETE_CREDENTIALS) {
+            /* the same input again, with no certificate (as ooSockets does) */
+            printf("  the server asks for a client certificate (%s)\n", resume ? "after the handshake" : "in the handshake");
+            if (++asked > 4) return st;
+            continue;
+        }
         /* what was not used stays for the next call (or for the data) */
         if (inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer) {
             memmove(t->in, t->in + (t->inlen - inb[1].cbBuffer), inb[1].cbBuffer);
@@ -405,7 +421,6 @@ static SECURITY_STATUS handshake(tls *t, CredHandle *cred, const wchar_t *target
             QueryContextAttributesW(&t->ctx, SECPKG_ATTR_STREAM_SIZES, &t->sizes);
             return st;
         }
-        if (st == SEC_I_INCOMPLETE_CREDENTIALS) { printf("  the server asks for a client certificate\n"); continue; }
         if (st != SEC_I_CONTINUE_NEEDED) return st;
     }
 }
@@ -509,6 +524,12 @@ static int do_client(const char *host, const char *port, int min13, const char *
     tls_send(&t, req, (int)strlen(req));
     char buf[4096]; int n = tls_recv(&t, buf, sizeof buf - 1, &cred, whost);
     if (n > 0) { buf[n] = 0; char *nl = strpbrk(buf, "\r\n"); if (nl) *nl = 0; printf("  received: %s\n", buf); }
+    for (int i = 0; getenv("RECV_AGAIN") && n > 0 && i < 3; i++) {
+        /* more lines (after whatever the server does in between) */
+        n = tls_recv(&t, buf, sizeof buf - 1, &cred, whost);
+        if (n > 0) { buf[n] = 0; char *nl = strpbrk(buf, "\r\n"); if (nl) *nl = 0; printf("  received: %s\n", buf); }
+        else printf("  receive: %d\n", n);
+    }
     tls_close(&t, &cred);
     return 0;
 }

@@ -19,6 +19,8 @@
 #   encrypted.pem     pkcs1.pem's certificate, its key as encrypted PKCS#8
 #                     (password "test"; PBES2, AES-256, OpenSSL 3's default)
 # (The last three: the key formats Windows reads by itself.)
+#   ec.p12            ec.pem as PKCS#12 (password "test"): an EC key through
+#                     Windows' PKCS#12 import
 set -euo pipefail
 cd "$(dirname "$0")/../tests"
 rm -rf certs; mkdir certs; cd certs
@@ -86,6 +88,7 @@ self() {
 }
 self ec -newkey ec -pkeyopt ec_paramgen_curve:P-256
 { cat "$w/ec.crt"; openssl ec -in "$w/ec.key" 2>/dev/null; } > ec.pem
+openssl pkcs12 -export -in ec.pem -out ec.p12 -passout pass:test
 self rsa -newkey rsa:2048
 { cat "$w/rsa.crt"; openssl rsa -in "$w/rsa.key" -traditional 2>/dev/null; } > pkcs1.pem
 { cat "$w/rsa.crt"; openssl pkcs8 -topk8 -in "$w/rsa.key" -v2 aes-256-cbc -passout pass:test; } > encrypted.pem

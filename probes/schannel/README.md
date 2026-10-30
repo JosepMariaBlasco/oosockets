@@ -65,6 +65,40 @@ So a Schannel server needs its key persisted at least while the
 credentials are made; deleting it right after works. A program killed in
 between would leave a key file behind.
 
+## Measured 30/10/2026 (ooSockets v10's open points)
+
+Run 41039862862, `windows-2022` and `windows-2025`, the same results.
+
+**When a TLS 1.2 client knows the server's certificate** (`tls12`): only
+when the handshake is over (`SEC_E_OK`), after our second flight
+(ClientKeyExchange, ChangeCipherSpec, Finished) has gone; before, the
+context gives no certificate. With TLS 1.3 it is known before our
+Finished. So a TLS 1.2 server that ooSockets refuses sees its handshake
+made, then our alert; no data is ever sent.
+
+**TLS 1.3 post-handshake client authentication** (`pha`): `s_server`'s `c`
+sends a CertificateRequest after the handshake; Schannel takes it in
+`InitializeSecurityContext` (after `SEC_I_RENEGOTIATE`) with `SEC_E_OK`,
+answers without a certificate, and the connection goes on (the next line
+arrives). Nothing fails.
+
+**A PKCS#12 file's keys** (`keys`, `keys.c`):
+
+| What | Result |
+|---|---|
+| a file with a key and no certificate, imported persisted | the key is persisted (a GUID name) and nothing deletes it: left behind |
+| a persisted import names the key after the file's friendly name | keytool's file: the key is called `mysrv` |
+| that name taken by an existing key | the import picks a GUID name; the existing key unchanged, and deleting the certificate's key leaves it |
+| the same with `PKCS12_ALLOW_OVERWRITE_KEY` | the existing key REPLACED, then deleted with the certificate's |
+| imported not persisted (`PKCS12_NO_PERSIST_KEY`, `PKCS12_ALWAYS_CNG_KSP`, `CRYPT_EXPORTABLE`) | no key persisted; export policy "allow export" only |
+| its key exported as plain PKCS#8, or as CNG's own blob | `0x80090029` not supported |
+| exported as PKCS#8 encrypted (PKCS#12's 3DES, a password) | works (RSA, keytool's and OpenSSL 3's files; EC P-256) |
+| that imported again as a named persisted key, then server credentials | works |
+
+So the server's key never needs to be persisted by the import: imported in
+memory, exported encrypted and imported under a name of ours, it is the
+only key that touches the disk.
+
 ## STARTTLS: works
 
 Both ends Schannel, on sockets that first exchanged a line in clear:

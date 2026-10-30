@@ -154,7 +154,14 @@ s~close
   the environment variable **`OOSOCKETS_TLS`** to `openssl` (Windows still
   decides trust). One difference: Schannel's
   DTLS client cannot send DTLS's closing message (`close_notify`), so a
-  server is not told when a Windows `DTLSSocket` closes.
+  server is not told when a Windows `DTLSSocket` closes. Another: over TLS
+  1.2, Schannel shows the server's certificate only once the handshake is
+  over, so a server whose certificate is refused sees its handshake made
+  and then the refusal (an alert); nothing is ever sent to it. A Schannel
+  server needs its private key in the user's key store while its
+  credentials are made: it is put there under a name `oosockets-<process
+  id>-<random>` and deleted right after; one left by a process killed in
+  between is deleted by the next ooSockets server.
 
 ### A TLS server
 

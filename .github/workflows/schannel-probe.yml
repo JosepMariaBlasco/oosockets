@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: 'Sections to run (probes/schannel/run.sh): all, or some of clients flaky pin server pem starttls dtlsc mtu dtlss'
+        description: 'Sections to run (probes/schannel/run.sh): all, or some of clients flaky pin server pem starttls dtlsc mtu dtlss tls12 pha keys'
         default: all
   push:
     paths:
@@ -32,6 +32,6 @@ jobs:
       - run: probes/schannel/run.sh
         env:
           # a push runs the sections being worked on; by hand, what is asked
-          ONLY: ${{ inputs.only || 'dtlss' }}
+          ONLY: ${{ inputs.only || 'tls12 pha keys' }}
           DTLSS_CRED: legacy
           DTLSS_MODES: 1 2 3
