@@ -61,6 +61,5 @@ mv socket_*.svg serverSocket_*.svg tlsSocket_*.svg tlsServerSocket_*.svg tlsOpti
 
 ## Keeping it current
 
-The chapter describes the classes as they are. One point is still open
-with Rony G. Flatscher: whether every error of the TLS and DTLS classes
-says `TLS error:`, also when the socket underneath failed.
+The chapter describes the classes as they are, and changes with them, in
+the same commit.
