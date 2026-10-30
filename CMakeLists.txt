@@ -41,6 +41,20 @@ find_package(OpenSSL 3.0 REQUIRED)
 target_include_directories(oosockets SYSTEM PRIVATE "${OPENSSL_INCLUDE_DIR}")
 target_link_libraries(oosockets PRIVATE ${CMAKE_DL_LIBS})
 
+# No rpath to the build machine's ooRexx (CMake's default build rpath; on
+# Linux it also ended in an empty entry, the current directory). Linux: none
+# (the library needs nothing of ooRexx's at load time). macOS: as ooRexx's
+# own extensions (librxsock: the directories next to the rexx that runs),
+# and the library's own directory, for a host that is not rexx when the
+# library is in ooRexx's lib/ (INSTALL.txt).
+if(APPLE)
+  set_target_properties(oosockets PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "@executable_path/../lib;@executable_path/../Libraries;@loader_path")
+elseif(NOT WIN32)
+  set_target_properties(oosockets PROPERTIES SKIP_BUILD_RPATH TRUE)
+endif()
+
 if(APPLE)
   # macOS decides trust (SecTrustEvaluateWithError)
   target_link_libraries(oosockets PRIVATE "-framework Security" "-framework CoreFoundation")
