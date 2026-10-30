@@ -3,7 +3,7 @@
 # named after it, if any (scripts/test.sh build DTLSSocket).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-build="${1:-$root/build}"
+build="$(cd "${1:-$root/build}" && pwd)"
 [ -f "$root/tests/framework/ooTest.frm" ] || "$root/scripts/get-oorexxunit.sh"
 # Windows (Git Bash): rexx needs ';' and native paths.
 if command -v cygpath >/dev/null 2>&1; then

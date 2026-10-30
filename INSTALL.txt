@@ -27,10 +27,12 @@ What each zip needs:
 
   Windows: 64-bit. TLS is Windows' own (Schannel). OpenSSL 3, in the
            two DLLs of the zip (licence: OpenSSL-LICENSE.txt), is
-           loaded only for the DTLS server and with OOSOCKETS_TLS=openssl
+           loaded only for DTLS and with OOSOCKETS_TLS=openssl
            (environment variable: OpenSSL for everything). Without the
-           DLLs everything else works. Another OpenSSL 3: its directory
-           (the one with libssl-3-x64.dll) in OOSOCKETS_OPENSSL.
+           DLLs everything works but the DTLS server, and the DTLS client
+           is then Windows' own, which cannot tell a server it closes.
+           Another OpenSSL 3: its directory (the one with
+           libssl-3-x64.dll) in OOSOCKETS_OPENSSL.
   macOS:   macOS 11 or later on Apple Silicon, 10.14 or later on Intel.
            For TLS and DTLS, OpenSSL 3 from Homebrew or MacPorts, which
            keep it up to date:

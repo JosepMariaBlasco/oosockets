@@ -641,7 +641,7 @@ static void closeSock(Sock *s)
 /* TLS                                                                        */
 /*                                                                            */
 /* OpenSSL does the TLS (loaded when first used, ossl.h; on Windows only for  */
-/* the DTLS server and OOSOCKETS_TLS=openssl: see "Schannel" below). Who      */
+/* DTLS and OOSOCKETS_TLS=openssl: see "Schannel" below). Who                 */
 /* decides whether the server's certificate is good:                          */
 /*   - when the program trusts certificates explicitly (TLSOptions~trust),    */
 /*     OpenSSL, with those as its only anchors, and the host name;            */
@@ -859,8 +859,8 @@ static TlsOutcome tlsRun(Sock *s, bool hasDeadline, Clock::time_point deadline, 
 // OOSOCKETS_OPENSSL's directory if it is set; else the system's (Linux), the
 // OpenSSL 3 of Homebrew or MacPorts (macOS; Rony, 29/10/2026: the package
 // manager keeps it current, ooSockets ships none), or the DLLs next to
-// oosockets.dll (Windows, where only the DTLS server and OOSOCKETS_TLS=openssl
-// need it). Without it the plain sockets work, and every way into OpenSSL's
+// oosockets.dll (Windows, where only DTLS and OOSOCKETS_TLS=openssl need
+// it). Without it the plain sockets work, and every way into OpenSSL's
 // TLS or DTLS asks this first.
 static bool opensslHere()
 {
@@ -1608,10 +1608,12 @@ static RexxArrayObject handshakeStep(RexxMethodContext *context, Sock *s, double
 /* Schannel                                                                   */
 /*                                                                            */
 /* Windows' own TLS, which Windows Update keeps current (Rony, 27 and         */
-/* 29/10/2026), for TLS's client and server and DTLS's client (DTLS's server  */
-/* stays OpenSSL's). Measured in probes/schannel/. OOSOCKETS_TLS=openssl      */
-/* makes Windows use OpenSSL instead (Rony, 29/10/2026), Windows still        */
-/* deciding trust.                                                            */
+/* 29/10/2026), for TLS's client and server. DTLS is OpenSSL's: the server    */
+/* always (Schannel's cannot be made to work), the client when OpenSSL is     */
+/* there (Rony, 30/10/2026: Schannel's cannot send close_notify), else        */
+/* Schannel's. Measured in probes/schannel/. OOSOCKETS_TLS=openssl makes      */
+/* Windows use OpenSSL for everything (Rony, 29/10/2026), =schannel           */
+/* Schannel for the DTLS client too; Windows always decides trust.            */
 /*                                                                            */
 /* The server's certificate is validated by hand (SCH_CRED_MANUAL_CRED_       */
 /* VALIDATION) as soon as Schannel shows it, before our next flight goes if   */

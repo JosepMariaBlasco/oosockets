@@ -66,18 +66,21 @@ A program uses it with the directive</para>
 </programlisting>
 
 <para>TLS and DTLS are provided by the system&apos;s own TLS or by OpenSSL 3,
-kept up to date by the system.  On Windows, everything but the DTLS
-server (<classname>DTLSServerSocket</classname>) uses Schannel, Windows&apos;
-own TLS; setting the environment variable <envar>OOSOCKETS_TLS</envar> to
-<literal>openssl</literal> makes it use OpenSSL instead.  The DLLs of
-OpenSSL 3 (<filename>libssl-3-x64.dll</filename> and
+kept up to date by the system.  On Windows, TLS uses Schannel, Windows&apos;
+own TLS, and DTLS uses OpenSSL (Schannel&apos;s DTLS server cannot be made
+to work, and its DTLS client cannot send DTLS&apos;s closing message).  The
+DLLs of OpenSSL 3 (<filename>libssl-3-x64.dll</filename> and
 <filename>libcrypto-3-x64.dll</filename>) come with ooSockets on Windows and
 are loaded only when OpenSSL is needed; they belong next to
 <filename>oosockets.dll</filename>.  Without them everything else works,
-certificate files included (Windows reads them), and the DTLS server raises
-a <literal>SYNTAX</literal> condition saying what is missing.  Schannel&apos;s
-DTLS client cannot send DTLS&apos;s closing message, so a server is not told
-when a <classname>DTLSSocket</classname> on Windows closes.  Over TLS 1.2,
+certificate files included (Windows reads them), the DTLS server raises a
+<literal>SYNTAX</literal> condition saying what is missing, and the DTLS
+client uses Schannel, so a server is not told when a
+<classname>DTLSSocket</classname> on Windows closes.  Setting the
+environment variable <envar>OOSOCKETS_TLS</envar> to
+<literal>openssl</literal> makes Windows use OpenSSL for everything, and
+setting it to <literal>schannel</literal>, Schannel for everything it can,
+the DTLS client included.  Over TLS 1.2,
 Schannel shows the server&apos;s certificate only once the handshake is over,
 so a server whose certificate is refused sees its handshake made and then
 the refusal; nothing is sent to it.  A Schannel server needs its private
