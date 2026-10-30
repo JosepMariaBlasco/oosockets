@@ -52,8 +52,8 @@
  *   Windows: libssl-3-x64.dll next to oosockets.dll (the release ships it
  *            there); never by its bare name (the current directory and
  *            the PATH would be searched: a planted DLL). Windows needs it
- *            only for the DTLS server and for OOSOCKETS_TLS=openssl:
- *            everything else is Schannel's.
+ *            only for DTLS and for OOSOCKETS_TLS=openssl: TLS is
+ *            Schannel's (and the DTLS client too, without OpenSSL).
  *
  * Include it after OpenSSL's headers: from here on, each name in
  * OSSL_FUNCTIONS is a call through the table (OpenSSL's own macros, such

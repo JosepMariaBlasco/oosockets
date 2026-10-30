@@ -141,20 +141,22 @@ s~close
   `libssl`) in the environment variable **`OOSOCKETS_OPENSSL`**; ooSockets
   then uses that one and no other.
 - **On Windows**, TLS is Windows' own, **Schannel**, kept up to date by
-  Windows Update: `TLSSocket`, `TLSServerSocket`, `startTLS`,
-  `startTLSServer` and the DTLS client, `DTLSSocket`. Only the DTLS server
-  (`DTLSServerSocket`) uses OpenSSL, since Schannel's cannot be made to
-  work (`probes/schannel/`). The Windows zip has OpenSSL 3's DLLs
-  (`libssl-3-x64.dll`, `libcrypto-3-x64.dll`), loaded only when the DTLS
-  server (or `OOSOCKETS_TLS`, below) needs them: keep them next to
-  `oosockets.dll`. Without them everything else works, certificate files
-  included (Windows reads them itself), and the DTLS server raises `TLS
-  error: OpenSSL 3 not found; ...`. `OOSOCKETS_OPENSSL` names another
-  OpenSSL 3's directory, as elsewhere. To use OpenSSL for everything, set
-  the environment variable **`OOSOCKETS_TLS`** to `openssl` (Windows still
-  decides trust). One difference: Schannel's
-  DTLS client cannot send DTLS's closing message (`close_notify`), so a
-  server is not told when a Windows `DTLSSocket` closes. Another: over TLS
+  Windows Update: `TLSSocket`, `TLSServerSocket`, `startTLS` and
+  `startTLSServer`. DTLS is OpenSSL's: the server (`DTLSServerSocket`),
+  since Schannel's cannot be made to work, and the client (`DTLSSocket`),
+  since Schannel's cannot send DTLS's closing message (`close_notify`)
+  (`probes/schannel/`). The Windows zip has OpenSSL 3's DLLs
+  (`libssl-3-x64.dll`, `libcrypto-3-x64.dll`), loaded only when DTLS (or
+  `OOSOCKETS_TLS`, below) needs them: keep them next to `oosockets.dll`.
+  Without them everything else works, certificate files included (Windows
+  reads them itself), the DTLS server raises `TLS error: OpenSSL 3 not
+  found; ...`, and the DTLS client is Schannel's: it works, but a server is
+  not told when it closes. `OOSOCKETS_OPENSSL` names another OpenSSL 3's
+  directory, as elsewhere (a newer one, say, with a fix not yet in the
+  zip). The environment variable **`OOSOCKETS_TLS`** set to `openssl`
+  makes Windows use OpenSSL for everything, and set to `schannel`, Schannel
+  for everything it can (the DTLS client too); Windows still decides trust.
+  One difference: over TLS
   1.2, Schannel shows the server's certificate only once the handshake is
   over, so a server whose certificate is refused sees its handshake made
   and then the refusal (an alert); nothing is ever sent to it. A Schannel

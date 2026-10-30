@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Runs the tests against the build in build/ (or $1).
+# Runs the tests against the build in build/ (or $1); only the test groups
+# named after it, if any (scripts/test.sh build DTLSSocket).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-build="${1:-$root/build}"
+build="$(cd "${1:-$root/build}" && pwd)"
 [ -f "$root/tests/framework/ooTest.frm" ] || "$root/scripts/get-oorexxunit.sh"
 # Windows (Git Bash): rexx needs ';' and native paths.
 if command -v cygpath >/dev/null 2>&1; then
@@ -15,4 +16,4 @@ else
   export DYLD_LIBRARY_PATH="$build${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 fi
 cd "$root/tests"
-rexx run.rex
+rexx run.rex "${@:2}"

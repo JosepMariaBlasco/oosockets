@@ -63,6 +63,7 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <cctype>
 #include <cstdio>
 #include <cerrno>
 #include <chrono>
@@ -640,7 +641,7 @@ static void closeSock(Sock *s)
 /* TLS                                                                        */
 /*                                                                            */
 /* OpenSSL does the TLS (loaded when first used, ossl.h; on Windows only for  */
-/* the DTLS server and OOSOCKETS_TLS=openssl: see "Schannel" below). Who      */
+/* DTLS and OOSOCKETS_TLS=openssl: see "Schannel" below). Who                 */
 /* decides whether the server's certificate is good:                          */
 /*   - when the program trusts certificates explicitly (TLSOptions~trust),    */
 /*     OpenSSL, with those as its only anchors, and the host name;            */
@@ -858,8 +859,8 @@ static TlsOutcome tlsRun(Sock *s, bool hasDeadline, Clock::time_point deadline, 
 // OOSOCKETS_OPENSSL's directory if it is set; else the system's (Linux), the
 // OpenSSL 3 of Homebrew or MacPorts (macOS; Rony, 29/10/2026: the package
 // manager keeps it current, ooSockets ships none), or the DLLs next to
-// oosockets.dll (Windows, where only the DTLS server and OOSOCKETS_TLS=openssl
-// need it). Without it the plain sockets work, and every way into OpenSSL's
+// oosockets.dll (Windows, where only DTLS and OOSOCKETS_TLS=openssl need
+// it). Without it the plain sockets work, and every way into OpenSSL's
 // TLS or DTLS asks this first.
 static bool opensslHere()
 {
@@ -1607,10 +1608,12 @@ static RexxArrayObject handshakeStep(RexxMethodContext *context, Sock *s, double
 /* Schannel                                                                   */
 /*                                                                            */
 /* Windows' own TLS, which Windows Update keeps current (Rony, 27 and         */
-/* 29/10/2026), for TLS's client and server and DTLS's client (DTLS's server  */
-/* stays OpenSSL's). Measured in probes/schannel/. OOSOCKETS_TLS=openssl      */
-/* makes Windows use OpenSSL instead (Rony, 29/10/2026), Windows still        */
-/* deciding trust.                                                            */
+/* 29/10/2026), for TLS's client and server. DTLS is OpenSSL's: the server    */
+/* always (Schannel's cannot be made to work), the client when OpenSSL is     */
+/* there (Rony, 30/10/2026: Schannel's cannot send close_notify), else        */
+/* Schannel's. Measured in probes/schannel/. OOSOCKETS_TLS=openssl makes      */
+/* Windows use OpenSSL for everything (Rony, 29/10/2026), =schannel           */
+/* Schannel for the DTLS client too; Windows always decides trust.            */
 /*                                                                            */
 /* The server's certificate is validated by hand (SCH_CRED_MANUAL_CRED_       */
 /* VALIDATION) as soon as Schannel shows it, before our next flight goes if   */
@@ -1626,13 +1629,38 @@ static RexxArrayObject handshakeStep(RexxMethodContext *context, Sock *s, double
 /* to write; the waiting is done outside the lock, a slice at a time.         */
 /*----------------------------------------------------------------------------*/
 
-// Whether Windows does TLS with Schannel: yes, unless OOSOCKETS_TLS is
-// "openssl". Read each time a connection starts TLS.
-static bool useSchannel()
+// OOSOCKETS_TLS, lowercase ("" when not set). Read each time a connection
+// starts TLS.
+static std::string tlsChoice()
 {
     char buf[32] = "";
     DWORD n = GetEnvironmentVariableA("OOSOCKETS_TLS", buf, sizeof(buf));
-    return !(n > 0 && n < sizeof(buf) && _stricmp(buf, "openssl") == 0);
+    std::string v = n > 0 && n < sizeof(buf) ? buf : "";
+    for (auto &ch : v)
+    {
+        ch = (char)tolower((unsigned char)ch);
+    }
+    return v;
+}
+
+// Whether Windows does TLS with Schannel: yes, unless OOSOCKETS_TLS is
+// "openssl".
+static bool useSchannel()
+{
+    return tlsChoice() != "openssl";
+}
+
+// Whether DTLS's client is Schannel's: only when OpenSSL cannot be loaded
+// (Rony, 30/10/2026: Schannel's DTLS client cannot send close_notify), or
+// when OOSOCKETS_TLS is "schannel"; never when it is "openssl".
+static bool dtlsClientBySchannel()
+{
+    std::string v = tlsChoice();
+    if (v == "openssl")
+    {
+        return false;
+    }
+    return v == "schannel" || !opensslHere();
 }
 
 // Schannel's credentials, shared by every connection a TLSServerSocket
@@ -6764,7 +6792,7 @@ RexxMethod5(RexxArrayObject, dtls_connect, CSTRING, host, CSTRING, port, RexxArr
             CSTRING, minVersion, double, timeout)
 {
 #ifdef _WIN32
-    bool bySchannel = useSchannel();
+    bool bySchannel = dtlsClientBySchannel();
     if (bySchannel && strcmp(minVersion, "1.3") == 0)
     {
         return errorArray(context, "DTLS 1.3 is not supported (Schannel)", "", 0);
