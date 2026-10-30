@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Makes a release zip: the native library, sockets.cls, README, LICENSE
-# and INSTALL.txt, in a directory oosockets-<version>-<platform>/.
+# and INSTALL.txt, in a directory oosockets-<version>-<platform>/. On
+# Windows also OpenSSL's DLLs and their licence, if they are next to the
+# library (the release puts them there: Rony, 29/10/2026, separate DLLs).
 #   scripts/package.sh <directory with the built library> <platform> <outdir>
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,6 +16,9 @@ for f in liboosockets.so liboosockets.dylib oosockets.dll; do
   if [ -f "$libdir/$f" ]; then cp "$libdir/$f" "$stage/"; found=1; fi
 done
 [ "$found" = 1 ] || { echo "no library in $libdir" >&2; exit 1; }
+for f in "$libdir"/libssl-3*.dll "$libdir"/libcrypto-3*.dll "$libdir"/OpenSSL-LICENSE.txt; do
+  if [ -f "$f" ]; then cp "$f" "$stage/"; fi
+done
 cp "$root/src/sockets.cls" "$root/README.md" "$root/LICENSE" "$root/INSTALL.txt" "$stage/"
 out="$(cd "$out" && pwd)"
 rm -f "$out/$name.zip"

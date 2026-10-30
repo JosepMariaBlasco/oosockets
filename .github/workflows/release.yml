@@ -117,22 +117,29 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/vcpkg-cache
-          key: vcpkg-openssl-x64-windows-static-md-v2
+          key: vcpkg-openssl-x64-windows-v1
+      # OpenSSL: vcpkg's x64-windows DLLs, shipped next to oosockets.dll
+      # (Rony, 29/10/2026: separate DLLs), loaded only for the DTLS server
+      # and OOSOCKETS_TLS=openssl; everything else is Schannel's.
       - name: OpenSSL
         run: |
           mkdir -p "$RUNNER_TEMP/vcpkg-cache"
           export VCPKG_BINARY_SOURCES="clear;files,$(cygpath -w "$RUNNER_TEMP/vcpkg-cache"),readwrite"
-          "$VCPKG_INSTALLATION_ROOT/vcpkg" install openssl:x64-windows-static-md > vcpkg.log 2>&1 \
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install openssl:x64-windows > vcpkg.log 2>&1 \
             || { tail -40 vcpkg.log; exit 1; }
-          grep -i -m3 -E "openssl:x64-windows-static-md" vcpkg.log || true
+          grep -i -m3 -E "openssl:x64-windows" vcpkg.log || true
           tc="$(cygpath -m "$VCPKG_INSTALLATION_ROOT")/scripts/buildsystems/vcpkg.cmake"
-          echo "CMAKE_EXTRA=-DCMAKE_TOOLCHAIN_FILE=$tc -DVCPKG_TARGET_TRIPLET=x64-windows-static-md" >> "$GITHUB_ENV"
+          echo "CMAKE_EXTRA=-DCMAKE_TOOLCHAIN_FILE=$tc -DVCPKG_TARGET_TRIPLET=x64-windows" >> "$GITHUB_ENV"
+          echo "OPENSSL_DIR=$(cygpath -u "$VCPKG_INSTALLATION_ROOT")/installed/x64-windows" >> "$GITHUB_ENV"
       - name: Build
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME" $CMAKE_EXTRA
           cmake --build build --config Release
-          dumpbin=$(ls "/c/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/"*/bin/Hostx64/x64/dumpbin.exe | head -1)
-          "$dumpbin" //dependents build/Release/oosockets.dll | grep -i "\.dll"
+          scripts/check-unlinked.sh build/Release/oosockets.dll
+          cp "$OPENSSL_DIR"/bin/libssl-3-x64.dll "$OPENSSL_DIR"/bin/libcrypto-3-x64.dll build/Release/
+          cp "$OPENSSL_DIR"/share/openssl/copyright build/Release/OpenSSL-LICENSE.txt
+          grep -m1 -o '"version-string": *"[^"]*"\|"version": *"[^"]*"' \
+            "$VCPKG_INSTALLATION_ROOT"/ports/openssl/vcpkg.json || true
       - name: Package
         run: scripts/package.sh build/Release windows-x86_64 dist
       - uses: actions/upload-artifact@v4
@@ -197,7 +204,7 @@ jobs:
       - name: Test (installed as INSTALL.txt says)
         run: |
           if [ "$RUNNER_OS" = Windows ]; then
-            cp "$PKG"/oosockets.dll "$PKG"/sockets.cls "$OOREXX_HOME/bin/"
+            cp "$PKG"/oosockets.dll "$PKG"/sockets.cls "$PKG"/libssl-3-x64.dll "$PKG"/libcrypto-3-x64.dll "$OOREXX_HOME/bin/"
           else
             cp "$PKG"/liboosockets.* "$OOREXX_HOME/lib/"
             cp "$PKG"/sockets.cls "$OOREXX_HOME/bin/"
@@ -226,6 +233,7 @@ jobs:
             echo
             echo "Each zip has the native library, \`sockets.cls\`, the README, the licence and \`INSTALL.txt\`."
             echo "A beta, as ooRexx 5.3.0 is: needs ooRexx 5.3.0 beta (trunk r13329 or later); not ooRexx 5.2.0."
+            echo "Windows: TLS is Windows' own (Schannel); the zip has OpenSSL 3's DLLs (\`libssl-3-x64.dll\`, \`libcrypto-3-x64.dll\`, Apache License 2.0), used only by the DTLS server and with OOSOCKETS_TLS=openssl: keep them next to \`oosockets.dll\`."
             echo "macOS: TLS and DTLS need the OpenSSL 3 of Homebrew (\`brew install openssl@3\`) or MacPorts (\`sudo port install openssl3\`); ooSockets ships none. OOSOCKETS_OPENSSL can name the directory of any other."
             echo "Tested with ooRexx 5.3.0 beta r13329 and the newest beta build."
             echo

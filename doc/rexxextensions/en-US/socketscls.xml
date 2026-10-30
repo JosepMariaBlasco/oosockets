@@ -69,7 +69,13 @@ A program uses it with the directive</para>
 kept up to date by the system.  On Windows, everything but the DTLS
 server (<classname>DTLSServerSocket</classname>) uses Schannel, Windows&apos;
 own TLS; setting the environment variable <envar>OOSOCKETS_TLS</envar> to
-<literal>openssl</literal> makes it use OpenSSL instead.  Schannel&apos;s
+<literal>openssl</literal> makes it use OpenSSL instead.  The DLLs of
+OpenSSL 3 (<filename>libssl-3-x64.dll</filename> and
+<filename>libcrypto-3-x64.dll</filename>) come with ooSockets on Windows and
+are loaded only when OpenSSL is needed; they belong next to
+<filename>oosockets.dll</filename>.  Without them everything else works,
+certificate files included (Windows reads them), and the DTLS server raises
+a <literal>SYNTAX</literal> condition saying what is missing.  Schannel&apos;s
 DTLS client cannot send DTLS&apos;s closing message, so a server is not told
 when a <classname>DTLSSocket</classname> on Windows closes.  On Linux the library uses the system&apos;s OpenSSL.  On macOS,
 which has none that fits, it uses the OpenSSL 3 of Homebrew
@@ -77,7 +83,7 @@ which has none that fits, it uses the OpenSSL 3 of Homebrew
 (<command>sudo port install openssl3</command>); without it, the plain
 sockets work, and the TLS and DTLS classes raise a
 <literal>SYNTAX</literal> condition saying what to install.  OpenSSL is
-loaded the first time TLS is used; to use another OpenSSL 3, set the
+loaded the first time it is needed; to use another OpenSSL 3, set the
 environment variable <envar>OOSOCKETS_OPENSSL</envar> to its directory (the
 one with <filename>libssl</filename>), and the library uses that one and
 no other.  On every
@@ -1880,7 +1886,10 @@ server.p12: ...</literal>).</para>
  <varlistentry><term><emphasis role="italic">file</emphasis></term>
  <listitem><para>A PKCS#12 keystore (as Java&apos;s
  <command>keytool</command> makes them), or a PEM file with the certificate
- and its private key.</para></listitem></varlistentry>
+ and its private key (PKCS#8, encrypted or not; or RSA&apos;s PKCS#1 or an EC
+ key&apos;s SEC1, not encrypted: on Windows, a key encrypted in
+ OpenSSL&apos;s older way, with a <literal>Proc-Type</literal> header, is
+ refused; <command>openssl pkcs8 -topk8</command> converts it).</para></listitem></varlistentry>
  <varlistentry><term><emphasis role="italic">password</emphasis></term>
  <listitem><para>The password of the keystore or of the key.  The default
  is an empty string.</para></listitem></varlistentry>

@@ -133,7 +133,7 @@
 #include <openssl/pkcs12.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
-#include "ossl.h"                           // OpenSSL loaded when first used (not Windows)
+#include "ossl.h"                           // OpenSSL loaded when first used
 
 #ifdef __APPLE__
   #include <Security/Security.h>
@@ -639,8 +639,8 @@ static void closeSock(Sock *s)
 /*----------------------------------------------------------------------------*/
 /* TLS                                                                        */
 /*                                                                            */
-/* OpenSSL does the TLS (loaded when first used on Linux and macOS; linked   */
-/* on Windows, whose TLS client is Schannel's: see "Schannel" below). Who     */
+/* OpenSSL does the TLS (loaded when first used, ossl.h; on Windows only for  */
+/* the DTLS server and OOSOCKETS_TLS=openssl: see "Schannel" below). Who      */
 /* decides whether the server's certificate is good:                          */
 /*   - when the program trusts certificates explicitly (TLSOptions~trust),    */
 /*     OpenSSL, with those as its only anchors, and the host name;            */
@@ -854,29 +854,24 @@ static TlsOutcome tlsRun(Sock *s, bool hasDeadline, Clock::time_point deadline, 
 
 /* ---- is OpenSSL there? -------------------------------------------------- */
 
-// On Linux and macOS, OpenSSL is loaded the first time TLS is used (ossl.h):
-// from OOSOCKETS_OPENSSL's directory if it is set; else the system's (Linux)
-// or the OpenSSL 3 of Homebrew or MacPorts (macOS; Rony, 29/10/2026: the
-// package manager keeps it current, ooSockets ships none). Without it the
-// plain sockets work, and every way into TLS or DTLS asks this first.
-// Windows links it (to be replaced by Schannel).
+// OpenSSL is loaded the first time it is needed (ossl.h): from
+// OOSOCKETS_OPENSSL's directory if it is set; else the system's (Linux), the
+// OpenSSL 3 of Homebrew or MacPorts (macOS; Rony, 29/10/2026: the package
+// manager keeps it current, ooSockets ships none), or the DLLs next to
+// oosockets.dll (Windows, where only the DTLS server and OOSOCKETS_TLS=openssl
+// need it). Without it the plain sockets work, and every way into OpenSSL's
+// TLS or DTLS asks this first.
 static bool opensslHere()
 {
-#ifdef OOSOCKETS_DYNAMIC_OPENSSL
     std::string why;
     return osslLoad(why);
-#else
-    return true;
-#endif
 }
 
 // The error for a way into TLS when OpenSSL is not there.
 static RexxArrayObject opensslMissing(RexxMethodContext *context)
 {
     std::string why;
-#ifdef OOSOCKETS_DYNAMIC_OPENSSL
     osslLoad(why);
-#endif
     return errorArray(context, why, "OPENSSL", 0);
 }
 
@@ -1406,7 +1401,14 @@ static bool loadCertificates(const std::string &data, const char *password,
             b = BIO_new_mem_buf(data.data(), (int)data.size());
             *key = PEM_read_bio_PrivateKey(b, nullptr, nullptr, (void *)password);
             BIO_free(b);
+            unsigned long e = ERR_peek_last_error();
             ERR_clear_error();
+            if (*key == nullptr && data.find("PRIVATE KEY-----") != std::string::npos)
+            {
+                // There is one, but it cannot be read (a wrong password).
+                why = "cannot read the private key: " + sslReason(e);
+                return false;
+            }
         }
         if (certs.empty())
         {
@@ -1479,10 +1481,35 @@ static bool isAddress(const std::string &host)
     return inet_pton(AF_INET, h.c_str(), buf) == 1 || inet_pton(AF_INET6, h.c_str(), buf) == 1;
 }
 
+#ifdef _WIN32
+static bool winLoadCertificates(const std::string &data, const char *password, std::vector<std::string> &ders,
+                                std::string &why);
+static bool winCheckIdentity(const char *file, const char *password, std::string &why);
+static bool useSchannel();
+#endif
+
 // TLSOptions~nLoad(file, password): "OK" and the certificates in the file,
-// each as DER bytes; or an error ("ERROR", text, "", 0).
+// each as DER bytes; or an error ("ERROR", text, "", 0). Windows reads the
+// file itself (OpenSSL is not needed for it there).
 RexxMethod2(RexxArrayObject, tls_load_certificates, CSTRING, file, OPTIONAL_CSTRING, password)
 {
+#ifdef _WIN32
+    {
+        std::string data, why;
+        std::vector<std::string> ders;
+        if (!readFile(file, data, why) ||
+            !winLoadCertificates(data, password != nullptr ? password : "", ders, why))
+        {
+            return errorArray(context, why, "", 0);
+        }
+        RexxArrayObject r = context->NewArray(ders.size());
+        for (const std::string &d : ders)
+        {
+            context->ArrayAppendString(r, d.data(), d.size());
+        }
+        return statusResult(context, "OK", r);
+    }
+#endif
     if (!opensslHere())
     {
         return opensslMissing(context);
@@ -2604,125 +2631,596 @@ static void schInfo(Sch *c, std::string &protocol, std::string &cipher)
     }
 }
 
-// A server's credentials, from the certificate and key in file (PKCS#12
-// with its password, or PEM with both; read with OpenSSL, as for OpenSSL's
-// server). Schannel takes a key only from a key store: the key is imported,
-// persisted, and deleted again once the credentials are made, which keep
-// working without it (probes/schannel: an ephemeral key is refused).
-static bool schServerCredentials(const char *file, const char *password, const char *minVersion,
-                                 std::shared_ptr<SchCred> &out, std::string &why)
+/* ---- certificate files, read by Windows ------------------------------------ */
+
+// On Windows the certificate files are read by Windows itself (CryptoAPI and
+// CNG), so that OpenSSL is needed only where it does the TLS (the DTLS
+// server, OOSOCKETS_TLS=openssl). The same files as OpenSSL's reading takes:
+// PEM (certificates, and a key: PKCS#8, encrypted or not, PKCS#1 RSA or SEC1
+// EC), DER (one certificate), PKCS#12 with its password; the same texts.
+
+// A PEM file's blocks: the label ("CERTIFICATE"), the bytes, and whether it
+// is a key encrypted in OpenSSL's old way (a "Proc-Type: 4,ENCRYPTED" header).
+struct PemBlock
 {
-    if (!opensslHere())
+    std::string label;
+    std::string der;
+    bool oldEncrypted = false;
+};
+
+static int base64Value(char c)
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static std::vector<PemBlock> pemBlocks(const std::string &data)
+{
+    std::vector<PemBlock> blocks;
+    size_t at = 0;
+    for (;;)
     {
-        why = "OpenSSL is needed to read the certificate";
+        size_t begin = data.find("-----BEGIN ", at);
+        if (begin == std::string::npos)
+        {
+            break;
+        }
+        size_t labelEnd = data.find("-----", begin + 11);
+        if (labelEnd == std::string::npos)
+        {
+            break;
+        }
+        PemBlock b;
+        b.label = data.substr(begin + 11, labelEnd - begin - 11);
+        std::string endLine = "-----END " + b.label + "-----";
+        size_t end = data.find(endLine, labelEnd + 5);
+        if (end == std::string::npos)
+        {
+            break;
+        }
+        at = end + endLine.size();
+        // The body: header lines ("Name: value") are left out, the rest
+        // is base64.
+        unsigned bits = 0;
+        int nbits = 0;
+        size_t line = labelEnd + 5;
+        while (line < end)
+        {
+            size_t eol = data.find('\n', line);
+            if (eol == std::string::npos || eol > end)
+            {
+                eol = end;
+            }
+            std::string text = data.substr(line, eol - line);
+            line = eol + 1;
+            if (text.find(':') != std::string::npos)
+            {
+                b.oldEncrypted = b.oldEncrypted || text.find("ENCRYPTED") != std::string::npos;
+                continue;
+            }
+            for (char c : text)
+            {
+                int v = base64Value(c);
+                if (v < 0)
+                {
+                    continue;                  // '=', spaces, CR
+                }
+                bits = (bits << 6) | (unsigned)v;
+                nbits += 6;
+                if (nbits >= 8)
+                {
+                    nbits -= 8;
+                    b.der.push_back((char)((bits >> nbits) & 0xFF));
+                }
+            }
+        }
+        blocks.push_back(b);
+    }
+    return blocks;
+}
+
+static bool isCertificateLabel(const std::string &label)
+{
+    return label == "CERTIFICATE" || label == "X509 CERTIFICATE";
+}
+
+// DER: a tag, a length, the contents.
+static std::string derTlv(unsigned char tag, const std::string &contents)
+{
+    std::string out(1, (char)tag);
+    size_t n = contents.size();
+    if (n < 0x80)
+    {
+        out.push_back((char)n);
+    }
+    else
+    {
+        std::string len;
+        for (; n > 0; n >>= 8)
+        {
+            len.insert(len.begin(), (char)(n & 0xFF));
+        }
+        out.push_back((char)(0x80 | len.size()));
+        out += len;
+    }
+    return out + contents;
+}
+
+// Reads one DER element at p (of what is left, n): its tag, its contents
+// (offset and size), and where the next element starts. False if malformed.
+static bool derNext(const std::string &d, size_t p, unsigned char &tag, size_t &start, size_t &size, size_t &next)
+{
+    if (p + 2 > d.size())
+    {
         return false;
     }
-    std::string data;
-    std::vector<X509 *> certs;
-    EVP_PKEY *key = nullptr;
-    auto freeAll = [&]()
+    tag = (unsigned char)d[p];
+    size_t len = (unsigned char)d[p + 1];
+    size_t q = p + 2;
+    if (len & 0x80)
     {
-        for (X509 *x : certs)
+        size_t k = len & 0x7F;
+        if (k == 0 || k > 4 || k > d.size() - q)
         {
-            X509_free(x);
+            return false;
         }
-        if (key != nullptr)
+        len = 0;
+        for (size_t i = 0; i < k; i++)
         {
-            EVP_PKEY_free(key);
+            len = (len << 8) | (unsigned char)d[q + i];
         }
-    };
-    if (!readFile(file, data, why) || !loadCertificates(data, password, certs, &key, why))
+        q += k;
+    }
+    if (len > d.size() - q)            // (no q + len: it could wrap)
     {
-        freeAll();
         return false;
     }
-    if (key == nullptr)
+    start = q;
+    size = len;
+    next = q + len;
+    return true;
+}
+
+static const char OID_RSA[] = "\x2A\x86\x48\x86\xF7\x0D\x01\x01\x01";     // 1.2.840.113549.1.1.1
+static const char OID_EC[] = "\x2A\x86\x48\xCE\x3D\x02\x01";             // 1.2.840.10045.2.1
+
+// A key as PKCS#8 (what Windows imports): PKCS#1 (RSA) and SEC1 (EC) keys
+// are wrapped in it. False if the key cannot be read.
+static bool pkcs8Of(const PemBlock &k, std::string &out)
+{
+    if (k.label == "PRIVATE KEY" || k.label == "ENCRYPTED PRIVATE KEY")
     {
-        freeAll();
+        out = k.der;
+        return true;
+    }
+    std::string algorithm;
+    if (k.label == "RSA PRIVATE KEY")
+    {
+        algorithm = derTlv(0x06, std::string(OID_RSA, sizeof(OID_RSA) - 1)) + derTlv(0x05, "");
+    }
+    else
+    {
+        // SEC1: SEQUENCE { version, privateKey, [0] curve, [1] publicKey };
+        // PKCS#8 names the curve in the algorithm.
+        unsigned char tag;
+        size_t start, size, next;
+        if (!derNext(k.der, 0, tag, start, size, next) || tag != 0x30)
+        {
+            return false;
+        }
+        size_t p = start, end = start + size;
+        std::string curve;
+        while (p < end && derNext(k.der, p, tag, start, size, next) && next <= end)
+        {
+            if (tag == 0xA0)
+            {
+                curve = k.der.substr(start, size);
+            }
+            p = next;
+        }
+        if (curve.empty())
+        {
+            return false;
+        }
+        algorithm = derTlv(0x06, std::string(OID_EC, sizeof(OID_EC) - 1)) + curve;
+    }
+    out = derTlv(0x30, derTlv(0x02, std::string(1, '\0')) + derTlv(0x30, algorithm) + derTlv(0x04, k.der));
+    return true;
+}
+
+// A PKCS#12 file, imported by Windows: with its keys persisted (for
+// Schannel) or not. nullptr and why if it cannot be.
+static HCERTSTORE importPkcs12(const std::string &data, const char *password, bool persist, std::string &why)
+{
+    CRYPT_DATA_BLOB blob = { (DWORD)data.size(), (BYTE *)data.data() };
+    DWORD flags = persist ? CRYPT_USER_KEYSET | PKCS12_ALWAYS_CNG_KSP : PKCS12_NO_PERSIST_KEY;
+    std::wstring pw = wide(password);
+    HCERTSTORE store = PFXImportCertStore(&blob, pw.c_str(), flags);
+    DWORD err = store == nullptr ? GetLastError() : 0;
+    if (store == nullptr && pw.empty())
+    {
+        // No password: an empty one, or none at all (as OpenSSL tries both).
+        store = PFXImportCertStore(&blob, nullptr, flags);
+    }
+    if (store == nullptr)
+    {
+        bool wrong = err == ERROR_INVALID_PASSWORD ||
+                     (!PFXVerifyPassword(&blob, pw.c_str(), 0) &&
+                      (!pw.empty() || !PFXVerifyPassword(&blob, nullptr, 0)));
+        why = wrong
+              ? "wrong password for the PKCS#12 file"
+              : "cannot read the PKCS#12 file: " + secText((SECURITY_STATUS)HRESULT_FROM_WIN32(err));
+    }
+    return store;
+}
+
+static bool hasKey(PCCERT_CONTEXT c)
+{
+    DWORD n = 0;
+    return CertGetCertificateContextProperty(c, CERT_KEY_PROV_INFO_PROP_ID, nullptr, &n) ||
+           CertGetCertificateContextProperty(c, CERT_NCRYPT_KEY_HANDLE_PROP_ID, nullptr, &n) ||
+           CertGetCertificateContextProperty(c, CERT_KEY_CONTEXT_PROP_ID, nullptr, &n);
+}
+
+// The certificates in a file, as DER (a PKCS#12 file's own certificate,
+// the one with the key, first). False and why if there are none.
+static bool winLoadCertificates(const std::string &data, const char *password, std::vector<std::string> &ders,
+                                std::string &why)
+{
+    // PEM
+    if (data.find("-----BEGIN") != std::string::npos)
+    {
+        for (const PemBlock &b : pemBlocks(data))
+        {
+            if (isCertificateLabel(b.label))
+            {
+                PCCERT_CONTEXT c = CertCreateCertificateContext(X509_ASN_ENCODING, (const BYTE *)b.der.data(),
+                                                                (DWORD)b.der.size());
+                if (c != nullptr)
+                {
+                    ders.push_back(b.der);
+                    CertFreeCertificateContext(c);
+                }
+            }
+        }
+        if (ders.empty())
+        {
+            why = "no certificate in the file";
+            return false;
+        }
+        return true;
+    }
+    // DER: one certificate
+    PCCERT_CONTEXT c = CertCreateCertificateContext(X509_ASN_ENCODING, (const BYTE *)data.data(), (DWORD)data.size());
+    if (c != nullptr)
+    {
+        ders.push_back(data);
+        CertFreeCertificateContext(c);
+        return true;
+    }
+    // PKCS#12
+    CRYPT_DATA_BLOB blob = { (DWORD)data.size(), (BYTE *)data.data() };
+    if (!PFXIsPFXBlob(&blob))
+    {
+        why = "not a certificate file (PEM, DER or PKCS#12)";
+        return false;
+    }
+    HCERTSTORE store = importPkcs12(data, password, false, why);
+    if (store == nullptr)
+    {
+        return false;
+    }
+    std::vector<std::string> others;
+    PCCERT_CONTEXT x = nullptr;
+    while ((x = CertEnumCertificatesInStore(store, x)) != nullptr)
+    {
+        std::string der((const char *)x->pbCertEncoded, x->cbCertEncoded);
+        (hasKey(x) ? ders : others).push_back(der);
+    }
+    CertCloseStore(store, 0);
+    ders.insert(ders.end(), others.begin(), others.end());
+    if (ders.empty())
+    {
+        why = "no certificate in the PKCS#12 file";
+        return false;
+    }
+    return true;
+}
+
+// A public key as Windows exports it, without its first field (the
+// "magic", which tells ECDSA from ECDH for the same EC key).
+static std::string publicBlob(NCRYPT_KEY_HANDLE key)
+{
+    DWORD n = 0;
+    if (NCryptExportKey(key, 0, BCRYPT_PUBLIC_KEY_BLOB, nullptr, nullptr, 0, &n, 0) != ERROR_SUCCESS || n < 4)
+    {
+        return "";
+    }
+    std::string b(n, '\0');
+    if (NCryptExportKey(key, 0, BCRYPT_PUBLIC_KEY_BLOB, nullptr, (PBYTE)&b[0], n, &n, 0) != ERROR_SUCCESS || n < 4)
+    {
+        return "";
+    }
+    return b.substr(4, n - 4);
+}
+
+static std::string publicBlob(PCCERT_CONTEXT cert)
+{
+    BCRYPT_KEY_HANDLE pub = nullptr;
+    if (!CryptImportPublicKeyInfoEx2(X509_ASN_ENCODING, &cert->pCertInfo->SubjectPublicKeyInfo, 0, nullptr, &pub))
+    {
+        return "";
+    }
+    std::string b;
+    ULONG n = 0;
+    if (BCryptExportKey(pub, nullptr, BCRYPT_PUBLIC_KEY_BLOB, nullptr, 0, &n, 0) == 0 && n >= 4)
+    {
+        b.assign(n, '\0');
+        if (BCryptExportKey(pub, nullptr, BCRYPT_PUBLIC_KEY_BLOB, (PUCHAR)&b[0], n, &n, 0) == 0 && n >= 4)
+        {
+            b = b.substr(4, n - 4);
+        }
+        else
+        {
+            b.clear();
+        }
+    }
+    BCryptDestroyKey(pub);
+    return b;
+}
+
+// A server's certificate and its key, as Windows holds them: the
+// certificate (in a store with the rest of the chain) with its key. For
+// Schannel the key must be persisted (it refuses an ephemeral one:
+// probes/schannel); it is deleted again when the WinIdentity goes, as the
+// credentials made from it keep working without it.
+struct WinIdentity
+{
+    HCERTSTORE store = nullptr;
+    PCCERT_CONTEXT cert = nullptr;
+    NCRYPT_KEY_HANDLE key = 0;         // a PEM file's key, imported by us
+    bool persisted = false;
+    ~WinIdentity()
+    {
+        if (key != 0)
+        {
+            if (!persisted || NCryptDeleteKey(key, 0) != ERROR_SUCCESS)
+            {
+                NCryptFreeObject(key);
+            }
+        }
+        else if (persisted && store != nullptr)
+        {
+            // A PKCS#12 file's keys, persisted by the import.
+            PCCERT_CONTEXT x = nullptr;
+            while ((x = CertEnumCertificatesInStore(store, x)) != nullptr)
+            {
+                HCRYPTPROV_OR_NCRYPT_KEY_HANDLE k = 0;
+                DWORD spec = 0;
+                BOOL mustFree = FALSE;
+                DWORD n = 0;
+                if (CertGetCertificateContextProperty(x, CERT_KEY_PROV_INFO_PROP_ID, nullptr, &n) &&
+                    CryptAcquireCertificatePrivateKey(x, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG,
+                                                      nullptr, &k, &spec, &mustFree))
+                {
+                    if (NCryptDeleteKey((NCRYPT_KEY_HANDLE)k, 0) != ERROR_SUCCESS && mustFree)
+                    {
+                        NCryptFreeObject((NCRYPT_KEY_HANDLE)k);
+                    }
+                }
+            }
+        }
+        if (cert != nullptr)
+        {
+            CertFreeCertificateContext(cert);
+        }
+        if (store != nullptr)
+        {
+            CertCloseStore(store, 0);
+        }
+    }
+};
+
+// The certificate and key in a file (PKCS#12 with its password, or PEM
+// with both), read by Windows; persist: for Schannel. False and why if
+// they cannot be used.
+static bool winIdentity(const std::string &data, const char *password, bool persist, WinIdentity &id, std::string &why)
+{
+    id.persisted = persist;
+    if (data.find("-----BEGIN") == std::string::npos)
+    {
+        CRYPT_DATA_BLOB blob = { (DWORD)data.size(), (BYTE *)data.data() };
+        PCCERT_CONTEXT c = CertCreateCertificateContext(X509_ASN_ENCODING, (const BYTE *)data.data(), (DWORD)data.size());
+        if (c != nullptr)
+        {
+            CertFreeCertificateContext(c);
+            why = "no private key in the file";
+            return false;
+        }
+        if (!PFXIsPFXBlob(&blob))
+        {
+            why = "not a certificate file (PEM, DER or PKCS#12)";
+            return false;
+        }
+        id.store = importPkcs12(data, password, persist, why);
+        if (id.store == nullptr)
+        {
+            return false;
+        }
+        bool any = false;
+        PCCERT_CONTEXT x = nullptr;
+        while ((x = CertEnumCertificatesInStore(id.store, x)) != nullptr)
+        {
+            any = true;
+            if (hasKey(x))
+            {
+                id.cert = CertDuplicateCertificateContext(x);
+                CertFreeCertificateContext(x);
+                break;
+            }
+        }
+        if (id.cert == nullptr)
+        {
+            why = any ? "no private key in the file" : "no certificate in the PKCS#12 file";
+            return false;
+        }
+        return true;
+    }
+    // PEM: the first certificate is the server's, the others its chain;
+    // the first key is its key.
+    std::vector<PemBlock> blocks = pemBlocks(data);
+    id.store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr);
+    const PemBlock *keyBlock = nullptr;
+    for (const PemBlock &b : blocks)
+    {
+        if (isCertificateLabel(b.label))
+        {
+            PCCERT_CONTEXT c = nullptr;
+            if (CertAddEncodedCertificateToStore(id.store, X509_ASN_ENCODING, (const BYTE *)b.der.data(),
+                                                 (DWORD)b.der.size(), CERT_STORE_ADD_ALWAYS,
+                                                 id.cert == nullptr ? &c : nullptr) && c != nullptr)
+            {
+                id.cert = c;
+            }
+        }
+        else if (keyBlock == nullptr && (b.label == "PRIVATE KEY" || b.label == "ENCRYPTED PRIVATE KEY" ||
+                                         b.label == "RSA PRIVATE KEY" || b.label == "EC PRIVATE KEY"))
+        {
+            keyBlock = &b;
+        }
+    }
+    if (id.cert == nullptr)
+    {
+        why = "no certificate in the file";
+        return false;
+    }
+    if (keyBlock == nullptr)
+    {
         why = "no private key in the file";
         return false;
     }
-    ERR_clear_error();
-    if (X509_check_private_key(certs[0], key) != 1)
+    std::string pkcs8;
+    if (keyBlock->oldEncrypted)
     {
-        freeAll();
-        ERR_clear_error();
-        why = "the private key is not the certificate's";
+        why = "cannot read the private key: encrypted in OpenSSL's old way"
+              " (make it PKCS#8, \"openssl pkcs8 -topk8\", or PKCS#12)";
         return false;
     }
-    // Both, as a PKCS#12 in memory, for Windows to import.
-    STACK_OF(X509) *chain = sk_X509_new_null();
-    for (size_t i = 1; i < certs.size(); i++)
-    {
-        sk_X509_push(chain, certs[i]);
-    }
-    const char *pw = "oosockets";
-    PKCS12 *p12 = PKCS12_create(pw, nullptr, key, certs[0], chain, 0, 0, 0, 0, 0);
-    sk_X509_free(chain);
-    unsigned char *der = nullptr;
-    int len = p12 != nullptr ? i2d_PKCS12(p12, &der) : 0;
-    if (p12 != nullptr)
-    {
-        PKCS12_free(p12);
-    }
-    freeAll();
-    ERR_clear_error();
-    if (len <= 0)
+    if (!pkcs8Of(*keyBlock, pkcs8))
     {
         why = "cannot read the private key";
         return false;
     }
-    CRYPT_DATA_BLOB blob = { (DWORD)len, der };
-    HCERTSTORE store = PFXImportCertStore(&blob, L"oosockets", CRYPT_USER_KEYSET | PKCS12_ALWAYS_CNG_KSP);
-    DWORD importError = GetLastError();
-    OPENSSL_free(der);
-    if (store == nullptr)
+    NCRYPT_PROV_HANDLE prov = 0;
+    SECURITY_STATUS st = NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0);
+    if (st != ERROR_SUCCESS)
     {
-        why = "Windows cannot import the certificate: " + secText((SECURITY_STATUS)HRESULT_FROM_WIN32(importError));
+        why = "cannot read the private key: " + secText(st);
         return false;
     }
-    PCCERT_CONTEXT cert = nullptr, found = nullptr;
-    while ((cert = CertEnumCertificatesInStore(store, cert)) != nullptr)
+    // A persisted key needs a name: a new one each time.
+    unsigned char rnd[16];
+    BCryptGenRandom(nullptr, rnd, sizeof(rnd), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    wchar_t name[64];
+    swprintf(name, 64, L"oosockets-");
+    for (int i = 0; i < 16; i++)
     {
-        DWORD n = 0;
-        if (CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, nullptr, &n))
+        swprintf(name + 10 + 2 * i, 3, L"%02x", rnd[i]);
+    }
+    std::wstring pw = wide(password);
+    NCryptBuffer buffers[2];
+    ULONG nb = 0;
+    if (persist)
+    {
+        buffers[nb].BufferType = NCRYPTBUFFER_PKCS_KEY_NAME;
+        buffers[nb].cbBuffer = (ULONG)((wcslen(name) + 1) * sizeof(wchar_t));
+        buffers[nb].pvBuffer = name;
+        nb++;
+    }
+    if (keyBlock->label == "ENCRYPTED PRIVATE KEY")
+    {
+        buffers[nb].BufferType = NCRYPTBUFFER_PKCS_SECRET;
+        buffers[nb].cbBuffer = (ULONG)((pw.size() + 1) * sizeof(wchar_t));
+        buffers[nb].pvBuffer = &pw[0];
+        nb++;
+    }
+    NCryptBufferDesc desc = { NCRYPTBUFFER_VERSION, nb, buffers };
+    st = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, nb > 0 ? &desc : nullptr, &id.key,
+                         (PBYTE)pkcs8.data(), (DWORD)pkcs8.size(), persist ? NCRYPT_DO_NOT_FINALIZE_FLAG : 0);
+    if (st == ERROR_SUCCESS && persist)
+    {
+        st = NCryptFinalizeKey(id.key, 0);
+    }
+    NCryptFreeObject(prov);
+    if (st != ERROR_SUCCESS)
+    {
+        if (id.key != 0)
         {
-            found = CertDuplicateCertificateContext(cert);
-            CertFreeCertificateContext(cert);
-            break;
+            NCryptFreeObject(id.key);      // not finalized: nothing was persisted
+            id.key = 0;
+        }
+        why = "cannot read the private key: " + secText(st);
+        return false;
+    }
+    std::string mine = publicBlob(id.key);
+    if (mine.empty() || mine != publicBlob(id.cert))
+    {
+        why = "the private key is not the certificate's";
+        return false;
+    }
+    if (persist)
+    {
+        CRYPT_KEY_PROV_INFO info;
+        memset(&info, 0, sizeof(info));
+        info.pwszContainerName = name;
+        info.pwszProvName = (LPWSTR)MS_KEY_STORAGE_PROVIDER;
+        if (!CertSetCertificateContextProperty(id.cert, CERT_KEY_PROV_INFO_PROP_ID, 0, &info))
+        {
+            why = "Windows cannot use the private key: " +
+                  secText((SECURITY_STATUS)HRESULT_FROM_WIN32(GetLastError()));
+            return false;
         }
     }
-    bool ok = false;
-    if (found == nullptr)
+    return true;
+}
+
+// A server's credentials, from the certificate and key in file (PKCS#12
+// with its password, or PEM with both), read by Windows.
+static bool schServerCredentials(const char *file, const char *password, const char *minVersion,
+                                 std::shared_ptr<SchCred> &out, std::string &why)
+{
+    std::string data;
+    if (!readFile(file, data, why))
     {
-        why = "Windows found no private key in the certificate";
+        return false;
     }
-    else
+    WinIdentity id;
+    if (!winIdentity(data, password, true, id, why))
     {
-        DWORD enabled = SP_PROT_TLS1_3_SERVER | (strcmp(minVersion, "1.3") == 0 ? 0 : SP_PROT_TLS1_2_SERVER);
-        SECURITY_STATUS st = schCredentials(SECPKG_CRED_INBOUND, SCH_USE_STRONG_CRYPTO | SCH_CRED_DISABLE_RECONNECTS,
-                                            enabled, found, out);
-        ok = st == SEC_E_OK;
-        if (!ok)
-        {
-            why = "Schannel cannot use it: " + secText(st);
-        }
-        // The key is not left behind in the user's profile.
-        HCRYPTPROV_OR_NCRYPT_KEY_HANDLE k = 0;
-        DWORD spec = 0;
-        BOOL mustFree = FALSE;
-        if (CryptAcquireCertificatePrivateKey(found, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG,
-                                              nullptr, &k, &spec, &mustFree))
-        {
-            if (NCryptDeleteKey((NCRYPT_KEY_HANDLE)k, 0) != ERROR_SUCCESS && mustFree)
-            {
-                NCryptFreeObject((NCRYPT_KEY_HANDLE)k);
-            }
-        }
-        CertFreeCertificateContext(found);
+        return false;
     }
-    CertCloseStore(store, 0);
-    return ok;
+    DWORD enabled = SP_PROT_TLS1_3_SERVER | (strcmp(minVersion, "1.3") == 0 ? 0 : SP_PROT_TLS1_2_SERVER);
+    SECURITY_STATUS st = schCredentials(SECPKG_CRED_INBOUND, SCH_USE_STRONG_CRYPTO | SCH_CRED_DISABLE_RECONNECTS,
+                                        enabled, id.cert, out);
+    if (st != SEC_E_OK)
+    {
+        why = "Schannel cannot use it: " + secText(st);
+        return false;
+    }
+    return true;                       // the key is deleted with id
+}
+
+// TLSOptions~certificate's check, by Windows: the file has a certificate and
+// its key (nothing persisted).
+static bool winCheckIdentity(const char *file, const char *password, std::string &why)
+{
+    std::string data;
+    WinIdentity id;
+    return readFile(file, data, why) && winIdentity(data, password, false, id, why);
 }
 
 // A Sch for the server's side of a connection.
@@ -2939,9 +3437,21 @@ static SSL_CTX *serverContext(const char *file, const char *password, const SSL_
 }
 
 // TLSOptions~nCheckIdentity(file, password): "OK" if the file has a
-// certificate and its key; else "ERROR", why.
+// certificate and its key; else "ERROR", why. On Windows with Schannel,
+// read by Windows.
 RexxMethod2(RexxArrayObject, tls_check_identity, CSTRING, file, CSTRING, password)
 {
+#ifdef _WIN32
+    if (useSchannel())
+    {
+        std::string why;
+        if (!winCheckIdentity(file, password, why))
+        {
+            return errorArray(context, why, "", 0);
+        }
+        return statusResult(context, "OK");
+    }
+#endif
     if (!opensslHere())
     {
         return opensslMissing(context);
@@ -2961,10 +3471,6 @@ RexxMethod2(RexxArrayObject, tls_check_identity, CSTRING, file, CSTRING, passwor
 RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file,
             CSTRING, password, CSTRING, minVersion, double, timeout)
 {
-    if (!opensslHere())
-    {
-        return opensslMissing(context);
-    }
     Sock *s = (Sock *)cself;
     if (s == nullptr || s->fd == BAD_SOCKET)
     {
@@ -2992,6 +3498,10 @@ RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
         return schHandshakeStep(context, s, timeout);
     }
 #endif
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
+    }
     SSL_CTX *ctx = serverContext(file, password, TLS_server_method(), minVersionOf(minVersion), why);
     if (ctx == nullptr)
     {
@@ -3007,10 +3517,6 @@ RexxMethod5(RexxArrayObject, socket_starttls_server, CSELF, cself, CSTRING, file
 // accepted connection will share. "OK"; or "ERROR", why.
 RexxMethod4(RexxArrayObject, server_tls, CSELF, cself, CSTRING, file, CSTRING, password, CSTRING, minVersion)
 {
-    if (!opensslHere())
-    {
-        return opensslMissing(context);
-    }
     Sock *s = (Sock *)cself;
     if (s == nullptr || s->fd == BAD_SOCKET)
     {
@@ -3027,9 +3533,18 @@ RexxMethod4(RexxArrayObject, server_tls, CSELF, cself, CSTRING, file, CSTRING, p
         }
         std::lock_guard<std::mutex> guard(s->mu);
         s->schCred = cred;
+        if (s->ctx != nullptr)
+        {
+            SSL_CTX_free(s->ctx);          // (an earlier call with OOSOCKETS_TLS=openssl)
+            s->ctx = nullptr;
+        }
         return statusResult(context, "OK");
     }
 #endif
+    if (!opensslHere())
+    {
+        return opensslMissing(context);
+    }
     SSL_CTX *ctx = serverContext(file, password, TLS_server_method(), minVersionOf(minVersion), why);
     if (ctx == nullptr)
     {
@@ -3041,6 +3556,9 @@ RexxMethod4(RexxArrayObject, server_tls, CSELF, cself, CSTRING, file, CSTRING, p
         SSL_CTX_free(s->ctx);
     }
     s->ctx = ctx;
+#ifdef _WIN32
+    s->schCred.reset();                // (an earlier call with Schannel)
+#endif
     return statusResult(context, "OK");
 }
 

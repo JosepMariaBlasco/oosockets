@@ -27,26 +27,19 @@ target_compile_definitions(oosockets PRIVATE OOSOCKETS_VERSION="${PROJECT_VERSIO
 target_include_directories(oosockets SYSTEM PRIVATE "${OOREXX_INCLUDE_DIR}")
 target_link_libraries(oosockets PRIVATE "${OOREXX_REXX_LIB}" "${OOREXX_REXXAPI_LIB}")
 
-# OpenSSL does the TLS. Linux and macOS: not linked; the library loads it
-# the first time TLS is used (src/ossl.h), from OOSOCKETS_OPENSSL's
-# directory if it is set, else the system's (Linux) or the OpenSSL 3 of
-# Homebrew or MacPorts (macOS: the package manager keeps it current; Rony,
-# 29/10/2026: ooSockets ships none). Without it the plain sockets work and
-# TLS says what to install. Only OpenSSL's headers are needed to build:
-# point OPENSSL_ROOT_DIR at any OpenSSL 3 (the release uses 3.0's, the
-# oldest 3.x, so that every 3.x has what it calls). Windows: vcpkg's
-# x64-windows-static-md, linked, through its toolchain file (to be
-# replaced by Schannel).
-if(WIN32)
-  set(OPENSSL_USE_STATIC_LIBS TRUE)
-endif()
+# OpenSSL is not linked: the library loads it the first time it is needed
+# (src/ossl.h), from OOSOCKETS_OPENSSL's directory if it is set, else the
+# system's (Linux), the OpenSSL 3 of Homebrew or MacPorts (macOS: the
+# package manager keeps it current; Rony, 29/10/2026: ooSockets ships
+# none), or the DLLs next to oosockets.dll (Windows, where only the DTLS
+# server and OOSOCKETS_TLS=openssl use it: the rest is Schannel's). Without
+# it the plain sockets work and TLS says what to do. Only OpenSSL's headers
+# are needed to build: point OPENSSL_ROOT_DIR at any OpenSSL 3 (the
+# release uses 3.0's on macOS, the oldest 3.x, so that every 3.x has what
+# it calls); on Windows, vcpkg's x64-windows, through its toolchain file.
 find_package(OpenSSL 3.0 REQUIRED)
-if(WIN32)
-  target_link_libraries(oosockets PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-else()
-  target_include_directories(oosockets SYSTEM PRIVATE "${OPENSSL_INCLUDE_DIR}")
-  target_link_libraries(oosockets PRIVATE ${CMAKE_DL_LIBS})
-endif()
+target_include_directories(oosockets SYSTEM PRIVATE "${OPENSSL_INCLUDE_DIR}")
+target_link_libraries(oosockets PRIVATE ${CMAKE_DL_LIBS})
 
 if(APPLE)
   # macOS decides trust (SecTrustEvaluateWithError)
@@ -54,9 +47,9 @@ if(APPLE)
 endif()
 
 if(WIN32)
-  # Schannel does the TLS (secur32), Windows decides trust (crypt32);
-  # OpenSSL's own needs
-  target_link_libraries(oosockets PRIVATE ws2_32 iphlpapi crypt32 secur32 ncrypt user32 advapi32)
+  # Schannel does the TLS (secur32), Windows decides trust and reads the
+  # certificate files (crypt32, ncrypt, bcrypt)
+  target_link_libraries(oosockets PRIVATE ws2_32 iphlpapi crypt32 secur32 ncrypt bcrypt)
   target_compile_definitions(oosockets PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
 

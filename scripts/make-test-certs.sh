@@ -12,6 +12,13 @@
 #   keytool.p12       localhost, made with keytool as the line given to Rony
 #                     (plus serverAuth), password 123456
 #   mismatch.pem      server.pem's certificate with wronghost.pem's key
+#   ec.pem            localhost, self-signed, an EC P-256 key in SEC1 ("EC
+#                     PRIVATE KEY")
+#   pkcs1.pem         localhost, self-signed, an RSA key in PKCS#1 ("RSA
+#                     PRIVATE KEY")
+#   encrypted.pem     pkcs1.pem's certificate, its key as encrypted PKCS#8
+#                     (password "test"; PBES2, AES-256, OpenSSL 3's default)
+# (The last three: the key formats Windows reads by itself.)
 set -euo pipefail
 cd "$(dirname "$0")/../tests"
 rm -rf certs; mkdir certs; cd certs
@@ -71,6 +78,17 @@ keytool -genkeypair -alias mysrv -keyalg RSA -dname "CN=localhost" \
   -keystore keytool.p12 -storepass 123456 2>/dev/null
 
 { openssl x509 -in server.pem; openssl pkey -in wronghost.pem; } > mismatch.pem
+
+# self name: a self-signed certificate for localhost, with its key in self.key
+self() {
+  openssl req -x509 "${@:2}" -nodes -keyout "$w/$1.key" -out "$w/$1.crt" -days $days \
+    -subj "/CN=localhost" -addext subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1 2>/dev/null
+}
+self ec -newkey ec -pkeyopt ec_paramgen_curve:P-256
+{ cat "$w/ec.crt"; openssl ec -in "$w/ec.key" 2>/dev/null; } > ec.pem
+self rsa -newkey rsa:2048
+{ cat "$w/rsa.crt"; openssl rsa -in "$w/rsa.key" -traditional 2>/dev/null; } > pkcs1.pem
+{ cat "$w/rsa.crt"; openssl pkcs8 -topk8 -in "$w/rsa.key" -v2 aes-256-cbc -passout pass:test; } > encrypted.pem
 
 rm -f ca.srl
 ls -l

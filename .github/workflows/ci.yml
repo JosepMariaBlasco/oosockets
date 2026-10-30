@@ -48,11 +48,11 @@ jobs:
       - name: ooRexx version
         run: rexx -v
 
-      # OpenSSL: Linux, the system's; macOS, Homebrew's (only its headers to
-      # build: on both, the library loads OpenSSL when TLS is first used,
-      # src/ossl.h); Windows, vcpkg's x64-windows-static-md (static
-      # libraries, the DLL C runtime), linked, cached: building it takes ~7
-      # minutes.
+      # OpenSSL: Linux, the system's; macOS, Homebrew's; Windows, vcpkg's
+      # x64-windows (DLLs), cached: building it takes ~7 minutes. Only its
+      # headers to build: the library loads OpenSSL when it is first needed
+      # (src/ossl.h); on Windows from next to oosockets.dll, where the DLLs
+      # are copied (as the release zip has them).
       - name: OpenSSL (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -72,35 +72,36 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/vcpkg-cache
-          key: vcpkg-openssl-x64-windows-static-md-v2
+          key: vcpkg-openssl-x64-windows-v1
 
       - name: OpenSSL (Windows)
         if: runner.os == 'Windows'
         run: |
           mkdir -p "$RUNNER_TEMP/vcpkg-cache"
           export VCPKG_BINARY_SOURCES="clear;files,$(cygpath -w "$RUNNER_TEMP/vcpkg-cache"),readwrite"
-          "$VCPKG_INSTALLATION_ROOT/vcpkg" install openssl:x64-windows-static-md > vcpkg.log 2>&1 \
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install openssl:x64-windows > vcpkg.log 2>&1 \
             || { tail -40 vcpkg.log; exit 1; }
-          grep -i -m3 -E "openssl:x64-windows-static-md|restored" vcpkg.log || true
+          grep -i -m3 -E "openssl:x64-windows|restored" vcpkg.log || true
           tc="$(cygpath -m "$VCPKG_INSTALLATION_ROOT")/scripts/buildsystems/vcpkg.cmake"
-          echo "CMAKE_EXTRA=-DCMAKE_TOOLCHAIN_FILE=$tc -DVCPKG_TARGET_TRIPLET=x64-windows-static-md" >> "$GITHUB_ENV"
+          echo "CMAKE_EXTRA=-DCMAKE_TOOLCHAIN_FILE=$tc -DVCPKG_TARGET_TRIPLET=x64-windows" >> "$GITHUB_ENV"
+          echo "OPENSSL_BIN=$(cygpath -u "$VCPKG_INSTALLATION_ROOT")/installed/x64-windows/bin" >> "$GITHUB_ENV"
 
       - name: Build
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOOREXX_HOME="$OOREXX_HOME" ${CMAKE_EXTRA:-}
           cmake --build build --config Release
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp "$OPENSSL_BIN"/libssl-3-x64.dll "$OPENSSL_BIN"/libcrypto-3-x64.dll build/Release/
+          fi
 
-      # What the library loads: on Linux and macOS no OpenSSL (it loads it
-      # itself, and nothing of it may be left undefined); on Windows none
-      # (linked statically).
+      # What the library loads: no OpenSSL (it loads it itself, and nothing
+      # of it may be left undefined: on Windows that would not link).
       - name: Dependencies
         run: |
           case "$RUNNER_OS" in
             Linux) scripts/check-unlinked.sh build/liboosockets.so ;;
             macOS) scripts/check-unlinked.sh build/liboosockets.dylib ;;
-            Windows)
-              dumpbin=$(ls "/c/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/"*/bin/Hostx64/x64/dumpbin.exe | head -1)
-              "$dumpbin" //dependents build/Release/oosockets.dll | grep -i "\.dll" ;;
+            Windows) scripts/check-unlinked.sh build/Release/oosockets.dll ;;
           esac
 
       - name: ooRexxUnit
@@ -127,6 +128,32 @@ jobs:
           OOSOCKETS_TLS: openssl
         run: scripts/test.sh "$PWD/build/Release"
 
+      # Windows without OpenSSL (OOSOCKETS_OPENSSL naming a directory without
+      # it): everything Schannel does works, certificate files included; the
+      # DTLS server and OOSOCKETS_TLS=openssl say what is missing. Then
+      # OOSOCKETS_OPENSSL naming vcpkg's directory finds it there.
+      - name: Without OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 15
+        env:
+          OOSOCKETS_ONLINE: 1
+        run: |
+          w() { cygpath -w "$1"; }
+          lib="$PWD/build/Release"
+          alone="$RUNNER_TEMP/lib-alone"
+          mkdir -p "$RUNNER_TEMP/none" "$alone"
+          cp "$lib/oosockets.dll" "$lib/sockets.cls" "$alone/"
+          none="$(w "$RUNNER_TEMP/none")"
+          rc=0
+          (export OOSOCKETS_OPENSSL="$none"
+           export REXX_PATH="$(w "$alone");$(w "$PWD/tests");$(w "$PWD/tests/framework")" PATH="$alone:$PATH"
+           rexx scripts/no-openssl.rex "$(w "$PWD/tests/certs")" windows || exit 1
+           cd tests && rexx run.rex Socket ServerSocket UDPSocket MulticastSocket TLSSocket TLSServerSocket) || rc=1
+          (export OOSOCKETS_OPENSSL="$(w "$OPENSSL_BIN")" OOSOCKETS_TLS=openssl
+           export REXX_PATH="$(w "$alone");$(w "$PWD/tests");$(w "$PWD/tests/framework")" PATH="$alone:$PATH"
+           cd tests && rexx run.rex TLSSocket DTLSSocket) || rc=1
+          exit $rc
+
       # OOSOCKETS_OPENSSL (Linux): a directory without OpenSSL 3 is an error
       # that names it; the system's directory, named so, works as always.
       - name: OOSOCKETS_OPENSSL (Linux)
@@ -136,8 +163,7 @@ jobs:
           export REXX_PATH="$PWD/build:$PWD/tests:$PWD/tests/framework" LD_LIBRARY_PATH="$PWD/build"
           mkdir -p "$RUNNER_TEMP/none"
           rc=0
-          OOSOCKETS_OPENSSL="$RUNNER_TEMP/none" rexx scripts/no-openssl.rex "$PWD/tests/certs/" \
-            "\"OpenSSL 3 not found in $RUNNER_TEMP/none (OOSOCKETS_OPENSSL)\"" || rc=1
+          OOSOCKETS_OPENSSL="$RUNNER_TEMP/none" rexx scripts/no-openssl.rex "$PWD/tests/certs" || rc=1
           dir="$(dirname "$(ldconfig -p | grep -m1 'libssl.so.3 .*x86-64' | sed 's/.*=> //')")"
           echo "the system's OpenSSL: $dir"
           (cd tests && OOSOCKETS_OPENSSL="$dir" rexx run.rex TLSSocket DTLSSocket) || rc=1

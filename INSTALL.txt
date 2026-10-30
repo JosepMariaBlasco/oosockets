@@ -3,9 +3,12 @@ Installing ooSockets
 
 ooSockets is two files: sockets.cls, and its native library
 (oosockets.dll on Windows, liboosockets.dylib on macOS, liboosockets.so
-on Linux). Put them where ooRexx finds them:
+on Linux); on Windows, also OpenSSL's two DLLs. Put them where ooRexx
+finds them:
 
-  Windows: both files in ooRexx's bin directory (the one with rexx.exe).
+  Windows: the files in ooRexx's bin directory (the one with rexx.exe):
+  oosockets.dll, sockets.cls, and OpenSSL's libssl-3-x64.dll and
+  libcrypto-3-x64.dll, which go next to oosockets.dll.
 
   macOS, Linux: the library in ooRexx's lib directory (the one with
   librexx), sockets.cls in ooRexx's bin directory (the one with rexx).
@@ -22,9 +25,12 @@ DYLD_LIBRARY_PATH on macOS, LD_LIBRARY_PATH on Linux) for the library.
 
 What each zip needs:
 
-  Windows: 64-bit. TLS is Windows' own (Schannel); OpenSSL, for the
-           DTLS server, is inside oosockets.dll for now. Environment
-           variable OOSOCKETS_TLS=openssl: OpenSSL for everything.
+  Windows: 64-bit. TLS is Windows' own (Schannel). OpenSSL 3, in the
+           two DLLs of the zip (licence: OpenSSL-LICENSE.txt), is
+           loaded only for the DTLS server and with OOSOCKETS_TLS=openssl
+           (environment variable: OpenSSL for everything). Without the
+           DLLs everything else works. Another OpenSSL 3: its directory
+           (the one with libssl-3-x64.dll) in OOSOCKETS_OPENSSL.
   macOS:   macOS 11 or later on Apple Silicon, 10.14 or later on Intel.
            For TLS and DTLS, OpenSSL 3 from Homebrew or MacPorts, which
            keep it up to date:

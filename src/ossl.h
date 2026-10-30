@@ -36,34 +36,38 @@
 /*----------------------------------------------------------------------------*/
 
 /*
- * ossl.h: OpenSSL loaded when TLS is first used (Linux and macOS).
+ * ossl.h: OpenSSL loaded when TLS is first used.
  *
- * The library does not link OpenSSL: the first way into TLS or DTLS loads
- * libssl with dlopen, and takes every function it calls from it (and from
- * the libcrypto libssl itself depends on, so that the two always belong
- * together). Without OpenSSL 3 the library still loads and the plain
- * sockets work. Where it comes from:
+ * The library does not link OpenSSL: the first way into TLS or DTLS that
+ * needs it loads libssl (dlopen, or LoadLibrary on Windows), and takes
+ * every function it calls from it and from the libcrypto libssl itself
+ * depends on, so that the two always belong together. Without OpenSSL 3
+ * the library still loads and the plain sockets work. Where it comes from:
  *
  *   OOSOCKETS_OPENSSL set: libssl in that directory, and nowhere else
  *                          (Rony, 29/10/2026: an optional environment
  *                          variable, "to keep the flexibility")
- *   Linux:  libssl.so.3, as the system finds it
- *   macOS:  the OpenSSL 3 of Homebrew (Apple Silicon, Intel) or MacPorts
+ *   Linux:   libssl.so.3, as the system finds it
+ *   macOS:   the OpenSSL 3 of Homebrew (Apple Silicon, Intel) or MacPorts
+ *   Windows: libssl-3-x64.dll next to oosockets.dll (the release ships it
+ *            there); never by its bare name (the current directory and
+ *            the PATH would be searched: a planted DLL). Windows needs it
+ *            only for the DTLS server and for OOSOCKETS_TLS=openssl:
+ *            everything else is Schannel's.
  *
  * Include it after OpenSSL's headers: from here on, each name in
  * OSSL_FUNCTIONS is a call through the table (OpenSSL's own macros, such
  * as SSL_CTX_set_mode, expand to those names and go through it too).
- * Windows links OpenSSL as before (to be replaced by Schannel).
  */
 
 #ifndef OOSOCKETS_OSSL_H
 #define OOSOCKETS_OSSL_H
 
-#ifndef _WIN32
 #define OOSOCKETS_DYNAMIC_OPENSSL 1
 
 // Every OpenSSL function the library calls. A name missing here is an
-// undefined symbol in the library (`nm -u`): the CI checks there is none.
+// undefined symbol in the library (`nm -u`; on Windows, a link error): the
+// CI checks there is none.
 #define OSSL_FUNCTIONS(X) \
     X(BIO_ADDR_free) X(BIO_ADDR_new) X(BIO_ADDR_rawmake) X(BIO_clear_flags) \
     X(BIO_free) X(BIO_get_data) X(BIO_get_new_index) X(BIO_meth_new) \
@@ -107,11 +111,110 @@ struct OsslTable
 
 static OsslTable ossl;
 
-#include <dlfcn.h>
 #include <cstdlib>
 #include <mutex>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+
+// OpenSSL 3's DLLs for this architecture (OpenSSL's own names).
+#if defined(_M_ARM64) || defined(__aarch64__)
+  #define OSSL_DLL_ARCH "-arm64"
+#elif defined(_WIN64)
+  #define OSSL_DLL_ARCH "-x64"
+#else
+  #define OSSL_DLL_ARCH ""
+#endif
+static const char *const OSSL_SSL_DLL = "libssl-3" OSSL_DLL_ARCH ".dll";
+static const char *const OSSL_CRYPTO_DLL = "libcrypto-3" OSSL_DLL_ARCH ".dll";
+
+typedef HMODULE OsslHandle;
+
+// libssl from a directory, with the libcrypto it needs looked for there
+// first. Only a directory: never the bare name, which Windows would look
+// for in the current directory and on the PATH too (a planted DLL).
+static OsslHandle osslOpen(const std::wstring &dir)
+{
+    wchar_t full[MAX_PATH * 2];
+    DWORD n = GetFullPathNameW(dir.c_str(), MAX_PATH * 2, full, nullptr);
+    if (n == 0 || n >= MAX_PATH * 2)
+    {
+        return nullptr;
+    }
+    std::wstring path(full, n);
+    if (path.back() != L'\\' && path.back() != L'/')
+    {
+        path += L'\\';
+    }
+    for (const char *c = OSSL_SSL_DLL; *c != '\0'; c++)
+    {
+        path += (wchar_t)*c;
+    }
+    return LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+}
+
+// The directory oosockets.dll was loaded from (empty if unknown).
+static std::wstring osslOwnDirectory()
+{
+    HMODULE self = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR)&osslOwnDirectory, &self))
+    {
+        return L"";
+    }
+    wchar_t buf[MAX_PATH * 4];
+    DWORD n = GetModuleFileNameW(self, buf, MAX_PATH * 4);
+    if (n == 0 || n >= MAX_PATH * 4)
+    {
+        return L"";
+    }
+    std::wstring path(buf, n);
+    size_t slash = path.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? L"" : path.substr(0, slash);
+}
+
+// A function, from libssl or from the libcrypto it was loaded with.
+static void *osslSymbol(OsslHandle h, const char *name)
+{
+    void *f = (void *)GetProcAddress(h, name);
+    if (f == nullptr)
+    {
+        HMODULE crypto = GetModuleHandleA(OSSL_CRYPTO_DLL);
+        f = crypto != nullptr ? (void *)GetProcAddress(crypto, name) : nullptr;
+    }
+    return f;
+}
+
+static void osslClose(OsslHandle h)
+{
+    FreeLibrary(h);
+}
+
+#else
+
+#include <dlfcn.h>
+
+typedef void *OsslHandle;
+
+static OsslHandle osslOpen(const std::string &path)
+{
+    return dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+}
+
+// libssl's handle finds libcrypto's functions too: the libcrypto that this
+// libssl was built with.
+static void *osslSymbol(OsslHandle h, const char *name)
+{
+    return dlsym(h, name);
+}
+
+static void osslClose(OsslHandle h)
+{
+    dlclose(h);
+}
+
+#endif
 
 // Loads OpenSSL once, the first time any thread asks; true if it is there.
 // Otherwise false, and why says what to do (the same text every time).
@@ -123,6 +226,25 @@ static bool osslLoad(std::string &why)
     std::call_once(once, []
     {
         const char *env = getenv("OOSOCKETS_OPENSSL");
+        bool own = env != nullptr && *env != '\0';
+#ifdef _WIN32
+        // Each place is a directory: OOSOCKETS_OPENSSL's, or oosockets.dll's.
+        std::vector<std::wstring> where;
+        std::wstring mine = osslOwnDirectory();
+        if (!mine.empty())
+        {
+            where.push_back(mine);
+        }
+        reason = std::string("OpenSSL 3 not found; put ") + OSSL_SSL_DLL + " and " + OSSL_CRYPTO_DLL +
+                 " next to oosockets.dll";
+        if (own)
+        {
+            const wchar_t *wenv = _wgetenv(L"OOSOCKETS_OPENSSL");
+            where = {wenv != nullptr ? wenv : L""};
+            reason = std::string("OpenSSL 3 not found in ") + env + " (OOSOCKETS_OPENSSL)";
+        }
+        auto place = [](const std::wstring &dir) { return dir; };
+#else
 #ifdef __APPLE__
         const char *name = "libssl.3.dylib";
         std::vector<std::string> where = {
@@ -137,17 +259,17 @@ static bool osslLoad(std::string &why)
         std::vector<std::string> where = {""};     // where the system finds it
         reason = "OpenSSL 3 not found; install it with the system's package manager";
 #endif
-        bool own = env != nullptr && *env != '\0';
         if (own)
         {
             where = {env};
             reason = std::string("OpenSSL 3 not found in ") + env + " (OOSOCKETS_OPENSSL)";
         }
-        void *h = nullptr;
-        for (const std::string &dir : where)
+        auto place = [name](const std::string &dir) { return dir.empty() ? std::string(name) : dir + "/" + name; };
+#endif
+        OsslHandle h = nullptr;
+        for (const auto &dir : where)
         {
-            std::string path = dir.empty() ? name : dir + "/" + name;
-            h = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+            h = osslOpen(place(dir));
             if (h != nullptr)
             {
                 break;
@@ -157,11 +279,9 @@ static bool osslLoad(std::string &why)
         {
             return;
         }
-        // libssl's handle finds libcrypto's functions too: the libcrypto
-        // that this libssl was built with.
         std::string missing;
 #define OSSL_LOAD(f) \
-        ossl.f = (decltype(ossl.f))dlsym(h, #f); \
+        ossl.f = (decltype(ossl.f))osslSymbol(h, #f); \
         if (ossl.f == nullptr && missing.empty()) missing = #f;
         OSSL_FUNCTIONS(OSSL_LOAD)
 #undef OSSL_LOAD
@@ -173,7 +293,7 @@ static bool osslLoad(std::string &why)
                 reason = std::string("the OpenSSL in ") + env + " (OOSOCKETS_OPENSSL) is not OpenSSL 3";
             }
             ossl = OsslTable();
-            dlclose(h);
+            osslClose(h);
             return;
         }
         loaded = true;                              // h stays open for good
@@ -279,5 +399,4 @@ static bool osslLoad(std::string &why)
 #define d2i_X509 (ossl.d2i_X509)
 #define i2d_X509 (ossl.i2d_X509)
 
-#endif // !_WIN32
 #endif // OOSOCKETS_OSSL_H

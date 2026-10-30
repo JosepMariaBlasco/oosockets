@@ -178,6 +178,28 @@ inUse:
   c = certificateFails(certFile("keytool.p12"), "wrong")
   self~assertTrue(c~additional[1]~endsWith(": wrong password for the PKCS#12 file"), c~additional[1])
 
+-- The key formats of PEM files (Windows reads them itself): EC (SEC1),
+-- RSA (PKCS#1), encrypted PKCS#8; each server's certificate self-signed,
+-- trusted by the client as it is.
+::method test_key_formats
+  do f over .array~of("ec.pem", "pkcs1.pem", "encrypted.pem")
+    password = ""
+    if f == "encrypted.pem" then password = "test"
+    srv = .TLSServerSocket~new(0, serverOptions(f, password), "127.0.0.1")
+    opts = .TLSOptions~new~trust(certFile(f))
+    msg = .Client~new~start("echoOnce", srv~localPort, f, opts)
+    c = srv~accept
+    c~readTimeout = 10
+    c~lineOut(c~lineIn)
+    self~assertSame(f, msg~result, f)
+    c~close
+    srv~close
+  end
+
+::method test_an_encrypted_key_with_the_wrong_password
+  c = certificateFails(certFile("encrypted.pem"), "wrong")
+  self~assertTrue(c~additional[1]~pos(": cannot read the private key") > 0, c~additional[1])
+
 ::method test_string
   srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
   self~assertSame("a TLSServerSocket on port" srv~localPort, srv~string)

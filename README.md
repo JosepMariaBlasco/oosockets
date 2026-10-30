@@ -144,9 +144,15 @@ s~close
   Windows Update: `TLSSocket`, `TLSServerSocket`, `startTLS`,
   `startTLSServer` and the DTLS client, `DTLSSocket`. Only the DTLS server
   (`DTLSServerSocket`) uses OpenSSL, since Schannel's cannot be made to
-  work (`probes/schannel/`); OpenSSL is linked statically for now. To use
-  OpenSSL for everything, set the environment variable **`OOSOCKETS_TLS`**
-  to `openssl` (Windows still decides trust). One difference: Schannel's
+  work (`probes/schannel/`). The Windows zip has OpenSSL 3's DLLs
+  (`libssl-3-x64.dll`, `libcrypto-3-x64.dll`), loaded only when the DTLS
+  server (or `OOSOCKETS_TLS`, below) needs them: keep them next to
+  `oosockets.dll`. Without them everything else works, certificate files
+  included (Windows reads them itself), and the DTLS server raises `TLS
+  error: OpenSSL 3 not found; ...`. `OOSOCKETS_OPENSSL` names another
+  OpenSSL 3's directory, as elsewhere. To use OpenSSL for everything, set
+  the environment variable **`OOSOCKETS_TLS`** to `openssl` (Windows still
+  decides trust). One difference: Schannel's
   DTLS client cannot send DTLS's closing message (`close_notify`), so a
   server is not told when a Windows `DTLSSocket` closes.
 
@@ -376,17 +382,16 @@ s~close
 Needs CMake, a C++11 compiler, an installed ooRexx 5.x (the family of
 projects this belongs to uses trunk r13329, see `scripts/oorexx-version.sh`)
 and OpenSSL 3: on Linux the system's development package (`libssl-dev`);
-on macOS Homebrew's `openssl@3` (on both, only its headers: the library
-does not link OpenSSL, it loads it when TLS is first used, `src/ossl.h`);
-on Windows vcpkg's
-`openssl:x64-windows-static-md` (`.github/workflows/ci.yml` has the
-details).
+on macOS Homebrew's `openssl@3`; on Windows vcpkg's `openssl:x64-windows`
+(on all three, only its headers: the library does not link OpenSSL, it
+loads it when it is first needed, `src/ossl.h`; `.github/workflows/ci.yml`
+has the details).
 
 ```sh
 cmake -S . -B build -DOOREXX_HOME=/usr/local     # where include/oorexxapi.h is
 #   macOS:   -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
 #   Windows: -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
-#            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+#            -DVCPKG_TARGET_TRIPLET=x64-windows
 cmake --build build --config Release
 ```
 
