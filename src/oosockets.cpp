@@ -63,6 +63,7 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <cctype>
 #include <cstdio>
 #include <cerrno>
 #include <chrono>
@@ -1626,13 +1627,38 @@ static RexxArrayObject handshakeStep(RexxMethodContext *context, Sock *s, double
 /* to write; the waiting is done outside the lock, a slice at a time.         */
 /*----------------------------------------------------------------------------*/
 
-// Whether Windows does TLS with Schannel: yes, unless OOSOCKETS_TLS is
-// "openssl". Read each time a connection starts TLS.
-static bool useSchannel()
+// OOSOCKETS_TLS, lowercase ("" when not set). Read each time a connection
+// starts TLS.
+static std::string tlsChoice()
 {
     char buf[32] = "";
     DWORD n = GetEnvironmentVariableA("OOSOCKETS_TLS", buf, sizeof(buf));
-    return !(n > 0 && n < sizeof(buf) && _stricmp(buf, "openssl") == 0);
+    std::string v = n > 0 && n < sizeof(buf) ? buf : "";
+    for (auto &ch : v)
+    {
+        ch = (char)tolower((unsigned char)ch);
+    }
+    return v;
+}
+
+// Whether Windows does TLS with Schannel: yes, unless OOSOCKETS_TLS is
+// "openssl".
+static bool useSchannel()
+{
+    return tlsChoice() != "openssl";
+}
+
+// Whether DTLS's client is Schannel's: only when OpenSSL cannot be loaded
+// (Rony, 30/10/2026: Schannel's DTLS client cannot send close_notify), or
+// when OOSOCKETS_TLS is "schannel"; never when it is "openssl".
+static bool dtlsClientBySchannel()
+{
+    std::string v = tlsChoice();
+    if (v == "openssl")
+    {
+        return false;
+    }
+    return v == "schannel" || !opensslHere();
 }
 
 // Schannel's credentials, shared by every connection a TLSServerSocket
@@ -6764,7 +6790,7 @@ RexxMethod5(RexxArrayObject, dtls_connect, CSTRING, host, CSTRING, port, RexxArr
             CSTRING, minVersion, double, timeout)
 {
 #ifdef _WIN32
-    bool bySchannel = useSchannel();
+    bool bySchannel = dtlsClientBySchannel();
     if (bySchannel && strcmp(minVersion, "1.3") == 0)
     {
         return errorArray(context, "DTLS 1.3 is not supported (Schannel)", "", 0);

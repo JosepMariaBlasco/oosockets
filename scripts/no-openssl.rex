@@ -9,7 +9,8 @@
    in its directory; else what each system says when it finds none by
    itself. windows: Windows, where Schannel does TLS without OpenSSL, and
    reads the certificate files: only the DTLS server, and everything with
-   OOSOCKETS_TLS=openssl, need OpenSSL.                                   */
+   OOSOCKETS_TLS=openssl, need OpenSSL; the DTLS client, which uses OpenSSL
+   when it can, is then Schannel's.                                       */
 
   parse arg certs mode
   sep = .file~separator
@@ -36,6 +37,7 @@
     call works "TLSOptions~certificate (PEM)", 'x = .TLSOptions~new~certificate("'certs'server.pem")'
     opts = .TLSOptions~new~certificate(certs"server.pem")
     call try "DTLSServerSocket~new", 'x = .DTLSServerSocket~new(0, opts, "127.0.0.1")'
+    call schannelDTLS port
     call value "OOSOCKETS_TLS", "openssl", "ENVIRONMENT"
   end
   call try "TLSSocket~new", 'x = .TLSSocket~new("127.0.0.1",' port', , 5)'
@@ -51,6 +53,23 @@
     call value "OOSOCKETS_TLS", "", "ENVIRONMENT"
   say "plain sockets connected; failures:" failures
   exit failures > 0
+
+-- Without OpenSSL, Windows' DTLS client is Schannel's: DTLSSocket~new to a
+-- port where nobody answers fails, but not for want of OpenSSL.
+schannelDTLS: procedure expose failures want
+  use arg port
+  signal on syntax name dtlsFailed
+  x = .DTLSSocket~new("127.0.0.1", port, , 2)
+  say "FAILED: DTLSSocket~new (Schannel) connected to nobody"; failures += 1
+  return
+dtlsFailed:
+  a = condition("A")
+  if condition("O")~code == 48.900, a[1]~pos("OpenSSL") == 0 then
+    say "ok: DTLSSocket~new (Schannel) without OpenSSL:" a[1]
+  else do
+    say "FAILED: DTLSSocket~new (Schannel) without OpenSSL:" condition("O")~code a[1]; failures += 1
+  end
+  return
 
 works: procedure expose failures opts
   use arg what, code

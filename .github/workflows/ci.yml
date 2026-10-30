@@ -134,9 +134,20 @@ jobs:
           OOSOCKETS_TLS: openssl
         run: scripts/test.sh "$PWD/build/Release"
 
+      # Windows: the DTLS client is OpenSSL's when OpenSSL is there (Rony,
+      # 30/10/2026), else Schannel's, without close_notify;
+      # OOSOCKETS_TLS=schannel makes it Schannel's here, with OpenSSL.
+      - name: Test with OOSOCKETS_TLS=schannel (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        env:
+          OOSOCKETS_TLS: schannel
+        run: scripts/test.sh "$PWD/build/Release" DTLSSocket
+
       # Windows without OpenSSL (OOSOCKETS_OPENSSL naming a directory without
-      # it): everything Schannel does works, certificate files included; the
-      # DTLS server and OOSOCKETS_TLS=openssl say what is missing. Then
+      # it): everything Schannel does works, certificate files included, and
+      # the DTLS client is Schannel's; the DTLS server and
+      # OOSOCKETS_TLS=openssl say what is missing. Then
       # OOSOCKETS_OPENSSL naming vcpkg's directory finds it there.
       - name: Without OpenSSL (Windows)
         if: runner.os == 'Windows'

@@ -449,7 +449,8 @@ syntax:
 syntax:
   return condition("o")
 
--- Whether the client's DTLS is Schannel's: Windows, unless OOSOCKETS_TLS=openssl.
+-- Whether the client's DTLS is Schannel's: on Windows, with
+-- OOSOCKETS_TLS=schannel (the tests always have OpenSSL: the DTLS server needs it).
 ::routine schannel
   parse source os .
-  return os~upper~startsWith("WINDOWS") & value("OOSOCKETS_TLS", , "ENVIRONMENT")~lower \== "openssl"
+  return os~upper~startsWith("WINDOWS") & value("OOSOCKETS_TLS", , "ENVIRONMENT")~lower == "schannel"
