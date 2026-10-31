@@ -8,7 +8,7 @@ DTLS (TLS over UDP).
 > **Status: beta**, as ooRexx 5.3.0 is; 1.0 comes with ooRexx 5.3.0.
 > The TCP classes, the TLS client, the TLS server, UDP, multicast and DTLS
 > work and are tested on Linux, macOS and Windows. Needs ooRexx 5.3.0 beta (trunk
-> r13329 or later), not 5.2.0: see `INSTALL.txt`. Names and behaviour may
+> r13344 or later), not 5.2.0: see `INSTALL.txt`. Names and behaviour may
 > still change until 1.0.
 
 ```rexx
@@ -389,7 +389,7 @@ s~close
 ## Building
 
 Needs CMake, a C++11 compiler, an installed ooRexx 5.x (the family of
-projects this belongs to uses trunk r13329, see `scripts/oorexx-version.sh`)
+projects this belongs to uses trunk r13344, see `scripts/oorexx-version.sh`)
 and OpenSSL 3: on Linux the system's development package (`libssl-dev`);
 on macOS Homebrew's `openssl@3`; on Windows vcpkg's `openssl:x64-windows`
 (on all three, only its headers: the library does not link OpenSSL, it
