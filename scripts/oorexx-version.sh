@@ -1,5 +1,5 @@
 # The ooRexx the family builds and tests against (oorexx-bridges,
 # CONVENTIONS.md, "Which ooRexx"). The CI and the session setup both read
 # this file, so the two never differ.
-OOREXX_REV=13346        # SourceForge's builds of trunk r13346
-OOREXX_TEST_REV=13347   # ooRexx's test suite (ooRexxUnit), test/trunk
+OOREXX_REV=13358        # SourceForge's builds of trunk r13358
+OOREXX_TEST_REV=13359   # ooRexx's test suite (ooRexxUnit), test/trunk
