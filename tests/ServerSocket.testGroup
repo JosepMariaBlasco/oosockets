@@ -102,8 +102,9 @@ return testResult
   return 0
 
 ::routine hasIpv6
-  signal on syntax name none
-  .ServerSocket~new(0, "::1")~close
+  do
+    .ServerSocket~new(0, "::1")~close
+  catch syntax
+    return .false
+  end
   return .true
-none:
-  return .false

@@ -59,18 +59,14 @@ return testResult
   msg = peer~start("send", "last" || "0a"x)
   s = .Socket~new("127.0.0.1", peer~port)
   self~assertSame("last", s~lineIn)
-  trapped = .false
-  signal on notready name eos
-  line = s~lineIn
-  signal eosDone
-eos:
-  trapped = .true
-  c = condition("o")
+  c = .nil
+  do
+    line = s~lineIn
+  catch c = notready
+  end
+  self~assertTrue(c \== .nil, "NOTREADY at the end of the stream")
   self~assertSame(s, c~additional)
   self~assertSame(s~string, c~description)
-eosDone:
-  signal off notready
-  self~assertTrue(trapped, "NOTREADY at the end of the stream")
   self~assertSame("NOTREADY", s~state)
   self~assertSame("NOTREADY:EOF", s~description)
   self~assertSame(0, s~lines)
@@ -201,6 +197,20 @@ done:
   s~close
   peer~close
 
+::method test_a_server_loop_with_catch_notready
+  peer = .Peer~new
+  msg = peer~start("send", "a" || "0a"x || "b" || "0a"x || "c" || "0a"x)
+  s = .Socket~new("127.0.0.1", peer~port)
+  got = ""
+  loop
+    got = got || s~lineIn
+  catch notready
+  end
+  self~assertSame("abc", got)
+  msg~result
+  s~close
+  peer~close
+
 ::method test_shutdownOutput_then_read_the_reply
   peer = .Peer~new
   msg = peer~start("collect", "the reply")
@@ -282,11 +292,12 @@ done:
 
 ::method test_refused_carries_the_system_error
   port = freePort()
-  signal on syntax name refused
-  s = .Socket~new("127.0.0.1", port)
-  self~fail("connected to a closed port")
-refused:
-  c = condition("o")
+  c = .nil
+  do
+    s = .Socket~new("127.0.0.1", port)
+  catch c = syntax
+  end
+  if c == .nil then self~fail("connected to a closed port")
   self~assertSame(48, c~rc)
   self~assertSame("ECONNREFUSED", c~additional[2])
   self~assertTrue(c~additional[4] \== "", "the system's text")   -- e.g. "Connection refused"
@@ -493,11 +504,10 @@ refused:
 ::method lines
   use strict arg s, n
   got = .array~new
-  signal on notready name stop
   do n
     got~append(s~lineIn)
+  catch notready
   end
-stop:
   return got
 
 -- A port nobody listens on: one the system gave and took back.
@@ -509,7 +519,8 @@ stop:
 
 -- A Peer on ::1, or .nil if the machine has no IPv6.
 ::routine ipv6Peer
-  signal on syntax name none
-  return .Peer~new("::1")
-none:
-  return .nil
+  do
+    return .Peer~new("::1")
+  catch syntax
+    return .nil
+  end

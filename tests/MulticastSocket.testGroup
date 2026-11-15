@@ -36,14 +36,15 @@ return testResult
 
 ::method test_a_udp_socket_does_not_take_a_shared_port
   a = .MulticastSocket~new
-  signal on syntax
-  u = .UDPSocket~new(a~localPort)
-  u~close
+  c = .nil
+  do
+    u = .UDPSocket~new(a~localPort)
+    u~close
+  catch c = syntax
+  end
   a~close
-  self~fail("the UDPSocket took the port")
-syntax:
-  a~close
-  self~assertSame(48.900, condition("o")~code)
+  if c == .nil then self~fail("the UDPSocket took the port")
+  self~assertSame(48.900, c~code)
 
 ::method test_both_members_receive
   g = group4()
@@ -212,10 +213,11 @@ syntax:
 ::routine ipv6Multicast
   parse source os .
   if os~upper~pos("DARWIN") > 0 | os~upper~pos("MAC") > 0 then return .false
-  signal on syntax name none
-  m = .MulticastSocket~new
-  m~joinGroup("ff12::4297")
-  m~close
+  do
+    m = .MulticastSocket~new
+    m~joinGroup("ff12::4297")
+    m~close
+  catch syntax
+    return .false
+  end
   return .true
-none:
-  return .false

@@ -105,11 +105,12 @@ return testResult
   good = .Client~new~start("echoOnce", port, "good", trustCA(), 3)  -- starts later
   c = srv~accept                             -- the bad one, its handshake not over
   c~receiveTimeout = 10
-  signal on syntax name failed
-  c~receive
-  self~fail("the bad client's receive should have failed")
-failed:
-  co = condition("o")
+  co = .nil
+  do
+    c~receive
+  catch co = syntax
+  end
+  if co == .nil then self~fail("the bad client's receive should have failed")
   self~assertSame(48.900, co~code)
   self~assertTrue(co~additional[1]~startsWith("TLS error: handshake failed: "), co~additional[1])
   self~assertSame("TLS", co~additional[2])
@@ -183,11 +184,12 @@ failed:
     srv~close
     return
   end
-  signal on syntax
-  c~receive                                  -- the handshake, then the client's close
-  self~fail("receive should have failed")
-syntax:
-  co = condition("o")
+  co = .nil
+  do
+    c~receive                                -- the handshake, then the client's close
+  catch co = syntax
+  end
+  if co == .nil then self~fail("receive should have failed")
   self~assertSame(48.900, co~code)
   self~assertSame("TLS error: the peer closed the connection (127.0.0.1, port" c~remotePort")", co~additional[1])
   self~assertSame("connected", msg~result)
@@ -345,12 +347,13 @@ syntax:
   return reply
 ::method connectOnly
   use arg port, options = (trustCA())
-  signal on syntax
-  s = .DTLSSocket~new("localhost", port, options, 10)
+  do
+    s = .DTLSSocket~new("localhost", port, options, 10)
+  catch c = syntax
+    return c~additional[1]
+  end
   s~close
   return "connected"
-syntax:
-  return condition("o")~additional[1]
 
 ::class Server
 -- Echoes in upper case until "bye"; returns how many it echoed.
@@ -396,21 +399,21 @@ syntax:
 ::method acceptFor
   use strict arg srv, seconds
   srv~acceptTimeout = seconds
-  signal on syntax
-  c = srv~accept
-  if c \== .nil then c~close
-  srv~close
-  return
-syntax:
+  do
+    c = srv~accept
+    if c \== .nil then c~close
+    srv~close
+  catch syntax
+  end
   return
 ::method accept
   use strict arg srv
-  signal on syntax
-  srv~accept
+  do
+    srv~accept
+  catch c = syntax
+    return c~code c~message
+  end
   return "accepted"
-syntax:
-  c = condition("o")
-  return c~code c~message
 
 ::class Shell
 ::method run
@@ -422,10 +425,11 @@ syntax:
 
 ::routine tryConnect
   use arg port
-  signal on syntax
-  return .DTLSSocket~new("localhost", port, trustCA(), 2)
-syntax:
-  return .nil
+  do
+    return .DTLSSocket~new("localhost", port, trustCA(), 2)
+  catch syntax
+    return .nil
+  end
 
 ::routine opensslHere
   parse source os .
@@ -442,12 +446,13 @@ syntax:
 -- The condition object of the SYNTAX condition DTLSSocket~new raised.
 ::routine connectFails
   use arg host, port, options, timeout = 10
-  signal on syntax
-  s = .DTLSSocket~new(host, port, options, timeout)
+  do
+    s = .DTLSSocket~new(host, port, options, timeout)
+  catch c = syntax
+    return c
+  end
   s~close
   raise syntax 40.900 array("expected DTLSSocket~new to fail; it connected to" host)
-syntax:
-  return condition("o")
 
 -- Whether the client's DTLS is Schannel's: on Windows, with
 -- OOSOCKETS_TLS=schannel (the tests always have OpenSSL: the DTLS server needs it).

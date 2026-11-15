@@ -58,42 +58,45 @@
 -- port where nobody answers fails, but not for want of OpenSSL.
 schannelDTLS: procedure expose failures want
   use arg port
-  signal on syntax name dtlsFailed
-  x = .DTLSSocket~new("127.0.0.1", port, , 2)
-  say "FAILED: DTLSSocket~new (Schannel) connected to nobody"; failures += 1
-  return
-dtlsFailed:
-  a = condition("A")
-  if condition("O")~code == 48.900, a[1]~pos("OpenSSL") == 0 then
-    say "ok: DTLSSocket~new (Schannel) without OpenSSL:" a[1]
-  else do
-    say "FAILED: DTLSSocket~new (Schannel) without OpenSSL:" condition("O")~code a[1]; failures += 1
+  do
+    x = .DTLSSocket~new("127.0.0.1", port, , 2)
+  catch c = syntax
+    a = c~additional
+    if c~code == 48.900, a[1]~pos("OpenSSL") == 0 then
+      say "ok: DTLSSocket~new (Schannel) without OpenSSL:" a[1]
+    else do
+      say "FAILED: DTLSSocket~new (Schannel) without OpenSSL:" c~code a[1]; failures += 1
+    end
+    return
   end
+  say "FAILED: DTLSSocket~new (Schannel) connected to nobody"; failures += 1
   return
 
 works: procedure expose failures opts
   use arg what, code
-  signal on syntax name broke
-  interpret code
+  do
+    interpret code
+  catch c = syntax
+    say "FAILED:" what":" c~code c~additional[1]; failures += 1
+    return
+  end
   say "ok:" what "works"
-  return
-broke:
-  say "FAILED:" what":" condition("O")~code condition("A")[1]; failures += 1
   return
 
 try: procedure expose want failures s opts
   use arg what, code
-  signal on syntax
-  interpret code
-  say "FAILED:" what "did not raise a condition"; failures += 1
-  return
-syntax:
-  a = condition("A")
-  if condition("O")~code == 48.900, a[1]~pos(want) > 0, a[1]~startsWith("TLS error: ") then
-    say "ok:" what":" a[1]
-  else do
-    say "FAILED:" what":" condition("O")~code a[1]; failures += 1
+  do
+    interpret code
+  catch c = syntax
+    a = c~additional
+    if c~code == 48.900, a[1]~pos(want) > 0, a[1]~startsWith("TLS error: ") then
+      say "ok:" what":" a[1]
+    else do
+      say "FAILED:" what":" c~code a[1]; failures += 1
+    end
+    return
   end
+  say "FAILED:" what "did not raise a condition"; failures += 1
   return
 
 ::requires "sockets.cls"

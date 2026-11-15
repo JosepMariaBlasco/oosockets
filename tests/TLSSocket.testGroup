@@ -203,13 +203,11 @@ return testResult
   self~assertSame("one", s~lineIn)
   self~assertSame("two", s~lineIn)
   trapped = .false
-  signal on notready name eos
-  s~lineIn
-  signal eosDone
-eos:
-  trapped = .true
-eosDone:
-  signal off notready
+  do
+    s~lineIn
+  catch notready
+    trapped = .true
+  end
   self~assertTrue(trapped, "NOTREADY at the end of the stream")
   self~assertSame("NOTREADY:EOF", s~description)
   s~close
@@ -287,11 +285,12 @@ eosDone:
   self~assertSame("220 ready", s~lineIn)
   call sysSleep 0.2
   s~chars                                            -- INJECTED is in the buffer
-  signal on syntax name failed
-  s~startTLS(, trustCA())
-  self~fail("startTLS should have failed")
-failed:
-  c = condition("o")
+  c = .nil
+  do
+    s~startTLS(, trustCA())
+  catch c = syntax
+  end
+  if c == .nil then self~fail("startTLS should have failed")
   self~assertSame("TLS error: data arrived before the TLS handshake (localhost, port" peer~port")", c~additional[1])
   self~assertSame("UNKNOWN:", s~description)
   msg~result
@@ -301,11 +300,12 @@ failed:
   peer = .Peer~new
   msg = peer~start("tlsEcho")
   s = .TLSSocket~new("localhost", peer~port, trustCA())
-  signal on syntax name failed
-  s~startTLS
-  self~fail("a second startTLS should have failed")
-failed:
-  c = condition("o")
+  c = .nil
+  do
+    s~startTLS
+  catch c = syntax
+  end
+  if c == .nil then self~fail("a second startTLS should have failed")
   self~assertSame("TLS error: TLS has already started on this connection (localhost, port" peer~port")", c~additional[1])
   s~lineOut("bye")
   s~close
@@ -336,18 +336,21 @@ failed:
 ::method test_minVersion_values
   opts = .TLSOptions~new
   self~assertSame("1.2", opts~minVersion)
-  signal on syntax name failed
-  opts~minVersion = "1.1"
-  self~fail("minVersion 1.1 should have been refused")
-failed:
-  self~assertSame(88.900, condition("o")~code)
+  c = .nil
+  do
+    opts~minVersion = "1.1"
+  catch c = syntax
+  end
+  if c == .nil then self~fail("minVersion 1.1 should have been refused")
+  self~assertSame(88.900, c~code)
 
 ::method test_options_must_be_TLSOptions
-  signal on syntax name failed
-  .TLSSocket~new("localhost", 1, "not options")
-  self~fail("should have failed")
-failed:
-  c = condition("o")
+  c = .nil
+  do
+    .TLSSocket~new("localhost", 1, "not options")
+  catch c = syntax
+  end
+  if c == .nil then self~fail("should have failed")
   self~assertSame(88.900, c~code)
 
 /* ---- online: the system decides (OOSOCKETS_ONLINE=1) -------------------- */
@@ -420,20 +423,22 @@ failed:
 -- The condition object of the SYNTAX condition TLSSocket~new raised.
 ::routine connectFails
   use arg host, port, options, timeout = 10
-  signal on syntax
-  s = .TLSSocket~new(host, port, options, timeout)
+  do
+    s = .TLSSocket~new(host, port, options, timeout)
+  catch c = syntax
+    return c
+  end
   s~close
   raise syntax 40.900 array("expected TLSSocket~new to fail; it connected to" host)
-syntax:
-  return condition("o")
 
 ::routine trustFails
   use arg file, password = ""
-  signal on syntax
-  .TLSOptions~new~trust(file, password)
+  do
+    .TLSOptions~new~trust(file, password)
+  catch c = syntax
+    return c
+  end
   raise syntax 40.900 array("expected trust to fail:" file)
-syntax:
-  return condition("o")
 
 -- A TLSSocket to host:443 (the system decides); or the condition object
 -- if it was refused; or .nil (said) if the network failed three times:
@@ -452,17 +457,19 @@ syntax:
 
 ::routine tryConnect
   use arg host
-  signal on syntax
-  return .TLSSocket~new(host, 443, , 20)
-syntax:
-  return condition("o")
+  do
+    return .TLSSocket~new(host, 443, , 20)
+  catch c = syntax
+    return c
+  end
 
 ::routine online
   return value("OOSOCKETS_ONLINE", , "ENVIRONMENT") == 1
 
 -- A Peer on ::1, or .nil if the machine has no IPv6.
 ::routine ipv6Peer
-  signal on syntax name none
-  return .Peer~new("::1")
-none:
-  return .nil
+  do
+    return .Peer~new("::1")
+  catch syntax
+    return .nil
+  end

@@ -252,16 +252,17 @@ return testResult
 ::class Receiver
 ::method receive
   use strict arg s
-  signal on syntax
-  d = s~receive
+  do
+    d = s~receive
+  catch c = syntax
+    return c~code c~message
+  end
   return "received" d
-syntax:
-  c = condition("o")
-  return c~code c~message
 
 ::routine hasIpv6
-  signal on syntax name none
-  .UDPSocket~new(0, "::1")~close
+  do
+    .UDPSocket~new(0, "::1")~close
+  catch syntax
+    return .false
+  end
   return .true
-none:
-  return .false

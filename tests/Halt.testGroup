@@ -1,8 +1,9 @@
 #!/usr/bin/env rexx
 /* HALT (Ctrl-C) while a call waits for the network: it stops waiting,
-   and the HALT reaches the caller's line, where SIGNAL ON HALT catches
-   it. Each test halts a waiting activity with Message~halt, which is
-   what Ctrl-C does to every activity.                                  */
+   and the HALT reaches the caller's line, where a CATCH HALT clause of
+   the block around the call catches it, or SIGNAL ON HALT. Each test
+   halts a waiting activity with Message~halt, which is what Ctrl-C does
+   to every activity.                                                   */
 
   parse source . . fileSpec
   group = .TestGroup~new(fileSpec)
@@ -40,6 +41,12 @@ return testResult
   s = .UDPSocket~new(0, "127.0.0.1")
   r = self~halted(.Waiter~new, "receive", s)
   self~assertSame("HALT at" .Waiter~line("receive"), r[1])
+  s~close
+
+::method test_udp_receive_with_signal_on_halt
+  s = .UDPSocket~new(0, "127.0.0.1")
+  r = self~halted(.Waiter~new, "receiveSignalOn", s)
+  self~assertSame("HALT at" .Waiter~line("receiveSignalOn"), r[1])
   s~close
 
 ::method test_lineIn
@@ -170,7 +177,7 @@ return testResult
 
 
 -- Each method waits in one call, on the line after its "-- waits:" (the
--- line number that the class method line finds), and traps the HALT.
+-- line number that the class method line finds), and catches the HALT.
 ::class Waiter
 ::method line class
   use arg name
@@ -184,11 +191,13 @@ return testResult
 
 ::method receive
   use arg s
-  signal on halt
-  -- waits:
-  d = s~receive
+  do
+    -- waits:
+    d = s~receive
+  catch halt
+    return "HALT at" sigl
+  end
   return "received" d
-halt: return "HALT at" sigl
 
 ::method receiveUntrapped
   use arg s
@@ -198,72 +207,95 @@ halt: return "HALT at" sigl
 
 ::method lineIn
   use arg s
-  signal on halt
-  -- waits:
-  line = s~lineIn
+  do
+    -- waits:
+    line = s~lineIn
+  catch halt
+    return "HALT at" sigl
+  end
   return "line" line
-halt: return "HALT at" sigl
 
 ::method charIn
   use arg s
-  signal on halt
-  -- waits:
-  c = s~charIn
+  do
+    -- waits:
+    c = s~charIn
+  catch halt
+    return "HALT at" sigl
+  end
   return "char" c
-halt: return "HALT at" sigl
 
 ::method read
   use arg s
-  signal on halt
-  -- waits:
-  data = s~read
+  do
+    -- waits:
+    data = s~read
+  catch halt
+    return "HALT at" sigl
+  end
   return "read" data
-halt: return "HALT at" sigl
 
 ::method accept
   use arg srv
-  signal on halt
-  -- waits:
-  c = srv~accept
+  do
+    -- waits:
+    c = srv~accept
+  catch halt
+    return "HALT at" sigl
+  end
   return "accepted" c
-halt: return "HALT at" sigl
 
 ::method flood
   use arg s
-  signal on halt
   line = copies("x", 1000)
   loop 1000000                               -- 1 GB: the buffers fill long before
     -- waits:
     s~lineOut(line)
+  catch halt
+    return "HALT at" sigl
   end
   return "all written?!"
-halt: return "HALT at" sigl
 
 ::method tls
   use arg host, port
-  signal on halt
-  -- waits:
-  s = .TLSSocket~new(host, port, .TLSOptions~new)
+  do
+    -- waits:
+    s = .TLSSocket~new(host, port, .TLSOptions~new)
+  catch halt
+    return "HALT at" sigl
+  end
   return "connected?!"
-halt: return "HALT at" sigl
 
 ::method dtls
   use arg host, port
-  signal on halt
-  -- waits:
-  s = .DTLSSocket~new(host, port, .TLSOptions~new)
+  do
+    -- waits:
+    s = .DTLSSocket~new(host, port, .TLSOptions~new)
+  catch halt
+    return "HALT at" sigl
+  end
   return "connected?!"
-halt: return "HALT at" sigl
 
 ::method connect
   use arg host, port
-  signal on halt
-  signal on syntax
-  -- waits:
-  s = .Socket~new(host, port)
+  do
+    -- waits:
+    s = .Socket~new(host, port)
+  catch halt
+    return "HALT at" sigl
+  catch c = syntax
+    return c~message
+  end
   return "connected?!"
+
+-- As receive, with the trap that programs written before CATCH use.
+::method receiveSignalOn
+  use arg s
+  signal on halt
+  -- waits:
+  d = s~receive
+  return "received" d
 halt: return "HALT at" sigl
-syntax: return condition("O")~message
 
 
 ::class Acceptor
@@ -279,8 +311,9 @@ syntax: return condition("O")~message
   use arg srv
   c = srv~accept
   c~readTimeout = 10
-  signal on notready
-  c~lineIn                                   -- makes the handshake, then waits
-notready:
+  do
+    c~lineIn                                 -- makes the handshake, then waits
+  catch notready
+  end
   c~close
   return 0

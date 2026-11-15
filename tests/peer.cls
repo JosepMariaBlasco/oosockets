@@ -32,14 +32,13 @@
   expose srv
   c = srv~accept
   got = .array~new
-  signal on notready
   loop
     line = c~lineIn
     got~append(line)
     if line == "bye" then leave
     c~lineOut(line)
+  catch notready
   end
-notready:
   c~close
   return got
 
@@ -59,11 +58,10 @@ notready:
   use strict arg reply = .nil
   c = srv~accept
   data = .mutableBuffer~new
-  signal on notready
   loop
     data~append(c~read)
+  catch notready
   end
-notready:
   if reply \== .nil then c~charOut(reply)
   c~close
   return data~string
@@ -76,9 +74,10 @@ notready:
   c = srv~accept
   call sysSleep seconds
   c~lineOut(line)
-  signal on notready
-  c~lineIn
-notready:
+  do
+    c~lineIn
+  catch notready
+  end
   c~close
   return 0
 
@@ -90,11 +89,10 @@ notready:
   c = srv~accept
   c~readTimeout = seconds
   got = .array~new
-  signal on notready
   loop
     got~append(c~lineIn)
+  catch notready
   end
-notready:
   c~close
   return got
 
@@ -115,22 +113,22 @@ notready:
   use strict arg file = "server.pem", password = "test"
   c = srv~accept
   c~readTimeout = 10
-  signal on syntax
-  c~startTLSServer(serverOptions(file, password))
+  do
+    c~startTLSServer(serverOptions(file, password))
+  catch e = syntax
+    c~close
+    return e~message
+  end
   got = .array~new
-  signal on notready
   loop
     line = c~lineIn
     got~append(line)
     if line == "bye" then leave
     c~lineOut(line)
+  catch notready
   end
-notready:
   c~close
   return got
-syntax:
-  c~close
-  return condition("o")~message
 
 -- Accepts, makes the TLS handshake, sends the bytes and closes.
 ::method tlsSend unguarded
@@ -152,11 +150,10 @@ syntax:
   c~readTimeout = 20
   c~startTLSServer(serverOptions("server.pem"))
   data = .mutableBuffer~new
-  signal on notready
   loop
     data~append(c~read)
+  catch notready
   end
-notready:
   c~lineOut(data~length)
   c~close
   return data~string
@@ -186,9 +183,10 @@ notready:
   c = srv~accept
   c~readTimeout = 10
   c~charOut("220 ready" || "0d0a"x || "INJECTED" || "0d0a"x)
-  signal on notready
-  c~read
-notready:
+  do
+    c~read
+  catch notready
+  end
   c~close
   return 0
 
