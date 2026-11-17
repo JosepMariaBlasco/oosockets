@@ -21,58 +21,73 @@ return testResult
 
 ::method test_echo
   srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
-  msg = .Client~new~start("echoOnce", srv~localPort, "Hello, TLS server")
-  c = srv~accept
-  self~assertTrue(c~isA(.TLSSocket))
-  self~assertTrue(c~secure)
-  self~assertSame("", c~protocol)                  -- no handshake yet
-  c~readTimeout = 10
-  self~assertSame("Hello, TLS server", c~lineIn)   -- the handshake, then the line
-  self~assertSame("TLSv1.3", c~protocol)
-  c~lineOut("echo")
-  self~assertSame("echo", msg~result)
-  c~close
-  srv~close
+  c = .nil
+  do
+    msg = .Client~new~start("echoOnce", srv~localPort, "Hello, TLS server")
+    c = srv~accept
+    self~assertTrue(c~isA(.TLSSocket))
+    self~assertTrue(c~secure)
+    self~assertSame("", c~protocol)                  -- no handshake yet
+    c~readTimeout = 10
+    self~assertSame("Hello, TLS server", c~lineIn)   -- the handshake, then the line
+    self~assertSame("TLSv1.3", c~protocol)
+    c~lineOut("echo")
+    self~assertSame("echo", msg~result)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 -- Rony's classroom case: one keytool keystore on both ends.
 ::method test_a_keytool_keystore_on_both_ends
   srv = .TLSServerSocket~new(0, serverOptions("keytool.p12", "123456"), "127.0.0.1")
-  opts = .TLSOptions~new~trust(certFile("keytool.p12"), "123456")
-  msg = .Client~new~start("echoOnce", srv~localPort, "keytool", opts)
-  c = srv~accept
-  c~readTimeout = 10
-  c~lineOut(c~lineIn)
-  self~assertSame("keytool", msg~result)
-  c~close
-  srv~close
+  c = .nil
+  do
+    opts = .TLSOptions~new~trust(certFile("keytool.p12"), "123456")
+    msg = .Client~new~start("echoOnce", srv~localPort, "keytool", opts)
+    c = srv~accept
+    c~readTimeout = 10
+    c~lineOut(c~lineIn)
+    self~assertSame("keytool", msg~result)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 -- The server's first move is a write: the handshake happens there.
 ::method test_the_server_writes_first
   srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
-  msg = .Client~new~start("readOne", srv~localPort)
-  c = srv~accept
-  c~writeTimeout = 10
-  self~assertSame(0, c~lineOut("220 welcome"))
-  self~assertSame("220 welcome", msg~result)
-  c~close
-  srv~close
+  c = .nil
+  do
+    msg = .Client~new~start("readOne", srv~localPort)
+    c = srv~accept
+    c~writeTimeout = 10
+    self~assertSame(0, c~lineOut("220 welcome"))
+    self~assertSame("220 welcome", msg~result)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 -- The usual server: each client in an activity of its own.
 ::method test_one_activity_per_client
   srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
-  clients = .array~new
-  do i = 1 to 3
-    clients~append(.Client~new~start("echoOnce", srv~localPort, "client" i))
+  do
+    clients = .array~new
+    do i = 1 to 3
+      clients~append(.Client~new~start("echoOnce", srv~localPort, "client" i))
+    end
+    do 3
+      .Session~new~start("serve", srv~accept)
+    end
+    got = .array~new
+    do m over clients
+      got~append(m~result)
+    end
+    self~assertSame("client 1,client 2,client 3", got~makeString("L", ","))
+  finally
+    srv~close
   end
-  do 3
-    .Session~new~start("serve", srv~accept)
-  end
-  got = .array~new
-  do m over clients
-    got~append(m~result)
-  end
-  self~assertSame("client 1,client 2,client 3", got~makeString("L", ","))
-  srv~close
 
 /* ---- clients that fail -------------------------------------------------- */
 
@@ -81,78 +96,101 @@ return testResult
 -- server, NOTREADY on that socket, and the next client is served.
 ::method test_a_client_that_refuses_the_certificate
   srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
-  bad = .Client~new~start("connectOnly", srv~localPort, .nil)
-  c = srv~accept
-  c~readTimeout = 10
-  self~notready(c)
-  self~assertSame("ERROR", c~state)
-  self~assertTrue(c~description~startsWith("ERROR:TLS handshake failed: "), c~description)
-  say "  (the server's side:" c~description")"
-  self~assertTrue(bad~result~startsWith("TLS error: certificate"), bad~result)
-  c~close
-  -- the server goes on
-  msg = .Client~new~start("echoOnce", srv~localPort, "next")
-  c = srv~accept
-  c~readTimeout = 10
-  c~lineOut(c~lineIn)
-  self~assertSame("next", msg~result)
-  c~close
-  srv~close
+  c = .nil
+  do
+    bad = .Client~new~start("connectOnly", srv~localPort, .nil)
+    c = srv~accept
+    c~readTimeout = 10
+    self~notready(c)
+    self~assertSame("ERROR", c~state)
+    self~assertTrue(c~description~startsWith("ERROR:TLS handshake failed: "), c~description)
+    say "  (the server's side:" c~description")"
+    self~assertTrue(bad~result~startsWith("TLS error: certificate"), bad~result)
+    c~close
+    -- the server goes on
+    msg = .Client~new~start("echoOnce", srv~localPort, "next")
+    c = srv~accept
+    c~readTimeout = 10
+    c~lineOut(c~lineIn)
+    self~assertSame("next", msg~result)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 -- A client that does not speak TLS (telnet, a browser on http://).
 ::method test_a_client_in_clear
   srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
-  msg = .Client~new~start("plainLine", srv~localPort, "GET / HTTP/1.0")
-  c = srv~accept
-  c~readTimeout = 10
-  self~notready(c)
-  self~assertTrue(c~description~startsWith("ERROR:TLS handshake failed: "), c~description)
-  say "  (the server's side:" c~description")"
-  c~close
-  msg~result
-  srv~close
+  c = .nil
+  do
+    msg = .Client~new~start("plainLine", srv~localPort, "GET / HTTP/1.0")
+    c = srv~accept
+    c~readTimeout = 10
+    self~notready(c)
+    self~assertTrue(c~description~startsWith("ERROR:TLS handshake failed: "), c~description)
+    say "  (the server's side:" c~description")"
+    c~close
+    msg~result
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 -- A client that connects and says nothing waits only in its own activity,
 -- and only for readTimeout; accept goes on meanwhile.
 ::method test_a_silent_client_does_not_block_accept
   srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
-  silent = .Socket~new("127.0.0.1", srv~localPort)
-  quiet = srv~accept                                 -- returns at once
-  msg = .Client~new~start("echoOnce", srv~localPort, "not blocked")
-  c = srv~accept
-  c~readTimeout = 10
-  c~lineOut(c~lineIn)
-  self~assertSame("not blocked", msg~result)
-  c~close
-  quiet~readTimeout = 0.5
-  self~notready(quiet)
-  self~assertSame("NOTREADY:TIMEOUT", quiet~description)
-  quiet~close; silent~close
-  srv~close
+  silent = .nil; quiet = .nil; c = .nil
+  do
+    silent = .Socket~new("127.0.0.1", srv~localPort)
+    quiet = srv~accept                                 -- returns at once
+    msg = .Client~new~start("echoOnce", srv~localPort, "not blocked")
+    c = srv~accept
+    c~readTimeout = 10
+    c~lineOut(c~lineIn)
+    self~assertSame("not blocked", msg~result)
+    c~close
+    quiet~readTimeout = 0.5
+    self~notready(quiet)
+    self~assertSame("NOTREADY:TIMEOUT", quiet~description)
+  finally
+    if c \== .nil then c~close
+    if quiet \== .nil then quiet~close
+    if silent \== .nil then silent~close
+    srv~close
+  end
 
 ::method test_acceptTimeout
   srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
-  srv~acceptTimeout = 0.2
-  self~assertSame(.nil, srv~accept)
-  srv~close
+  do
+    srv~acceptTimeout = 0.2
+    self~assertSame(.nil, srv~accept)
+  finally
+    srv~close
+  end
 
 -- Rony, 29/10/2026: a TLS class says "TLS error:" also when the socket
 -- failed; additional[5] says where.
 ::method test_a_port_in_use_is_a_tls_error
   first = .ServerSocket~new(0, "127.0.0.1")
-  port = first~localPort
-  c = .nil
+  srv = .nil
   do
-    srv = .TLSServerSocket~new(port, serverOptions("server.pem"), "127.0.0.1")
-    srv~close
-  catch c = syntax
+    port = first~localPort
+    c = .nil
+    do
+      srv = .TLSServerSocket~new(port, serverOptions("server.pem"), "127.0.0.1")
+      srv~close
+    catch c = syntax
+    end
+    if c == .nil then self~fail("listened on a port in use")
+    self~assertSame(48.900, c~code)
+    self~assertSame("TLS error: address already in use (127.0.0.1, port" port")", c~additional[1])
+    self~assertSame("EADDRINUSE", c~additional[2])
+    self~assertSame("SOCKET", c~additional[5])
+  finally
+    if srv \== .nil then srv~close
+    first~close
   end
-  first~close
-  if c == .nil then self~fail("listened on a port in use")
-  self~assertSame(48.900, c~code)
-  self~assertSame("TLS error: address already in use (127.0.0.1, port" port")", c~additional[1])
-  self~assertSame("EADDRINUSE", c~additional[2])
-  self~assertSame("SOCKET", c~additional[5])
 
 /* ---- the server's certificate -------------------------------------------- */
 
@@ -187,16 +225,20 @@ return testResult
     password = ""
     if f == "encrypted.pem" | f == "ec.p12" then password = "test"
     srv = .TLSServerSocket~new(0, serverOptions(f, password), "127.0.0.1")
-    trusted = f
-    if f == "ec.p12" then trusted = "ec.pem"
-    opts = .TLSOptions~new~trust(certFile(trusted))
-    msg = .Client~new~start("echoOnce", srv~localPort, f, opts)
-    c = srv~accept
-    c~readTimeout = 10
-    c~lineOut(c~lineIn)
-    self~assertSame(f, msg~result, f)
-    c~close
-    srv~close
+    c = .nil
+    do
+      trusted = f
+      if f == "ec.p12" then trusted = "ec.pem"
+      opts = .TLSOptions~new~trust(certFile(trusted))
+      msg = .Client~new~start("echoOnce", srv~localPort, f, opts)
+      c = srv~accept
+      c~readTimeout = 10
+      c~lineOut(c~lineIn)
+      self~assertSame(f, msg~result, f)
+    finally
+      if c \== .nil then c~close
+      srv~close
+    end
   end
 
 ::method test_an_encrypted_key_with_the_wrong_password
@@ -205,25 +247,33 @@ return testResult
 
 ::method test_string
   srv = .TLSServerSocket~new(0, serverOptions("server.pem"), "127.0.0.1")
-  self~assertSame("a TLSServerSocket on port" srv~localPort, srv~string)
-  srv~close
+  do
+    self~assertSame("a TLSServerSocket on port" srv~localPort, srv~string)
+  finally
+    srv~close
+  end
 
 /* ---- startTLSServer ----------------------------------------------------- */
 
 ::method test_startTLSServer_needs_a_certificate
   peer = .Peer~new
-  msg = peer~start("acceptAndClose")
-  s = .Socket~new("127.0.0.1", peer~port)
-  c = .nil
+  s = .nil
   do
-    s~startTLSServer(.TLSOptions~new)
-  catch c = syntax
+    msg = peer~start("acceptAndClose")
+    s = .Socket~new("127.0.0.1", peer~port)
+    c = .nil
+    do
+      s~startTLSServer(.TLSOptions~new)
+    catch c = syntax
+    end
+    if c == .nil then self~fail("should have failed")
+    self~assertSame(88.900, c~code)
+    s~close
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
   end
-  if c == .nil then self~fail("should have failed")
-  self~assertSame(88.900, c~code)
-  s~close
-  msg~result
-  peer~close
 
 /* ---- helpers ------------------------------------------------------------ */
 

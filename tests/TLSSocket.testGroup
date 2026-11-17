@@ -27,38 +27,53 @@ return testResult
 
 ::method test_echo_trusting_the_ca
   peer = .Peer~new
-  msg = peer~start("tlsEcho")
-  s = .TLSSocket~new("localhost", peer~port, trustCA())
-  self~assertTrue(s~secure)
-  self~assertSame("TLSv1.3", s~protocol)
-  self~assertTrue(s~cipher \== "")
-  s~lineOut("Hello over TLS")
-  self~assertSame("Hello over TLS", s~lineIn)
-  s~lineOut("bye")
-  s~close
-  self~assertSame("bye", msg~result[2])
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("tlsEcho")
+    s = .TLSSocket~new("localhost", peer~port, trustCA())
+    self~assertTrue(s~secure)
+    self~assertSame("TLSv1.3", s~protocol)
+    self~assertTrue(s~cipher \== "")
+    s~lineOut("Hello over TLS")
+    self~assertSame("Hello over TLS", s~lineIn)
+    s~lineOut("bye")
+    s~close
+    self~assertSame("bye", msg~result[2])
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 ::method test_a_plain_socket_is_not_secure
   peer = .Peer~new
-  msg = peer~start("echo")
-  s = .Socket~new("127.0.0.1", peer~port)
-  self~assertFalse(s~secure)
-  self~assertSame("", s~protocol)
-  self~assertSame("", s~cipher)
-  s~lineOut("bye")
-  s~close
-  msg~result
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("echo")
+    s = .Socket~new("127.0.0.1", peer~port)
+    self~assertFalse(s~secure)
+    self~assertSame("", s~protocol)
+    self~assertSame("", s~cipher)
+    s~lineOut("bye")
+    s~close
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 ::method test_by_ip_address
   peer = .Peer~new
-  msg = peer~start("tlsEcho")
-  s = .TLSSocket~new("127.0.0.1", peer~port, trustCA())  -- IP:127.0.0.1 in the certificate
-  s~lineOut("bye")
-  s~close
-  self~assertSame("bye", msg~result[1])
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("tlsEcho")
+    s = .TLSSocket~new("127.0.0.1", peer~port, trustCA())  -- IP:127.0.0.1 in the certificate
+    s~lineOut("bye")
+    s~close
+    self~assertSame("bye", msg~result[1])
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 ::method test_ipv6
   peer = ipv6Peer()
@@ -66,45 +81,65 @@ return testResult
     say "  (no IPv6 on this machine: test_ipv6 checked nothing)"
     return
   end
-  msg = peer~start("tlsEcho")
-  s = .TLSSocket~new("::1", peer~port, trustCA())       -- IP:::1 in the certificate
-  s~lineOut("bye")
-  s~close
-  self~assertSame("bye", msg~result[1])
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("tlsEcho")
+    s = .TLSSocket~new("::1", peer~port, trustCA())       -- IP:::1 in the certificate
+    s~lineOut("bye")
+    s~close
+    self~assertSame("bye", msg~result[1])
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 ::method test_trusting_the_servers_own_certificate
   peer = .Peer~new
-  msg = peer~start("tlsEcho")
-  -- server.pem is not a root: trusted explicitly, it is enough by itself
-  s = .TLSSocket~new("localhost", peer~port, .TLSOptions~new~trust(certFile("server.pem")))
-  s~lineOut("bye")
-  s~close
-  self~assertSame("bye", msg~result[1])
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("tlsEcho")
+    -- server.pem is not a root: trusted explicitly, it is enough by itself
+    s = .TLSSocket~new("localhost", peer~port, .TLSOptions~new~trust(certFile("server.pem")))
+    s~lineOut("bye")
+    s~close
+    self~assertSame("bye", msg~result[1])
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 ::method test_a_keytool_keystore_on_both_ends
   peer = .Peer~new
-  msg = peer~start("tlsEcho", "keytool.p12", "123456")
-  opts = .TLSOptions~new~trust(certFile("keytool.p12"), "123456")
-  s = .TLSSocket~new("localhost", peer~port, opts)
-  s~lineOut("bye")
-  s~close
-  self~assertSame("bye", msg~result[1])
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("tlsEcho", "keytool.p12", "123456")
+    opts = .TLSOptions~new~trust(certFile("keytool.p12"), "123456")
+    s = .TLSSocket~new("localhost", peer~port, opts)
+    s~lineOut("bye")
+    s~close
+    self~assertSame("bye", msg~result[1])
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 ::method test_minVersion_1_3
   peer = .Peer~new
-  msg = peer~start("tlsEcho")
-  opts = trustCA()
-  opts~minVersion = "1.3"
-  self~assertSame("1.3", opts~minVersion)
-  s = .TLSSocket~new("localhost", peer~port, opts)
-  self~assertSame("TLSv1.3", s~protocol)
-  s~lineOut("bye")
-  s~close
-  msg~result
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("tlsEcho")
+    opts = trustCA()
+    opts~minVersion = "1.3"
+    self~assertSame("1.3", opts~minVersion)
+    s = .TLSSocket~new("localhost", peer~port, opts)
+    self~assertSame("TLSv1.3", s~protocol)
+    s~lineOut("bye")
+    s~close
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 /* ---- refused ------------------------------------------------------------ */
 
@@ -120,51 +155,64 @@ return testResult
 -- Without TLSOptions the system decides; it has never heard of our CA.
 ::method test_the_system_does_not_trust_the_test_ca
   peer = .Peer~new
-  msg = peer~start("tlsEcho")
-  c = connectFails("localhost", peer~port, .nil)
-  say "  (the system said:" c~additional[2] c~additional[3]")"
-  -- macOS objects first to the test certificates' hundred years (it
-  -- allows 825 days, even for a root it would trust).
-  if c~additional[2] == "errSecCertificateValidityPeriodTooLong" then
-    self~assertTrustError(c, "certificate is valid for longer than the system allows", "(localhost, port" peer~port")")
-  else
-    self~assertTrustError(c, "certificate is not trusted", "(localhost, port" peer~port")")
-  msg~result
-  peer~close
+  do
+    msg = peer~start("tlsEcho")
+    c = connectFails("localhost", peer~port, .nil)
+    say "  (the system said:" c~additional[2] c~additional[3]")"
+    -- macOS objects first to the test certificates' hundred years (it
+    -- allows 825 days, even for a root it would trust).
+    if c~additional[2] == "errSecCertificateValidityPeriodTooLong" then
+      self~assertTrustError(c, "certificate is valid for longer than the system allows", "(localhost, port" peer~port")")
+    else
+      self~assertTrustError(c, "certificate is not trusted", "(localhost, port" peer~port")")
+    msg~result
+  finally
+    peer~close
+  end
 
 ::method test_a_server_that_does_not_speak_tls
   peer = .Peer~new
-  msg = peer~start("twoLinesAtOnce")                      -- and waits
-  c = connectFails("localhost", peer~port, trustCA())
-  self~assertSame(48.900, c~code)
-  self~assertTrue(c~additional[1]~startsWith("TLS error: handshake failed:"), c~additional[1])
-  msg~result
-  peer~close
+  do
+    msg = peer~start("twoLinesAtOnce")                      -- and waits
+    c = connectFails("localhost", peer~port, trustCA())
+    self~assertSame(48.900, c~code)
+    self~assertTrue(c~additional[1]~startsWith("TLS error: handshake failed:"), c~additional[1])
+    msg~result
+  finally
+    peer~close
+  end
 
 ::method test_connectTimeout_covers_the_handshake
   peer = .Peer~new
-  msg = peer~start("silentThenLine", 3, "too late")     -- accepts, says nothing
-  start = .DateTime~new
-  -- 127.0.0.1: on Windows, "localhost" tries ::1 first, and a refused
-  -- connection there takes it about two seconds.
-  c = connectFails("127.0.0.1", peer~port, trustCA(), 1)
-  elapsed = (.DateTime~new - start)~totalSeconds
-  self~assertSame("TLS error: timed out (127.0.0.1, port" peer~port")", c~additional[1])
-  self~assertTrue(elapsed < 2.5, "timed out after" elapsed "seconds")
-  msg~result
-  peer~close
+  do
+    msg = peer~start("silentThenLine", 3, "too late")     -- accepts, says nothing
+    start = .DateTime~new
+    -- 127.0.0.1: on Windows, "localhost" tries ::1 first, and a refused
+    -- connection there takes it about two seconds.
+    c = connectFails("127.0.0.1", peer~port, trustCA(), 1)
+    elapsed = (.DateTime~new - start)~totalSeconds
+    self~assertSame("TLS error: timed out (127.0.0.1, port" peer~port")", c~additional[1])
+    self~assertTrue(elapsed < 2.5, "timed out after" elapsed "seconds")
+    msg~result
+  finally
+    peer~close
+  end
 
 -- Rony, 29/10/2026: a TLS class says "TLS error:" also when the socket
 -- failed; additional[4] is the system's text, [5] where it failed.
 ::method test_connection_refused_is_a_tls_error
   srv = .ServerSocket~new(0, "127.0.0.1")
-  port = srv~localPort
-  srv~close                                  -- nobody there now
-  c = connectFails("127.0.0.1", port, trustCA(), 5)
-  self~assertSame("TLS error: connection refused (127.0.0.1, port" port")", c~additional[1])
-  self~assertSame("ECONNREFUSED", c~additional[2])
-  self~assertTrue(c~additional[4] \== "", "the system's text")
-  self~assertSame("SOCKET", c~additional[5])
+  do
+    port = srv~localPort
+    srv~close                                  -- nobody there now
+    c = connectFails("127.0.0.1", port, trustCA(), 5)
+    self~assertSame("TLS error: connection refused (127.0.0.1, port" port")", c~additional[1])
+    self~assertSame("ECONNREFUSED", c~additional[2])
+    self~assertTrue(c~additional[4] \== "", "the system's text")
+    self~assertSame("SOCKET", c~additional[5])
+  finally
+    srv~close
+  end
 
 ::method test_unknown_host_is_a_tls_error
   c = connectFails("no-such-host.invalid", 443, trustCA(), 5)
@@ -198,119 +246,154 @@ return testResult
 
 ::method test_end_of_stream
   peer = .Peer~new
-  msg = peer~start("tlsSend", "one" || "0d0a"x || "two")
-  s = .TLSSocket~new("localhost", peer~port, trustCA())
-  self~assertSame("one", s~lineIn)
-  self~assertSame("two", s~lineIn)
-  trapped = .false
+  s = .nil
   do
-    s~lineIn
-  catch notready
-    trapped = .true
+    msg = peer~start("tlsSend", "one" || "0d0a"x || "two")
+    s = .TLSSocket~new("localhost", peer~port, trustCA())
+    self~assertSame("one", s~lineIn)
+    self~assertSame("two", s~lineIn)
+    trapped = .false
+    do
+      s~lineIn
+    catch notready
+      trapped = .true
+    end
+    self~assertTrue(trapped, "NOTREADY at the end of the stream")
+    self~assertSame("NOTREADY:EOF", s~description)
+    s~close
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
   end
-  self~assertTrue(trapped, "NOTREADY at the end of the stream")
-  self~assertSame("NOTREADY:EOF", s~description)
-  s~close
-  msg~result
-  peer~close
 
 -- A megabyte each way: shutdownOutput sends TLS's close_notify, and the
 -- reply still comes back.
 ::method test_a_megabyte_and_shutdownOutput
   peer = .Peer~new
-  msg = peer~start("tlsCollect")
-  s = .TLSSocket~new("localhost", peer~port, trustCA())
-  data = "0123456789abcdef"~copies(65536)
-  self~assertSame(0, s~charOut(data))
-  self~assertSame(0, s~shutdownOutput)
-  self~assertSame(data~length, s~lineIn)
-  s~close
-  self~assertTrue(msg~result == data, "the server got the same bytes")
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("tlsCollect")
+    s = .TLSSocket~new("localhost", peer~port, trustCA())
+    data = "0123456789abcdef"~copies(65536)
+    self~assertSame(0, s~charOut(data))
+    self~assertSame(0, s~shutdownOutput)
+    self~assertSame(data~length, s~lineIn)
+    s~close
+    self~assertTrue(msg~result == data, "the server got the same bytes")
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 -- One activity waits in lineIn while another writes: the write must not
 -- wait for the read (OpenSSL's calls are serialised, the waiting is not).
 ::method test_reading_and_writing_from_two_activities
   peer = .Peer~new
-  msg = peer~start("tlsEcho")
-  s = .TLSSocket~new("localhost", peer~port, trustCA())
-  s~readTimeout = 10
-  reader = .Reader~new~start("readLine", s)
-  call sysSleep 0.5                                  -- the reader is waiting
-  start = .DateTime~new
-  s~lineOut("ping")
-  self~assertSame("ping", reader~result)
-  self~assertTrue((.DateTime~new - start)~totalSeconds < 5)
-  s~lineOut("bye")
-  s~close
-  msg~result
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("tlsEcho")
+    s = .TLSSocket~new("localhost", peer~port, trustCA())
+    s~readTimeout = 10
+    reader = .Reader~new~start("readLine", s)
+    call sysSleep 0.5                                  -- the reader is waiting
+    start = .DateTime~new
+    s~lineOut("ping")
+    self~assertSame("ping", reader~result)
+    self~assertTrue((.DateTime~new - start)~totalSeconds < 5)
+    s~lineOut("bye")
+    s~close
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 ::method test_buffered_output_is_sent_before_a_read_waits
   peer = .Peer~new
-  msg = peer~start("tlsEcho")
-  s = .TLSSocket~new("localhost", peer~port, trustCA())
-  s~bufferOutput = .true
-  s~lineOut("kept")
-  self~assertSame("kept", s~lineIn)
-  s~lineOut("bye")
-  s~close
-  msg~result
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("tlsEcho")
+    s = .TLSSocket~new("localhost", peer~port, trustCA())
+    s~bufferOutput = .true
+    s~lineOut("kept")
+    self~assertSame("kept", s~lineIn)
+    s~lineOut("bye")
+    s~close
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 /* ---- startTLS ----------------------------------------------------------- */
 
 ::method test_startTLS
   peer = .Peer~new
-  msg = peer~start("startTLSEcho")
-  s = .Socket~new("localhost", peer~port)
-  self~assertSame("220 ready", s~lineIn)
-  s~lineOut("STARTTLS")
-  self~assertSame("220 go ahead", s~lineIn)
-  self~assertSame(s, s~startTLS(, trustCA()))
-  self~assertTrue(s~secure)
-  self~assertSame("TLSv1.3", s~protocol)
-  s~lineOut("now encrypted")
-  self~assertSame("now encrypted", s~lineIn)
-  s~close
-  self~assertSame(0, msg~result)
-  peer~close
+  s = .nil
+  do
+    msg = peer~start("startTLSEcho")
+    s = .Socket~new("localhost", peer~port)
+    self~assertSame("220 ready", s~lineIn)
+    s~lineOut("STARTTLS")
+    self~assertSame("220 go ahead", s~lineIn)
+    self~assertSame(s, s~startTLS(, trustCA()))
+    self~assertTrue(s~secure)
+    self~assertSame("TLSv1.3", s~protocol)
+    s~lineOut("now encrypted")
+    self~assertSame("now encrypted", s~lineIn)
+    s~close
+    self~assertSame(0, msg~result)
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
 
 -- Bytes that arrived in clear before the handshake would be taken as if
 -- they had come over TLS: refused, and the socket closed.
 ::method test_startTLS_refuses_data_that_came_before
   peer = .Peer~new
-  msg = peer~start("twoLinesAtOnce")
-  s = .Socket~new("localhost", peer~port)
-  self~assertSame("220 ready", s~lineIn)
-  call sysSleep 0.2
-  s~chars                                            -- INJECTED is in the buffer
-  c = .nil
+  s = .nil
   do
-    s~startTLS(, trustCA())
-  catch c = syntax
+    msg = peer~start("twoLinesAtOnce")
+    s = .Socket~new("localhost", peer~port)
+    self~assertSame("220 ready", s~lineIn)
+    call sysSleep 0.2
+    s~chars                                            -- INJECTED is in the buffer
+    c = .nil
+    do
+      s~startTLS(, trustCA())
+    catch c = syntax
+    end
+    if c == .nil then self~fail("startTLS should have failed")
+    self~assertSame("TLS error: data arrived before the TLS handshake (localhost, port" peer~port")", c~additional[1])
+    self~assertSame("UNKNOWN:", s~description)
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
   end
-  if c == .nil then self~fail("startTLS should have failed")
-  self~assertSame("TLS error: data arrived before the TLS handshake (localhost, port" peer~port")", c~additional[1])
-  self~assertSame("UNKNOWN:", s~description)
-  msg~result
-  peer~close
 
 ::method test_startTLS_twice
   peer = .Peer~new
-  msg = peer~start("tlsEcho")
-  s = .TLSSocket~new("localhost", peer~port, trustCA())
-  c = .nil
+  s = .nil
   do
-    s~startTLS
-  catch c = syntax
+    msg = peer~start("tlsEcho")
+    s = .TLSSocket~new("localhost", peer~port, trustCA())
+    c = .nil
+    do
+      s~startTLS
+    catch c = syntax
+    end
+    if c == .nil then self~fail("a second startTLS should have failed")
+    self~assertSame("TLS error: TLS has already started on this connection (localhost, port" peer~port")", c~additional[1])
+    s~lineOut("bye")
+    s~close
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
   end
-  if c == .nil then self~fail("a second startTLS should have failed")
-  self~assertSame("TLS error: TLS has already started on this connection (localhost, port" peer~port")", c~additional[1])
-  s~lineOut("bye")
-  s~close
-  msg~result
-  peer~close
 
 /* ---- TLSOptions --------------------------------------------------------- */
 
@@ -359,15 +442,18 @@ return testResult
   if \online() then return
   s = onlineConnect("example.com")
   if s == .nil then return
-  s~readTimeout = 20
-  s~lineOut("HEAD / HTTP/1.1")
-  s~lineOut("Host: example.com")
-  s~lineOut("Connection: close")
-  s~lineOut("")
-  line = s~lineIn
-  self~assertTrue(line~startsWith("HTTP/1.1 "), line)
-  say "  (example.com:" s~protocol s~cipher")"
-  s~close
+  do
+    s~readTimeout = 20
+    s~lineOut("HEAD / HTTP/1.1")
+    s~lineOut("Host: example.com")
+    s~lineOut("Connection: close")
+    s~lineOut("")
+    line = s~lineIn
+    self~assertTrue(line~startsWith("HTTP/1.1 "), line)
+    say "  (example.com:" s~protocol s~cipher")"
+  finally
+    s~close
+  end
 
 ::method test_online_expired
   if \online() then return

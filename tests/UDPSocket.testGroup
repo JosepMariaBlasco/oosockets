@@ -15,44 +15,60 @@ return testResult
 
 ::method test_port_zero_gives_a_free_port
   s = .UDPSocket~new(0, "127.0.0.1")
-  self~assertTrue(s~localPort > 0)
-  self~assertSame("127.0.0.1", s~localAddress)
-  self~assertSame("a UDPSocket on port" s~localPort, s~string)
-  s~close
+  do
+    self~assertTrue(s~localPort > 0)
+    self~assertSame("127.0.0.1", s~localAddress)
+    self~assertSame("a UDPSocket on port" s~localPort, s~string)
+  finally
+    s~close
+  end
 
 ::method test_no_arguments_gives_a_free_port
   s = .UDPSocket~new
-  self~assertTrue(s~localPort > 0)
-  s~close
+  do
+    self~assertTrue(s~localPort > 0)
+  finally
+    s~close
+  end
 
 ::method test_round_trip
   srv = .UDPSocket~new(0, "127.0.0.1")
-  c = .UDPSocket~new(0, "127.0.0.1")
-  c~receiveTimeout = 5; srv~receiveTimeout = 5
-  c~send("hello", "127.0.0.1", srv~localPort)
-  d = srv~receive
-  self~assertTrue(d~isA(.Datagram))
-  self~assertSame("hello", d~data)
-  self~assertSame("hello", d~string)
-  self~assertSame("127.0.0.1", d~address)
-  self~assertSame(c~localPort, d~port)
-  srv~send(d~data~upper, d~address, d~port)
-  self~assertSame("HELLO", c~receive~data)
-  c~close; srv~close
+  c = .nil
+  do
+    c = .UDPSocket~new(0, "127.0.0.1")
+    c~receiveTimeout = 5; srv~receiveTimeout = 5
+    c~send("hello", "127.0.0.1", srv~localPort)
+    d = srv~receive
+    self~assertTrue(d~isA(.Datagram))
+    self~assertSame("hello", d~data)
+    self~assertSame("hello", d~string)
+    self~assertSame("127.0.0.1", d~address)
+    self~assertSame(c~localPort, d~port)
+    srv~send(d~data~upper, d~address, d~port)
+    self~assertSame("HELLO", c~receive~data)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_every_address_takes_ipv4
   srv = .UDPSocket~new                       -- IPv6 and IPv4, or IPv4 alone
-  srv~receiveTimeout = 5
-  c = .UDPSocket~new(0, "127.0.0.1")
-  c~send("v4", "127.0.0.1", srv~localPort)
-  d = srv~receive
-  self~assertSame("v4", d~data)
-  self~assertSame("127.0.0.1", d~address)    -- not ::ffff:127.0.0.1
-  -- and the answer, from the IPv6 socket, reaches the IPv4 one
-  c~receiveTimeout = 5
-  srv~send("back", d~address, d~port)
-  self~assertSame("back", c~receive~data)
-  c~close; srv~close
+  c = .nil
+  do
+    srv~receiveTimeout = 5
+    c = .UDPSocket~new(0, "127.0.0.1")
+    c~send("v4", "127.0.0.1", srv~localPort)
+    d = srv~receive
+    self~assertSame("v4", d~data)
+    self~assertSame("127.0.0.1", d~address)    -- not ::ffff:127.0.0.1
+    -- and the answer, from the IPv6 socket, reaches the IPv4 one
+    c~receiveTimeout = 5
+    srv~send("back", d~address, d~port)
+    self~assertSame("back", c~receive~data)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_every_address_takes_ipv6_where_there_is_ipv6
   if \hasIpv6() then do
@@ -60,50 +76,75 @@ return testResult
     return
   end
   srv = .UDPSocket~new
-  srv~receiveTimeout = 5
-  c = .UDPSocket~new(0, "::1")
-  c~send("v6", "::1", srv~localPort)
-  d = srv~receive
-  self~assertSame("v6", d~data)
-  self~assertSame("::1", d~address)
-  c~close; srv~close
+  c = .nil
+  do
+    srv~receiveTimeout = 5
+    c = .UDPSocket~new(0, "::1")
+    c~send("v6", "::1", srv~localPort)
+    d = srv~receive
+    self~assertSame("v6", d~data)
+    self~assertSame("::1", d~address)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_a_name_with_ipv4_and_ipv6_goes_to_ipv4
   srv = .UDPSocket~new(0, "127.0.0.1")
-  srv~receiveTimeout = 5
-  c = .UDPSocket~new
-  c~send("by name", "localhost", srv~localPort)
-  self~assertSame("by name", srv~receive~data)
-  c~close; srv~close
+  c = .nil
+  do
+    srv~receiveTimeout = 5
+    c = .UDPSocket~new
+    c~send("by name", "localhost", srv~localPort)
+    self~assertSame("by name", srv~receive~data)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_empty_datagram
   srv = .UDPSocket~new(0, "127.0.0.1")
-  srv~receiveTimeout = 5
-  c = .UDPSocket~new
-  c~send("", "127.0.0.1", srv~localPort)
-  d = srv~receive
-  self~assertTrue(d \== .nil)
-  self~assertSame("", d~data)
-  c~close; srv~close
+  c = .nil
+  do
+    srv~receiveTimeout = 5
+    c = .UDPSocket~new
+    c~send("", "127.0.0.1", srv~localPort)
+    d = srv~receive
+    self~assertTrue(d \== .nil)
+    self~assertSame("", d~data)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_every_byte_value
   srv = .UDPSocket~new(0, "127.0.0.1")
-  srv~receiveTimeout = 5
-  c = .UDPSocket~new
-  bytes = xrange("00"x, "ff"x)
-  c~send(bytes, "127.0.0.1", srv~localPort)
-  self~assertSame(bytes, srv~receive~data)
-  c~close; srv~close
+  c = .nil
+  do
+    srv~receiveTimeout = 5
+    c = .UDPSocket~new
+    bytes = xrange("00"x, "ff"x)
+    c~send(bytes, "127.0.0.1", srv~localPort)
+    self~assertSame(bytes, srv~receive~data)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_largest_ipv4_datagram_arrives_whole
   srv = .UDPSocket~new(0, "127.0.0.1")
-  srv~receiveTimeout = 5
-  c = .UDPSocket~new
-  big = copies("0123456789abcdef", 4095)~left(65507)
-  self~assertSame(65507, big~length)
-  c~send(big, "127.0.0.1", srv~localPort)
-  self~assertSame(big, srv~receive~data)
-  c~close; srv~close
+  c = .nil
+  do
+    srv~receiveTimeout = 5
+    c = .UDPSocket~new
+    big = copies("0123456789abcdef", 4095)~left(65507)
+    self~assertSame(65507, big~length)
+    c~send(big, "127.0.0.1", srv~localPort)
+    self~assertSame(big, srv~receive~data)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_largest_ipv6_datagram_arrives_whole_where_there_is_ipv6
   if \hasIpv6() then do
@@ -111,38 +152,62 @@ return testResult
     return
   end
   srv = .UDPSocket~new(0, "::1")
-  srv~receiveTimeout = 5
-  c = .UDPSocket~new
-  big = copies("0123456789abcdef", 4096)~left(65527)
-  c~send(big, "::1", srv~localPort)
-  self~assertSame(big, srv~receive~data)
-  c~close; srv~close
+  c = .nil
+  do
+    srv~receiveTimeout = 5
+    c = .UDPSocket~new
+    big = copies("0123456789abcdef", 4096)~left(65527)
+    c~send(big, "::1", srv~localPort)
+    self~assertSame(big, srv~receive~data)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_too_big_is_an_error
   srv = .UDPSocket~new(0, "127.0.0.1")
-  c = .UDPSocket~new
-  port = srv~localPort
-  self~expectSyntax(.array~of(48.900, "Socket error: message too long (127.0.0.1, port" port")"))
-  c~send(copies("x", 65508), "127.0.0.1", port)
+  c = .nil
+  do
+    c = .UDPSocket~new
+    port = srv~localPort
+    self~expectSyntax(.array~of(48.900, "Socket error: message too long (127.0.0.1, port" port")"))
+    c~send(copies("x", 65508), "127.0.0.1", port)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_receive_timeout_returns_nil
   s = .UDPSocket~new(0, "127.0.0.1")
-  self~assertSame(.nil, s~receiveTimeout)
-  s~receiveTimeout = 0.1
-  self~assertSame(0.1, s~receiveTimeout)
-  self~assertSame(.nil, s~receive)
-  s~close
+  do
+    self~assertSame(.nil, s~receiveTimeout)
+    s~receiveTimeout = 0.1
+    self~assertSame(0.1, s~receiveTimeout)
+    self~assertSame(.nil, s~receive)
+  finally
+    s~close
+  end
 
 ::method test_bad_receive_timeout
   s = .UDPSocket~new(0, "127.0.0.1")
-  self~expectSyntax(88.900)
-  s~receiveTimeout = -1
+  do
+    self~expectSyntax(88.900)
+    s~receiveTimeout = -1
+  finally
+    s~close
+  end
 
 ::method test_port_in_use
   s = .UDPSocket~new(0, "127.0.0.1")
-  port = s~localPort
-  self~expectSyntax(.array~of(48.900, "Socket error: address already in use (127.0.0.1, port" port")"))
-  other = .UDPSocket~new(port, "127.0.0.1")
+  other = .nil
+  do
+    port = s~localPort
+    self~expectSyntax(.array~of(48.900, "Socket error: address already in use (127.0.0.1, port" port")"))
+    other = .UDPSocket~new(port, "127.0.0.1")
+  finally
+    if other \== .nil then other~close
+    s~close
+  end
 
 ::method test_bad_port
   self~expectSyntax(88.900)
@@ -154,99 +219,145 @@ return testResult
 
 ::method test_send_to_unknown_host
   s = .UDPSocket~new
-  self~expectSyntax(.array~of(48.900, "Socket error: unknown host (no-such-host.invalid, port 9)"))
-  s~send("x", "no-such-host.invalid", 9)
+  do
+    self~expectSyntax(.array~of(48.900, "Socket error: unknown host (no-such-host.invalid, port 9)"))
+    s~send("x", "no-such-host.invalid", 9)
+  finally
+    s~close
+  end
 
 ::method test_send_needs_a_host_when_not_connected
   s = .UDPSocket~new
-  self~expectSyntax(93.901)
-  s~send("x")
+  do
+    self~expectSyntax(93.901)
+    s~send("x")
+  finally
+    s~close
+  end
 
 ::method test_unconnected_send_to_a_closed_port_is_not_an_error
   -- Windows would report it on the next receive, unless switched off.
   gone = .UDPSocket~new(0, "127.0.0.1")
-  port = gone~localPort
-  gone~close
-  s = .UDPSocket~new(0, "127.0.0.1")
-  s~receiveTimeout = 0.5
-  s~send("anyone?", "127.0.0.1", port)
-  self~assertSame(.nil, s~receive)
-  s~send("anyone?", "127.0.0.1", port)
-  self~assertSame(.nil, s~receive)
-  s~close
+  s = .nil
+  do
+    port = gone~localPort
+    gone~close
+    s = .UDPSocket~new(0, "127.0.0.1")
+    s~receiveTimeout = 0.5
+    s~send("anyone?", "127.0.0.1", port)
+    self~assertSame(.nil, s~receive)
+    s~send("anyone?", "127.0.0.1", port)
+    self~assertSame(.nil, s~receive)
+  finally
+    if s \== .nil then s~close
+    gone~close
+  end
 
 ::method test_connect
   srv = .UDPSocket~new(0, "127.0.0.1")
-  srv~receiveTimeout = 5
-  c = .UDPSocket~new(0, "127.0.0.1")
-  c~receiveTimeout = 5
-  self~assertFalse(c~connected)
-  self~assertSame("", c~remoteAddress)
-  c~connect("127.0.0.1", srv~localPort)
-  self~assertTrue(c~connected)
-  self~assertSame("127.0.0.1", c~remoteAddress)
-  self~assertSame(srv~localPort, c~remotePort)
-  c~send("connected")
-  d = srv~receive
-  self~assertSame("connected", d~data)
-  -- a datagram from anyone else does not reach a connected socket
-  other = .UDPSocket~new(0, "127.0.0.1")
-  other~send("intruder", "127.0.0.1", c~localPort)
-  srv~send("answer", d~address, d~port)
-  self~assertSame("answer", c~receive~data)
-  other~close; c~close; srv~close
+  c = .nil; other = .nil
+  do
+    srv~receiveTimeout = 5
+    c = .UDPSocket~new(0, "127.0.0.1")
+    c~receiveTimeout = 5
+    self~assertFalse(c~connected)
+    self~assertSame("", c~remoteAddress)
+    c~connect("127.0.0.1", srv~localPort)
+    self~assertTrue(c~connected)
+    self~assertSame("127.0.0.1", c~remoteAddress)
+    self~assertSame(srv~localPort, c~remotePort)
+    c~send("connected")
+    d = srv~receive
+    self~assertSame("connected", d~data)
+    -- a datagram from anyone else does not reach a connected socket
+    other = .UDPSocket~new(0, "127.0.0.1")
+    other~send("intruder", "127.0.0.1", c~localPort)
+    srv~send("answer", d~address, d~port)
+    self~assertSame("answer", c~receive~data)
+  finally
+    if other \== .nil then other~close
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_connected_send_takes_only_the_data
   srv = .UDPSocket~new(0, "127.0.0.1")
-  c = .UDPSocket~new
-  c~connect("127.0.0.1", srv~localPort)
-  self~expectSyntax(88.900)
-  c~send("x", "127.0.0.1", srv~localPort)
+  c = .nil
+  do
+    c = .UDPSocket~new
+    c~connect("127.0.0.1", srv~localPort)
+    self~expectSyntax(88.900)
+    c~send("x", "127.0.0.1", srv~localPort)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_connected_to_a_closed_port_is_refused
   gone = .UDPSocket~new(0, "127.0.0.1")
-  port = gone~localPort
-  gone~close
-  c = .UDPSocket~new(0, "127.0.0.1")
-  c~receiveTimeout = 5
-  c~connect("127.0.0.1", port)
-  c~send("anyone?")
-  self~expectSyntax(.array~of(48.900, "Socket error: connection refused (127.0.0.1, port" port")"))
-  c~receive
+  c = .nil
+  do
+    port = gone~localPort
+    gone~close
+    c = .UDPSocket~new(0, "127.0.0.1")
+    c~receiveTimeout = 5
+    c~connect("127.0.0.1", port)
+    c~send("anyone?")
+    self~expectSyntax(.array~of(48.900, "Socket error: connection refused (127.0.0.1, port" port")"))
+    c~receive
+  finally
+    if c \== .nil then c~close
+    gone~close
+  end
 
 ::method test_receive_after_close
   s = .UDPSocket~new(0, "127.0.0.1")
-  port = s~localPort
-  s~close
-  self~expectSyntax(.array~of(48.900, "Socket error: the UDP socket is closed (port" port")"))
-  s~receive
+  do
+    port = s~localPort
+    s~close
+    self~expectSyntax(.array~of(48.900, "Socket error: the UDP socket is closed (port" port")"))
+    s~receive
+  finally
+    s~close
+  end
 
 ::method test_close_wakes_a_blocked_receive
   s = .UDPSocket~new(0, "127.0.0.1")
-  port = s~localPort
-  msg = .Receiver~new~start("receive", s)
-  call sysSleep 0.3
-  s~close
-  -- at most a few seconds: the receiver has no timeout of its own
-  do 50 while \msg~completed
-    call sysSleep 0.1
+  do
+    port = s~localPort
+    msg = .Receiver~new~start("receive", s)
+    call sysSleep 0.3
+    s~close
+    -- at most a few seconds: the receiver has no timeout of its own
+    do 50 while \msg~completed
+      call sysSleep 0.1
+    end
+    self~assertTrue(msg~completed)
+    self~assertSame("48.900 Socket error: the UDP socket is closed (port" port").", msg~result)
+  finally
+    s~close
   end
-  self~assertTrue(msg~completed)
-  self~assertSame("48.900 Socket error: the UDP socket is closed (port" port").", msg~result)
 
 ::method test_broadcast
   s = .UDPSocket~new
-  self~assertFalse(s~broadcast)
-  s~broadcast = .true
-  self~assertTrue(s~broadcast)
-  s~broadcast = .false
-  self~assertFalse(s~broadcast)
-  s~close
+  do
+    self~assertFalse(s~broadcast)
+    s~broadcast = .true
+    self~assertTrue(s~broadcast)
+    s~broadcast = .false
+    self~assertFalse(s~broadcast)
+  finally
+    s~close
+  end
 
 ::method test_bad_broadcast_value
   s = .UDPSocket~new
-  self~expectSyntax(88.900)
-  s~broadcast = "yes"
+  do
+    self~expectSyntax(88.900)
+    s~broadcast = "yes"
+  finally
+    s~close
+  end
 
 
 ::class Receiver

@@ -39,109 +39,167 @@ return testResult
 
 ::method test_udp_receive
   s = .UDPSocket~new(0, "127.0.0.1")
-  r = self~halted(.Waiter~new, "receive", s)
-  self~assertSame("HALT at" .Waiter~line("receive"), r[1])
-  s~close
+  do
+    r = self~halted(.Waiter~new, "receive", s)
+    self~assertSame("HALT at" .Waiter~line("receive"), r[1])
+  finally
+    s~close
+  end
 
 ::method test_udp_receive_with_signal_on_halt
   s = .UDPSocket~new(0, "127.0.0.1")
-  r = self~halted(.Waiter~new, "receiveSignalOn", s)
-  self~assertSame("HALT at" .Waiter~line("receiveSignalOn"), r[1])
-  s~close
+  do
+    r = self~halted(.Waiter~new, "receiveSignalOn", s)
+    self~assertSame("HALT at" .Waiter~line("receiveSignalOn"), r[1])
+  finally
+    s~close
+  end
 
 ::method test_lineIn
   srv = .ServerSocket~new(0, "127.0.0.1")
-  c = .Socket~new("127.0.0.1", srv~localPort)
-  peer = srv~accept
-  r = self~halted(.Waiter~new, "lineIn", c)
-  self~assertSame("HALT at" .Waiter~line("lineIn"), r[1])
-  -- the socket goes on working: nothing that arrives later is lost
-  peer~lineOut("after the HALT")
-  c~readTimeout = 5
-  self~assertSame("after the HALT", c~lineIn)
-  peer~close; c~close; srv~close
+  c = .nil; peer = .nil
+  do
+    c = .Socket~new("127.0.0.1", srv~localPort)
+    peer = srv~accept
+    r = self~halted(.Waiter~new, "lineIn", c)
+    self~assertSame("HALT at" .Waiter~line("lineIn"), r[1])
+    -- the socket goes on working: nothing that arrives later is lost
+    peer~lineOut("after the HALT")
+    c~readTimeout = 5
+    self~assertSame("after the HALT", c~lineIn)
+  finally
+    if peer \== .nil then peer~close
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_lineIn_with_a_readTimeout
   srv = .ServerSocket~new(0, "127.0.0.1")
-  c = .Socket~new("127.0.0.1", srv~localPort)
-  peer = srv~accept
-  c~readTimeout = 60
-  r = self~halted(.Waiter~new, "lineIn", c)
-  self~assertSame("HALT at" .Waiter~line("lineIn"), r[1])
-  peer~close; c~close; srv~close
+  c = .nil; peer = .nil
+  do
+    c = .Socket~new("127.0.0.1", srv~localPort)
+    peer = srv~accept
+    c~readTimeout = 60
+    r = self~halted(.Waiter~new, "lineIn", c)
+    self~assertSame("HALT at" .Waiter~line("lineIn"), r[1])
+  finally
+    if peer \== .nil then peer~close
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_charIn_and_read
   srv = .ServerSocket~new(0, "127.0.0.1")
-  c = .Socket~new("127.0.0.1", srv~localPort)
-  peer = srv~accept
-  r = self~halted(.Waiter~new, "charIn", c)
-  self~assertSame("HALT at" .Waiter~line("charIn"), r[1])
-  r = self~halted(.Waiter~new, "read", c)
-  self~assertSame("HALT at" .Waiter~line("read"), r[1])
-  peer~close; c~close; srv~close
+  c = .nil; peer = .nil
+  do
+    c = .Socket~new("127.0.0.1", srv~localPort)
+    peer = srv~accept
+    r = self~halted(.Waiter~new, "charIn", c)
+    self~assertSame("HALT at" .Waiter~line("charIn"), r[1])
+    r = self~halted(.Waiter~new, "read", c)
+    self~assertSame("HALT at" .Waiter~line("read"), r[1])
+  finally
+    if peer \== .nil then peer~close
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_accept
   srv = .ServerSocket~new(0, "127.0.0.1")
-  r = self~halted(.Waiter~new, "accept", srv)
-  self~assertSame("HALT at" .Waiter~line("accept"), r[1])
-  -- the server goes on accepting
-  srv~acceptTimeout = 5
-  c = .Socket~new("127.0.0.1", srv~localPort)
-  peer = srv~accept
-  self~assertTrue(peer~isA(.Socket))
-  peer~close; c~close; srv~close
+  c = .nil; peer = .nil
+  do
+    r = self~halted(.Waiter~new, "accept", srv)
+    self~assertSame("HALT at" .Waiter~line("accept"), r[1])
+    -- the server goes on accepting
+    srv~acceptTimeout = 5
+    c = .Socket~new("127.0.0.1", srv~localPort)
+    peer = srv~accept
+    self~assertTrue(peer~isA(.Socket))
+  finally
+    if peer \== .nil then peer~close
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_lineOut_to_a_peer_that_does_not_read
   srv = .ServerSocket~new(0, "127.0.0.1")
-  c = .Socket~new("127.0.0.1", srv~localPort)
-  peer = srv~accept                          -- never reads
-  r = self~halted(.Waiter~new, "flood", c)
-  self~assertSame("HALT at" .Waiter~line("flood"), r[1])
-  peer~close; c~close; srv~close
+  c = .nil; peer = .nil
+  do
+    c = .Socket~new("127.0.0.1", srv~localPort)
+    peer = srv~accept                          -- never reads
+    r = self~halted(.Waiter~new, "flood", c)
+    self~assertSame("HALT at" .Waiter~line("flood"), r[1])
+  finally
+    if peer \== .nil then peer~close
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_lineOut_buffered_to_a_peer_that_does_not_read
   srv = .ServerSocket~new(0, "127.0.0.1")
-  c = .Socket~new("127.0.0.1", srv~localPort)
-  peer = srv~accept
-  c~bufferOutput = .true
-  r = self~halted(.Waiter~new, "flood", c)
-  self~assertSame("HALT at" .Waiter~line("flood"), r[1])
-  peer~close; c~close; srv~close
+  c = .nil; peer = .nil
+  do
+    c = .Socket~new("127.0.0.1", srv~localPort)
+    peer = srv~accept
+    c~bufferOutput = .true
+    r = self~halted(.Waiter~new, "flood", c)
+    self~assertSame("HALT at" .Waiter~line("flood"), r[1])
+  finally
+    if peer \== .nil then peer~close
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_tls_handshake_with_a_server_that_says_nothing
   srv = .ServerSocket~new(0, "127.0.0.1")    -- plain TCP: never answers the ClientHello
-  r = self~halted(.Waiter~new, "tls", "127.0.0.1", srv~localPort)
-  self~assertSame("HALT at" .Waiter~line("tls"), r[1])
-  srv~close
+  do
+    r = self~halted(.Waiter~new, "tls", "127.0.0.1", srv~localPort)
+    self~assertSame("HALT at" .Waiter~line("tls"), r[1])
+  finally
+    srv~close
+  end
 
 ::method test_tls_lineIn
   srv = .TLSServerSocket~new(0, serverOptions("server.p12"), "127.0.0.1")
-  helper = .Acceptor~new~start("acceptAndWait", srv)
-  c = .TLSSocket~new("localhost", srv~localPort, .TLSOptions~new~trust(certFile("ca.pem")))
-  r = self~halted(.Waiter~new, "lineIn", c)
-  self~assertSame("HALT at" .Waiter~line("lineIn"), r[1])
-  c~close
-  helper~result
-  srv~close
+  c = .nil
+  do
+    helper = .Acceptor~new~start("acceptAndWait", srv)
+    c = .TLSSocket~new("localhost", srv~localPort, .TLSOptions~new~trust(certFile("ca.pem")))
+    r = self~halted(.Waiter~new, "lineIn", c)
+    self~assertSame("HALT at" .Waiter~line("lineIn"), r[1])
+    c~close
+    helper~result
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_dtls_handshake_with_a_server_that_says_nothing
   u = .UDPSocket~new(0, "127.0.0.1")         -- takes the ClientHello, never answers
-  r = self~halted(.Waiter~new, "dtls", "127.0.0.1", u~localPort)
-  self~assertSame("HALT at" .Waiter~line("dtls"), r[1])
-  u~close
+  do
+    r = self~halted(.Waiter~new, "dtls", "127.0.0.1", u~localPort)
+    self~assertSame("HALT at" .Waiter~line("dtls"), r[1])
+  finally
+    u~close
+  end
 
 ::method test_dtls_accept_and_receive
   srv = .DTLSServerSocket~new(0, serverOptions("server.p12"), "127.0.0.1")
-  r = self~halted(.Waiter~new, "accept", srv)
-  self~assertSame("HALT at" .Waiter~line("accept"), r[1])
-  -- the server goes on: a client, and a receive halted on each side
-  helper = .Acceptor~new~start("dtlsAcceptAndWait", srv)
-  c = .DTLSSocket~new("localhost", srv~localPort, .TLSOptions~new~trust(certFile("ca.pem")), 10)
-  r = self~halted(.Waiter~new, "receive", c)
-  self~assertSame("HALT at" .Waiter~line("receive"), r[1])
-  c~send("bye")
-  self~assertSame("bye", helper~result)
-  c~close; srv~close
+  c = .nil
+  do
+    r = self~halted(.Waiter~new, "accept", srv)
+    self~assertSame("HALT at" .Waiter~line("accept"), r[1])
+    -- the server goes on: a client, and a receive halted on each side
+    helper = .Acceptor~new~start("dtlsAcceptAndWait", srv)
+    c = .DTLSSocket~new("localhost", srv~localPort, .TLSOptions~new~trust(certFile("ca.pem")), 10)
+    r = self~halted(.Waiter~new, "receive", c)
+    self~assertSame("HALT at" .Waiter~line("receive"), r[1])
+    c~send("bye")
+    self~assertSame("bye", helper~result)
+  finally
+    if c \== .nil then c~close
+    srv~close
+  end
 
 ::method test_connect_that_hangs
   -- 192.0.2.1 is TEST-NET-1 (RFC 5737): nothing answers there. Where the
@@ -160,20 +218,23 @@ return testResult
 
 ::method test_untrapped_halt_ends_the_activity_with_error_4
   s = .UDPSocket~new(0, "127.0.0.1")
-  msg = .Waiter~new~start("receiveUntrapped", s)
-  call sysSleep 0.5
-  msg~halt
-  do 100 while \msg~completed; call sysSleep 0.05; end
-  self~assertTrue(msg~hasError)
-  c = msg~errorCondition
-  self~assertSame("SYNTAX", c~condition)
-  self~assertSame(4.1, c~code)               -- "Program interrupted with HALT condition"
-  -- raised from sockets.cls (its "raise propagate"), with the caller's
-  -- line next in the traceback
-  tb = c~traceback~makeArray~makeString("L", "|")
-  self~assertTrue(tb~pos("raise propagate") > 0, tb)
-  self~assertTrue(tb~pos(.Waiter~line("receiveUntrapped") "*-* d = s~receive") > 0, tb)
-  s~close
+  do
+    msg = .Waiter~new~start("receiveUntrapped", s)
+    call sysSleep 0.5
+    msg~halt
+    do 100 while \msg~completed; call sysSleep 0.05; end
+    self~assertTrue(msg~hasError)
+    c = msg~errorCondition
+    self~assertSame("SYNTAX", c~condition)
+    self~assertSame(4.1, c~code)               -- "Program interrupted with HALT condition"
+    -- raised from sockets.cls (its "raise propagate"), with the caller's
+    -- line next in the traceback
+    tb = c~traceback~makeArray~makeString("L", "|")
+    self~assertTrue(tb~pos("raise propagate") > 0, tb)
+    self~assertTrue(tb~pos(.Waiter~line("receiveUntrapped") "*-* d = s~receive") > 0, tb)
+  finally
+    s~close
+  end
 
 
 -- Each method waits in one call, on the line after its "-- waits:" (the
