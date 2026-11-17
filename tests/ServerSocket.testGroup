@@ -97,8 +97,11 @@ return testResult
 ::method connect
   use strict arg host, port, line = "hello"
   s = .Socket~new(host, port)
-  s~lineOut(line)
-  s~close
+  do
+    s~lineOut(line)
+  finally
+    s~close
+  end
   return 0
 
 ::routine hasIpv6

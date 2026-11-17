@@ -38,8 +38,9 @@
     if line == "bye" then leave
     c~lineOut(line)
   catch notready
+  finally
+    c~close
   end
-  c~close
   return got
 
 -- Sends the bytes as they are, then closes.
@@ -47,8 +48,11 @@
   expose srv
   use strict arg bytes
   c = srv~accept
-  c~charOut(bytes)
-  c~close
+  do
+    c~charOut(bytes)
+  finally
+    c~close
+  end
   return 0
 
 -- Reads everything until the client closes or shuts down its output;
@@ -58,12 +62,15 @@
   use strict arg reply = .nil
   c = srv~accept
   data = .mutableBuffer~new
-  loop
-    data~append(c~read)
-  catch notready
+  do
+    loop
+      data~append(c~read)
+    catch notready
+    end
+    if reply \== .nil then c~charOut(reply)
+  finally
+    c~close
   end
-  if reply \== .nil then c~charOut(reply)
-  c~close
   return data~string
 
 -- Accepts, waits for the given seconds without sending, then sends a
@@ -72,13 +79,16 @@
   expose srv
   use strict arg seconds, line
   c = srv~accept
-  call sysSleep seconds
-  c~lineOut(line)
   do
-    c~lineIn
-  catch notready
+    call sysSleep seconds
+    c~lineOut(line)
+    do
+      c~lineIn
+    catch notready
+    end
+  finally
+    c~close
   end
-  c~close
   return 0
 
 -- Reads lines until none arrives for the given seconds (or the client
@@ -87,13 +97,16 @@
   expose srv
   use strict arg seconds
   c = srv~accept
-  c~readTimeout = seconds
   got = .array~new
-  loop
-    got~append(c~lineIn)
-  catch notready
+  do
+    c~readTimeout = seconds
+    loop
+      got~append(c~lineIn)
+    catch notready
+    end
+  finally
+    c~close
   end
-  c~close
   return got
 
 -- Accepts and closes at once.
@@ -112,33 +125,38 @@
   expose srv
   use strict arg file = "server.pem", password = "test"
   c = srv~accept
-  c~readTimeout = 10
   do
-    c~startTLSServer(serverOptions(file, password))
-  catch e = syntax
+    c~readTimeout = 10
+    do
+      c~startTLSServer(serverOptions(file, password))
+    catch e = syntax
+      return e~message
+    end
+    got = .array~new
+    loop
+      line = c~lineIn
+      got~append(line)
+      if line == "bye" then leave
+      c~lineOut(line)
+    catch notready
+    end
+    return got
+  finally
     c~close
-    return e~message
   end
-  got = .array~new
-  loop
-    line = c~lineIn
-    got~append(line)
-    if line == "bye" then leave
-    c~lineOut(line)
-  catch notready
-  end
-  c~close
-  return got
 
 -- Accepts, makes the TLS handshake, sends the bytes and closes.
 ::method tlsSend unguarded
   expose srv
   use strict arg bytes, file = "server.pem", password = "test"
   c = srv~accept
-  c~readTimeout = 10
-  c~startTLSServer(serverOptions(file, password))
-  c~charOut(bytes)
-  c~close
+  do
+    c~readTimeout = 10
+    c~startTLSServer(serverOptions(file, password))
+    c~charOut(bytes)
+  finally
+    c~close
+  end
   return 0
 
 -- Accepts, makes the TLS handshake, reads everything until the client
@@ -147,15 +165,18 @@
 ::method tlsCollect unguarded
   expose srv
   c = srv~accept
-  c~readTimeout = 20
-  c~startTLSServer(serverOptions("server.pem"))
   data = .mutableBuffer~new
-  loop
-    data~append(c~read)
-  catch notready
+  do
+    c~readTimeout = 20
+    c~startTLSServer(serverOptions("server.pem"))
+    loop
+      data~append(c~read)
+    catch notready
+    end
+    c~lineOut(data~length)
+  finally
+    c~close
   end
-  c~lineOut(data~length)
-  c~close
   return data~string
 
 -- A server that speaks in clear and then starts TLS when asked, as SMTP:
@@ -164,16 +185,16 @@
 ::method startTLSEcho unguarded
   expose srv
   c = srv~accept
-  c~readTimeout = 10
-  c~lineOut("220 ready")
-  if c~lineIn \== "STARTTLS" then do
+  do
+    c~readTimeout = 10
+    c~lineOut("220 ready")
+    if c~lineIn \== "STARTTLS" then return "no STARTTLS"
+    c~lineOut("220 go ahead")
+    c~startTLSServer(serverOptions("server.pem"))
+    c~lineOut(c~lineIn)
+  finally
     c~close
-    return "no STARTTLS"
   end
-  c~lineOut("220 go ahead")
-  c~startTLSServer(serverOptions("server.pem"))
-  c~lineOut(c~lineIn)
-  c~close
   return 0
 
 -- Sends two lines in one write (as an attacker injecting a command after
@@ -181,13 +202,16 @@
 ::method twoLinesAtOnce unguarded
   expose srv
   c = srv~accept
-  c~readTimeout = 10
-  c~charOut("220 ready" || "0d0a"x || "INJECTED" || "0d0a"x)
   do
-    c~read
-  catch notready
+    c~readTimeout = 10
+    c~charOut("220 ready" || "0d0a"x || "INJECTED" || "0d0a"x)
+    do
+      c~read
+    catch notready
+    end
+  finally
+    c~close
   end
-  c~close
   return 0
 
 

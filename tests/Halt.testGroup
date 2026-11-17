@@ -302,18 +302,21 @@ halt: return "HALT at" sigl
 ::method dtlsAcceptAndWait
   use arg srv
   c = srv~accept
-  c~receiveTimeout = 20
-  d = c~receive
-  c~close
-  return d~data
+  do
+    c~receiveTimeout = 20
+    return c~receive~data
+  finally
+    c~close
+  end
 
 ::method acceptAndWait
   use arg srv
   c = srv~accept
-  c~readTimeout = 10
   do
+    c~readTimeout = 10
     c~lineIn                                 -- makes the handshake, then waits
   catch notready
+  finally
+    c~close
   end
-  c~close
   return 0

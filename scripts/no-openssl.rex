@@ -30,27 +30,34 @@
   failures = 0
   srv = .ServerSocket~new(0, "127.0.0.1")
   port = srv~localPort
-  if windows then do
-    call works "TLSOptions~trust", 'x = .TLSOptions~new~trust("'certs'ca.pem")'
-    call works "TLSOptions~trust (PKCS#12)", 'x = .TLSOptions~new~trust("'certs'server.p12", "test")'
-    call works "TLSOptions~certificate", 'x = .TLSOptions~new~certificate("'certs'server.p12", "test")'
-    call works "TLSOptions~certificate (PEM)", 'x = .TLSOptions~new~certificate("'certs'server.pem")'
-    opts = .TLSOptions~new~certificate(certs"server.pem")
-    call try "DTLSServerSocket~new", 'x = .DTLSServerSocket~new(0, opts, "127.0.0.1")'
-    call schannelDTLS port
-    call value "OOSOCKETS_TLS", "openssl", "ENVIRONMENT"
+  do
+    if windows then do
+      call works "TLSOptions~trust", 'x = .TLSOptions~new~trust("'certs'ca.pem")'
+      call works "TLSOptions~trust (PKCS#12)", 'x = .TLSOptions~new~trust("'certs'server.p12", "test")'
+      call works "TLSOptions~certificate", 'x = .TLSOptions~new~certificate("'certs'server.p12", "test")'
+      call works "TLSOptions~certificate (PEM)", 'x = .TLSOptions~new~certificate("'certs'server.pem")'
+      opts = .TLSOptions~new~certificate(certs"server.pem")
+      call try "DTLSServerSocket~new", 'x = .DTLSServerSocket~new(0, opts, "127.0.0.1")'
+      call schannelDTLS port
+      call value "OOSOCKETS_TLS", "openssl", "ENVIRONMENT"
+    end
+    call try "TLSSocket~new", 'x = .TLSSocket~new("127.0.0.1",' port', , 5)'
+    if \windows then
+      call try "TLSOptions~trust", 'x = .TLSOptions~new~trust("'certs'ca.pem")'
+    call try "TLSOptions~certificate", 'x = .TLSOptions~new~certificate("'certs'server.p12", "test")'
+    call try "DTLSSocket~new", 'x = .DTLSSocket~new("127.0.0.1",' port', , 5)'
+    s = .Socket~new("127.0.0.1", port)          -- a plain one still connects
+    c = srv~accept
+    do
+      call try "Socket~startTLS", 's~startTLS'
+    finally
+      c~close
+    end
+  finally                                       -- however it ends: the setting back, the server closed
+    if windows then
+      call value "OOSOCKETS_TLS", "", "ENVIRONMENT"
+    srv~close
   end
-  call try "TLSSocket~new", 'x = .TLSSocket~new("127.0.0.1",' port', , 5)'
-  if \windows then
-    call try "TLSOptions~trust", 'x = .TLSOptions~new~trust("'certs'ca.pem")'
-  call try "TLSOptions~certificate", 'x = .TLSOptions~new~certificate("'certs'server.p12", "test")'
-  call try "DTLSSocket~new", 'x = .DTLSSocket~new("127.0.0.1",' port', , 5)'
-  s = .Socket~new("127.0.0.1", port)            -- a plain one still connects
-  c = srv~accept
-  call try "Socket~startTLS", 's~startTLS'
-  c~close; srv~close
-  if windows then
-    call value "OOSOCKETS_TLS", "", "ENVIRONMENT"
   say "plain sockets connected; failures:" failures
   exit failures > 0
 

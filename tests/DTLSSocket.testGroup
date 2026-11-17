@@ -333,18 +333,22 @@ return testResult
   use arg port, text, options = (trustCA()), wait = 0
   call sysSleep wait
   s = .DTLSSocket~new("localhost", port, options, 10)
-  s~receiveTimeout = 10
-  s~send(text)
-  reply = s~receive~data s~protocol
-  s~close
-  return reply
+  do
+    s~receiveTimeout = 10
+    s~send(text)
+    return s~receive~data s~protocol
+  finally
+    s~close
+  end
 ::method receiveOnce
   use arg port, options = (trustCA())
   s = .DTLSSocket~new("localhost", port, options, 10)
-  s~receiveTimeout = 10
-  reply = s~receive~data s~protocol
-  s~close
-  return reply
+  do
+    s~receiveTimeout = 10
+    return s~receive~data s~protocol
+  finally
+    s~close
+  end
 ::method connectOnly
   use arg port, options = (trustCA())
   do
@@ -360,39 +364,50 @@ return testResult
 ::method echoAll
   use arg srv
   c = srv~accept
-  c~receiveTimeout = 10
   n = 0
-  loop
-    d = c~receive
-    c~send(d~data~upper)
-    n += 1
-    if d~data == "bye" then leave
+  do
+    c~receiveTimeout = 10
+    loop
+      d = c~receive
+      c~send(d~data~upper)
+      n += 1
+      if d~data == "bye" then leave
+    end
+  finally
+    c~close
   end
-  c~close
   return n
 ::method echoOnceAndClose
   use arg srv
   c = srv~accept
-  c~receiveTimeout = 15
-  d = c~receive
-  c~send(d~data~upper)
-  call sysSleep 0.3
-  c~close
+  do
+    c~receiveTimeout = 15
+    d = c~receive
+    c~send(d~data~upper)
+    call sysSleep 0.3
+  finally
+    c~close
+  end
   return d~data
 ::method acceptAndClose
   use arg srv
   c = srv~accept
-  c~receiveTimeout = 1
-  c~receive                                  -- lets the handshake end (.nil after 1 s)
-  c~close
+  do
+    c~receiveTimeout = 1
+    c~receive                                -- lets the handshake end (.nil after 1 s)
+  finally
+    c~close
+  end
   return "closed"
 ::method acceptAndWait
   use arg srv
   c = srv~accept
-  c~receiveTimeout = 10
-  d = c~receive
-  c~close
-  return d~data
+  do
+    c~receiveTimeout = 10
+    return c~receive~data
+  finally
+    c~close
+  end
 
 ::class Waiter
 -- Accepts (answering handshakes) for some seconds; then closes.
@@ -402,8 +417,9 @@ return testResult
   do
     c = srv~accept
     if c \== .nil then c~close
-    srv~close
   catch syntax
+  finally
+    srv~close
   end
   return
 ::method accept

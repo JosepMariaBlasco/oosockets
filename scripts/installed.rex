@@ -56,12 +56,18 @@ check: procedure
 ::method serve
   use arg srv
   c = srv~accept
-  c~readTimeout = 5
-  c~lineOut(c~lineIn~upper)
-  c~close
+  do
+    c~readTimeout = 5
+    c~lineOut(c~lineIn~upper)
+  finally
+    c~close
+  end
 ::method serveDatagram
   use arg srv
   c = srv~accept
-  c~receiveTimeout = 5
-  c~send(c~receive~data~upper)
-  c~close
+  do
+    c~receiveTimeout = 5
+    c~send(c~receive~data~upper)
+  finally
+    c~close
+  end
