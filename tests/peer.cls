@@ -109,6 +109,27 @@
   end
   return got
 
+-- Sends its first argument as a line, then answers each line it reads
+-- with the next argument, until there are none left; then waits for the
+-- client to close.
+::method dialogue unguarded
+  expose srv
+  lines = arg(1, "A")
+  c = srv~accept
+  do
+    c~readTimeout = 10
+    c~lineOut(lines[1])
+    loop i = 2 to lines~items
+      c~lineIn
+      c~lineOut(lines[i])
+    end
+    c~read
+  catch notready
+  finally
+    c~close
+  end
+  return 0
+
 -- Accepts and closes at once.
 ::method acceptAndClose unguarded
   expose srv

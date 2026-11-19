@@ -279,6 +279,72 @@ done:
     peer~close
   end
 
+-- The README's "A protocol in a class of its own: THROW": MailServer below
+-- is the README's. Each test runs the README's program, outcome for its say.
+::method test_throw_propagate_takes_notready_to_the_program
+  peer = .Peer~new
+  s = .nil
+  do
+    msg = peer~start("send", "220 ready" || "0d0a"x)   -- greets, then goes away
+    s = .Socket~new("127.0.0.1", peer~port)
+    s~readTimeout = 10
+    outcome = mailCheck(.MailServer~new(s))
+    self~assertSame("lost the connection", outcome)
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
+
+::method test_throw_user_protocol_says_what_went_wrong
+  peer = .Peer~new
+  s = .nil
+  do
+    msg = peer~start("dialogue", "220 ready", "500 what?")
+    s = .Socket~new("127.0.0.1", peer~port)
+    s~readTimeout = 10
+    outcome = mailCheck(.MailServer~new(s))
+    self~assertSame("unexpected reply: expected 221; got 500 what?", outcome)
+    s~close
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
+
+::method test_the_protocol_s_reply_is_221
+  peer = .Peer~new
+  s = .nil
+  do
+    msg = peer~start("dialogue", "220 ready", "221 bye")
+    s = .Socket~new("127.0.0.1", peer~port)
+    s~readTimeout = 10
+    self~assertSame("the server answers", mailCheck(.MailServer~new(s)))
+    s~close
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
+
+-- What the README says happens without the CATCH clause in ask: the
+-- NOTREADY stays in ask, reply is empty, and the program hears only that
+-- the reply was not 221.
+::method test_without_throw_the_notready_is_lost_in_the_method
+  peer = .Peer~new
+  s = .nil
+  do
+    msg = peer~start("send", "220 ready" || "0d0a"x)
+    s = .Socket~new("127.0.0.1", peer~port)
+    s~readTimeout = 10
+    outcome = mailCheck(.MailServerWithoutCatch~new(s))
+    self~assertSame("unexpected reply: expected 221; got", outcome~strip)
+    msg~result
+  finally
+    if s \== .nil then s~close
+    peer~close
+  end
+
 ::method test_shutdownOutput_then_read_the_reply
   peer = .Peer~new
   s = .nil
@@ -677,3 +743,51 @@ done:
   catch syntax
     return .nil
   end
+
+-- The README's program, "A protocol in a class of its own: THROW", with
+-- what it says as the result.
+::routine mailCheck
+  use strict arg server
+  s = server~socket
+  do
+    server~check
+    return "the server answers"
+  catch notready                              -- the connection failed, at any depth
+    return "lost the connection"
+  catch c = user protocol                     -- the server said something else
+    return "unexpected reply:" c~description
+  finally
+    s~close                                   -- however it ended
+  end
+
+-- The README's MailServer (and socket, for mailCheck).
+::class MailServer
+::method init
+  expose s; use strict arg s
+::method socket
+  expose s; return s
+::method check
+  self~ask("", "220")                       -- the greeting
+  self~ask("QUIT", "221")
+::method ask private                        -- sends a line (if any), reads the reply
+  expose s; use strict arg line, code
+  do
+    if line \== "" then s~lineOut(line)
+    reply = s~lineIn
+  catch notready
+    throw propagate                         -- on past check, to the program's CATCH
+  end
+  if \reply~startsWith(code) then
+    throw user protocol description ("expected" code"; got" reply)
+  return reply
+
+-- The same without the CATCH clause in ask.
+::class MailServerWithoutCatch subclass MailServer
+::method ask private
+  use strict arg line, code
+  s = self~socket                           -- MailServer's: another scope
+  if line \== "" then s~lineOut(line)
+  reply = s~lineIn
+  if \reply~startsWith(code) then
+    throw user protocol description ("expected" code"; got" reply)
+  return reply

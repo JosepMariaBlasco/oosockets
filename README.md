@@ -76,6 +76,59 @@ client~close; srv~close
   through a namespace (`::requires "sockets.cls" namespace oo`, then
   `oo:Socket`).
 
+### A protocol in a class of its own: THROW
+
+The NOTREADY of a socket, as that of any stream, is raised one level: in
+whatever called `lineIn` or `lineOut`. When that is a method of a class
+that speaks the protocol, the program's `catch notready` does not see it,
+and if the method does not trap it, it is lost there: `lineIn` returns
+`""` and the method goes on. A CATCH clause that throws it on (`throw
+propagate`, ooRexx r13541 and later) sends it past every level, up to the
+program's CATCH; THROW also says what went wrong in the protocol itself,
+and FINALLY closes the socket however it ended.
+
+```rexx
+s = .Socket~new("mail.example.com", 25)
+s~readTimeout = 30
+do
+  .MailServer~new(s)~check
+  say "the server answers"
+catch notready                              -- the connection failed, at any depth
+  say "lost the connection:" s~description
+catch c = user protocol                     -- the server said something else
+  say "unexpected reply:" c~description
+finally
+  s~close                                   -- however it ended
+end
+::class MailServer
+::method init
+  expose s; use strict arg s
+::method check
+  self~ask("", "220")                       -- the greeting
+  self~ask("QUIT", "221")
+::method ask private                        -- sends a line (if any), reads the reply
+  expose s; use strict arg line, code
+  do
+    if line \== "" then s~lineOut(line)
+    reply = s~lineIn
+  catch notready
+    throw propagate                         -- on past check, to the program's CATCH
+  end
+  if \reply~startsWith(code) then
+    throw user protocol description ("expected" code"; got" reply)
+  return reply
+::requires "sockets.cls"
+```
+
+- Without the CATCH clause in `ask`, a server that closes the connection
+  after its greeting would leave `reply` empty, and the program would
+  hear only that the reply was not 221.
+- What an internal routine raises is different: the CATCH clauses of the
+  block that called it catch it already.
+- A thrown condition that nothing catches ends the program with error
+  4.901, its description in the message (`Program interrupted with USER
+  PROTOCOL condition: expected 221; got 500 what?`).
+
 ## TLS
 
 ```rexx
