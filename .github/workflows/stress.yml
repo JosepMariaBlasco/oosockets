@@ -31,10 +31,10 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq g++ cmake libssl-dev curl unzip ca-certificates gdb > /dev/null
       - uses: actions/checkout@v4
       - name: ooRexx
-        run: |
-          home="$(scripts/get-oorexx.sh ${{ matrix.oorexx }} ${{ matrix.build }} "$RUNNER_TEMP/oorexx")"
-          echo "OOREXX_HOME=$home" >> "$GITHUB_ENV"
-          echo "$home/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/oorexx
+        with:
+          version: ${{ matrix.oorexx }}
+          build: ${{ matrix.build }}
       - name: Build (with debug information)
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DOOREXX_HOME="$OOREXX_HOME"

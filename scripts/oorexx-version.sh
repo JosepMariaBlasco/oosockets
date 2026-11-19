@@ -1,5 +1,7 @@
-# The ooRexx the family builds and tests against (oorexx-bridges,
-# CONVENTIONS.md, "Which ooRexx"). The CI and the session setup both read
-# this file, so the two never differ.
-OOREXX_REV=13535        # SourceForge's builds of trunk r13535
-OOREXX_TEST_REV=13536   # ooRexx's test suite (ooRexxUnit), test/trunk
+# The ooRexx ooSockets builds and tests against. The CI and the session
+# setup both read this file, so the two never differ. Since 19/11/2026 (the
+# user: THROW, r13541-r13550) it is ahead of the family's revision
+# (oorexx-bridges, CONVENTIONS.md, "Which ooRexx"), and built from
+# SourceForge's SVN, not downloaded: scripts/get-oorexx.sh trunk.
+OOREXX_REV=13550        # main/trunk r13550 (THROW, the Throw() API, error 4.901)
+OOREXX_TEST_REV=13553   # ooRexx's test suite (ooRexxUnit), test/trunk

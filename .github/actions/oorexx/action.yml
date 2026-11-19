@@ -1,0 +1,70 @@
+name: ooRexx
+description: >
+  ooRexx to build and test against (scripts/get-oorexx.sh): trunk, built
+  from SourceForge's SVN at the revision in scripts/oorexx-version.sh and
+  cached per revision and platform; latest, SourceForge's newest portable
+  build, or trunk if that is older; or 5.2.0. Sets OOREXX_HOME and puts its
+  bin on PATH.
+inputs:
+  version:
+    description: trunk, latest or 5.2.0
+    default: trunk
+  build:
+    description: SourceForge's platform name (ubuntu2404.x86_64, macos.arm64.x86_64, windows.x86_64, ...)
+    required: true
+outputs:
+  home:
+    description: The ooRexx home directory
+    value: ${{ steps.get.outputs.home }}
+runs:
+  using: composite
+  steps:
+    - id: rev
+      shell: bash
+      run: |
+        . scripts/oorexx-version.sh
+        echo "rev=$OOREXX_REV" >> "$GITHUB_OUTPUT"
+        echo "dest=$RUNNER_TEMP/oorexx" >> "$GITHUB_OUTPUT"
+
+    # What trunk builds is cached: a build takes 2 to 10 minutes.
+    - id: cache
+      if: inputs.version != '5.2.0'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.rev.outputs.dest }}/oorexx-5.3.0-${{ steps.rev.outputs.rev }}.${{ inputs.build }}-svn
+        key: oorexx-svn-r${{ steps.rev.outputs.rev }}-${{ inputs.build }}-${{ runner.os }}-v1
+
+    - name: Tools to build ooRexx
+      if: inputs.version != '5.2.0' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        case "$RUNNER_OS" in
+          Linux)
+            s=""; command -v sudo > /dev/null && s=sudo
+            $s apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive $s apt-get install -y -qq subversion g++ cmake make libncurses-dev > /dev/null ;;
+          macOS)
+            command -v svn > /dev/null || brew install subversion > /dev/null ;;
+          Windows)
+            command -v svn > /dev/null || choco install -y --no-progress sliksvn > /dev/null
+            echo "C:\\Program Files\\SlikSvn\\bin" >> "$GITHUB_PATH" ;;
+        esac
+
+    - name: MSVC environment (Windows)
+      if: runner.os == 'Windows' && inputs.version != '5.2.0' && steps.cache.outputs.cache-hit != 'true'
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - id: get
+      shell: bash
+      run: |
+        home="$(scripts/get-oorexx.sh "${{ inputs.version }}" "${{ inputs.build }}" "${{ steps.rev.outputs.dest }}")"
+        echo "home=$home" >> "$GITHUB_OUTPUT"
+        echo "OOREXX_HOME=$home" >> "$GITHUB_ENV"
+        echo "$home/bin" >> "$GITHUB_PATH"
+        case "$home" in *-svn) echo "svn=true" >> "$GITHUB_OUTPUT" ;; esac
+
+    - if: steps.get.outputs.svn == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.rev.outputs.dest }}/oorexx-5.3.0-${{ steps.rev.outputs.rev }}.${{ inputs.build }}-svn
+        key: oorexx-svn-r${{ steps.rev.outputs.rev }}-${{ inputs.build }}-${{ runner.os }}-v1
